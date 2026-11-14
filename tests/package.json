@@ -1,0 +1,14 @@
+{
+  "name": "ride-manager-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run-db-tests.mjs && node run-web-smoke.mjs",
+    "test:db": "node run-db-tests.mjs",
+    "test:web": "node run-web-smoke.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.0",
+    "jsdom": "^25.0.0"
+  }
+}
