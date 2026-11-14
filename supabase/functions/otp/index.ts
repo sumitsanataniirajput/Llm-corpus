@@ -19,7 +19,7 @@ async function issueAndSend(bookingId: string, type: "auto" | "resend" | "manual
   ]);
   const sms = await sendOtpSms({ phone: issued.phone ?? "", otp: issued.otp, minutes: Math.max(1, Math.round(Number(expiry?.value ?? 300) / 60)), appName: String(name?.value ?? "Ride") });
   await call(db.rpc("otp_record_delivery", { p_otp_id: issued.otp_id, p_channel: "sms", p_provider: sms.provider, p_status: sms.status,
-    p_provider_message_id: sms.messageId ?? null, p_error: sms.error ?? null, p_delivery_type: type === "auto" ? "initial" : type, p_staff_id: staffId,
+    p_provider_message_id: sms.messageId ?? null, p_error: sms.error ?? null, p_delivery_type: type === "auto" ? "automatic" : type, p_staff_id: staffId,
     p_response: null }));
   return { ok: true, code: "ISSUED", otp_id: issued.otp_id, booking_code: issued.booking_code, expires_at: issued.expires_at,
     delivery: { status: sms.status, provider: sms.provider, error: sms.status === "sent" ? null : sms.error ?? null } };

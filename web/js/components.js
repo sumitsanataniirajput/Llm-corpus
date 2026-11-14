@@ -97,7 +97,7 @@ export function openModal({ title, subtitle = '', body = '', size = '', footer =
     </div></div>`);
   const bodyEl = $('.modal-body', root), foot = $('.modal-foot', root);
   if (typeof body === 'string') bodyEl.innerHTML = body; else if (body) bodyEl.appendChild(body);
-  if (foot) { if (footer) foot.innerHTML = footer; else foot.remove(); }
+  if (foot && footer) foot.innerHTML = footer;   // footer: '' keeps an empty bar that the caller fills in later; null = no bar
   let closed = false;
   const close = (result) => { if (closed) return; closed = true; document.removeEventListener('keydown', onKey); root.remove(); previous?.focus?.(); onClose?.(result); };
   const onKey = (e) => { if (e.key === 'Escape' && root === $('#modal-root').lastElementChild) close(); };

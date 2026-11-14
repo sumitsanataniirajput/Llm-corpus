@@ -119,9 +119,9 @@ export function polygonEditor(map, initial = [], color = '#2563eb') {
 }
 /** Demand heat cells drawn as translucent circles (no deprecated heatmap library needed). */
 export function drawHeat(map, cells) {
-  const maps = window.google.maps; const max = Math.max(1, ...cells.map((c) => Number(c.count)));
-  return cells.map((c) => new maps.Circle({ map, center: { lat: Number(c.lat), lng: Number(c.lng) }, radius: 180 + 520 * Math.sqrt(Number(c.count) / max), strokeWeight: 0,
-    fillColor: Number(c.count) / max > .66 ? '#dc2626' : Number(c.count) / max > .33 ? '#f59e0b' : '#2563eb', fillOpacity: .18 + .32 * (Number(c.count) / max), clickable: false }));
+  const maps = window.google.maps; const max = Math.max(1, ...cells.map((c) => Number(c.bookings ?? c.count)));
+  return cells.map((c) => new maps.Circle({ map, center: { lat: Number(c.lat), lng: Number(c.lng) }, radius: 180 + 520 * Math.sqrt(Number(c.bookings ?? c.count) / max), strokeWeight: 0,
+    fillColor: Number(c.bookings ?? c.count) / max > .66 ? '#dc2626' : Number(c.bookings ?? c.count) / max > .33 ? '#f59e0b' : '#2563eb', fillOpacity: .18 + .32 * (Number(c.bookings ?? c.count) / max), clickable: false }));
 }
 export const clearOverlays = (list) => { (list ?? []).forEach((o) => o?.setMap?.(null)); return []; };
 
