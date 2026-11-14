@@ -1,0 +1,17 @@
+# Training stack (GPU required -- free Colab/Kaggle T4 is enough).
+# The data generation, audit, and test suites need none of this:
+#   python training/aria/generate_dataset.py
+#   python training/tools_audit.py
+#   python training/tests/test_training.py
+# all run on bare Python 3.9+.
+
+torch>=2.2
+transformers>=4.45
+trl>=0.12
+peft>=0.12
+accelerate>=0.33
+bitsandbytes>=0.43
+datasets>=2.20
+
+# Evaluation against a hosted OpenAI-compatible endpoint (optional).
+openai>=1.30
