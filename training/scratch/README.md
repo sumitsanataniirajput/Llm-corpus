@@ -171,3 +171,43 @@ engineering win — just not the same as "smarter".
 Retrain deterministically with `--seed 7`.
 
 Committed: `tokenizer.json` (9 KB, needed for reproducibility) and the code.
+
+---
+
+## Try it in a browser (`serve.py`)
+
+```bash
+python training/scratch/serve.py --port 8000
+```
+
+Serves a phone-friendly chat UI plus a JSON API:
+
+| Route | Purpose |
+|---|---|
+| `GET /` | mobile web UI (chips for common requests, shows emotion, tool calls, raw model text) |
+| `GET /api/health` | params, val loss, checkpoint name |
+| `POST /api/chat` | `{"message": "...", "screen": "..."}` → reply + parsed object + schema validation |
+
+Stdlib only (`http.server`) — no FastAPI/uvicorn, so it starts even when
+package installs are unavailable. Binds `0.0.0.0`, sends permissive CORS and
+no `X-Frame-Options`, so it renders inside a preview iframe. The page uses
+relative URLs exclusively; the browser never calls `localhost`.
+
+**This is not the Android app.** See the limitation below.
+
+---
+
+## Why the Android app can't be built here
+
+| Requirement | Status in this environment |
+|---|---|
+| Java / Gradle / Android SDK / adb | **not installed** |
+| `dl.google.com`, `maven.google.com`, `repo1.maven.org`, `services.gradle.org` | **all blocked (HTTP 000)** |
+
+Gradle cannot resolve AGP, Kotlin or Compose dependencies, so no APK can be
+produced here, and `adb install` to a physical phone is impossible. To build
+the actual app you need Android Studio (or a machine with the SDK and Maven
+access) — `training/README.md` steps 1–6 in the app README cover that.
+
+What `serve.py` gives you instead is the **trained model** running live in a
+phone browser, which is the honest substitute for "try it on my phone".
