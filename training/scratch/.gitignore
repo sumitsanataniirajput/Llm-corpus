@@ -1,0 +1,14 @@
+# Generated artifacts -- regenerate with prepare_corpus.py
+corpus.txt
+tokens.npy
+
+# Checkpoints are build outputs (~35 MB each)
+checkpoints/
+*.pt
+
+# Logs
+train_log.txt
+training_curve.json
+
+__pycache__/
+*.pyc
