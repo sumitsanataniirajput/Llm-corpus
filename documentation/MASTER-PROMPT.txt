@@ -1,0 +1,1705 @@
+MASTER CODING PROMPT
+
+APP 01 — ULTIMATE RIDE MANAGEMENT SYSTEM
+
+Complete Manager Application | Production-Oriented Full Implementation
+
+---
+
+1. ROLE AND PROJECT OBJECTIVE
+
+Act as a senior software architect, full-stack developer, Android developer, database engineer, UI/UX designer, security engineer, and DevOps engineer.
+
+Your task is to build a complete, professional, production-oriented RIDE-HAILING MANAGER APPLICATION inspired by the operational capabilities of Uber and Rapido.
+
+This is APP 01 of a larger transportation platform consisting of three independent but interconnected applications:
+
+1. Manager Application.
+2. Driver Application.
+3. Customer Application.
+
+For this development phase, implement ONLY the MANAGER APPLICATION.
+
+However, design the database, APIs, authentication, permissions, ride lifecycle, GPS tracking and business logic so that the future Driver App and Customer App can connect to the same backend without requiring a major architectural rewrite.
+
+The system must support:
+
+- Bike taxis.
+- Auto rickshaws.
+- Mini cars.
+- Sedans.
+- SUVs.
+- Premium vehicles.
+- Company-owned vehicles.
+- Independent drivers with their own vehicles.
+- Multiple drivers.
+- Multiple operating zones.
+- Multiple branches in the future.
+- Multiple cities in the future.
+
+Initial launch location: One city in India.
+
+Currency: INR (₹).
+
+The platform must be independently owned and controlled by the project owner.
+
+Do not create a simple demonstration dashboard. Build real working modules with database persistence, authorization, validation, business logic and integration points.
+
+2. NON-NEGOTIABLE DEVELOPMENT REQUIREMENTS
+
+Use the following technology architecture.
+
+Web application
+
+- HTML5.
+- CSS3.
+- Vanilla JavaScript ES6.
+- Font Awesome icons.
+- Responsive design.
+- Supabase JavaScript SDK.
+- Chart.js for analytics.
+- SweetAlert2 for confirmations and alerts.
+- Google Maps JavaScript API.
+- Firebase Cloud Messaging where appropriate for push notifications.
+
+Do not use React, Angular, Vue or other frontend frameworks for the web dashboard.
+
+Native Android application
+
+Build a genuine Android application using:
+
+- Kotlin.
+- Android Studio-compatible project structure.
+- Android Jetpack components where appropriate.
+- Material Design 3.
+- Google Maps SDK for Android.
+- Supabase-compatible secure API integration.
+- Firebase Cloud Messaging.
+- Android background location services with proper permissions and foreground-service notifications.
+
+The Android application must not simply be a website inside a WebView.
+
+Backend
+
+Use Supabase:
+
+- Supabase Auth.
+- PostgreSQL.
+- Supabase Realtime.
+- Supabase Storage.
+- Supabase Edge Functions.
+- Row Level Security.
+- Database migrations.
+- Database indexes.
+- Secure RPC functions where necessary.
+
+Additional infrastructure
+
+- Redis or an appropriate managed caching service if required for scalable live-location processing.
+- Secure SMS gateway integration for OTP delivery.
+- Payment gateway integration.
+- Cloud hosting.
+- Centralized logging.
+- Automated backups.
+
+Use modular, maintainable architecture.
+
+3. REQUIRED PROJECT STRUCTURE
+
+Create a clearly organized project.
+
+Recommended structure:
+
+MANAGER-APPLICATION/
+
+web/
+    index.html
+    style.css
+    script.js
+
+    assets/
+        images/
+        icons/
+        fonts/
+
+    pages/
+        dashboard.html
+        live-tracking.html
+        drivers.html
+        vehicles.html
+        customers.html
+        rides.html
+        finance.html
+        pricing.html
+        services.html
+        marketing.html
+        notifications.html
+        support.html
+        staff.html
+        locations.html
+        analytics.html
+        security.html
+        settings.html
+        otp-verification.html
+
+    css/
+        components.css
+        responsive.css
+        themes.css
+
+    js/
+        config.example.js
+        supabase-client.js
+        auth.js
+        permissions.js
+        api.js
+        router.js
+        components.js
+        notifications.js
+        maps.js
+        tracking.js
+        charts.js
+        validation.js
+        utilities.js
+
+android/
+    Complete native Android Studio project.
+
+supabase/
+    migrations/
+    functions/
+    seed/
+    policies/
+    database-documentation/
+
+documentation/
+    SETUP.md
+    DATABASE.md
+    API.md
+    SECURITY.md
+    DEPLOYMENT.md
+    HOPEWEB-GUIDE.md
+
+You may improve this structure if necessary.
+
+However, the three primary web files MUST exist:
+
+- index.html
+- style.css
+- script.js
+
+The additional files are required for proper modularity.
+
+Do not put the entire application into one enormous JavaScript file merely to reduce file count.
+
+4. DESIGN AND USER EXPERIENCE
+
+Create an extremely professional fleet-management and ride-hailing administration interface.
+
+Design inspiration:
+
+- Uber Fleet.
+- Modern enterprise fleet management platforms.
+- Material Design 3.
+- Premium SaaS administration dashboards.
+
+Visual design
+
+Use:
+
+- Poppins or Inter typography.
+- Professional card layouts.
+- Rounded corners around 8dp–12dp.
+- Smooth shadows.
+- Carefully controlled glassmorphism.
+- Modern icons.
+- Subtle animations.
+- Clean charts.
+- Professional data tables.
+- Responsive layouts.
+
+Provide:
+
+1. Light theme.
+2. Dark theme.
+3. Theme persistence.
+4. Mobile-responsive layout.
+5. Tablet-responsive layout.
+6. Desktop-responsive layout.
+
+Navigation
+
+Desktop:
+
+- Collapsible sidebar.
+- Top application bar.
+- Main content area.
+- Notification centre.
+- Profile menu.
+- Global search.
+
+Mobile:
+
+- Responsive navigation.
+- Bottom navigation for important modules.
+- Mobile-friendly tables.
+- Responsive cards.
+- Mobile map controls.
+
+Dashboard
+
+The dashboard must be information-rich but not overcrowded.
+
+Use interactive charts, statistics cards, maps, filters and activity timelines.
+
+Avoid decorative components that do not perform a real function.
+
+5. FEATURE IMPLEMENTATION
+
+Implement EVERY feature listed below.
+
+No feature may be silently omitted.
+
+Every module must have:
+
+- Working interface.
+- Database integration.
+- Validation.
+- Appropriate permissions.
+- Error handling.
+- Loading states.
+- Empty states.
+- Success and failure feedback.
+- Audit history where relevant.
+
+MODULE 0 — MAIN DASHBOARD
+
+Implement all IDs:
+
+0.01–0.20
+
+Features:
+
+- Total customers.
+- Total drivers.
+- Total vehicles.
+- Online drivers.
+- Offline drivers.
+- Drivers on rides.
+- Today's bookings.
+- Completed rides.
+- Cancelled rides.
+- Ongoing rides.
+- Today's revenue.
+- Today's company profit.
+- Driver payouts.
+- Pending payments.
+- Company commission.
+- Live operational statistics.
+- Weekly, monthly and yearly analytics.
+- Custom date ranges.
+- Recent activities.
+- Alerts and notifications.
+
+Dashboard statistics must be calculated from real database records.
+
+Never use permanently hardcoded demonstration numbers.
+
+MODULE 1 — LIVE VEHICLE TRACKING
+
+Implement all IDs:
+
+1.01–1.20
+
+Features:
+
+- Live map showing vehicles.
+- Real-time driver GPS.
+- Individual vehicle tracking.
+- Driver movement history.
+- Current vehicle speed where available.
+- Vehicle direction.
+- Pickup and destination.
+- Complete route visualization.
+- Estimated arrival time.
+- Travelled distance.
+- Online/offline indicators.
+- Idle vehicle identification.
+- Drivers carrying customers.
+- Geofencing.
+- Restricted zones.
+- Location history.
+- Driver search.
+- City and area filters.
+- Traffic information.
+- Location sharing status.
+- Tracking alerts.
+
+Tracking requirements
+
+Use Google Maps Platform.
+
+Implement:
+
+- Vehicle markers.
+- Marker clustering.
+- Driver information popups.
+- Route polylines.
+- Pickup markers.
+- Destination markers.
+- Live location updates.
+- Historical route playback.
+- Search and filtering.
+- Map refresh controls.
+
+Do not request continuous location tracking from drivers without appropriate permission.
+
+Track only according to legitimate operational purposes, user consent and applicable law.
+
+Optimize location-update frequency to balance accuracy, battery consumption and backend costs.
+
+The system must handle:
+
+- GPS disabled.
+- Weak GPS signal.
+- Internet disconnection.
+- Background location restrictions.
+- Stale location updates.
+- Reconnection.
+- Duplicate location events.
+
+Show the last updated timestamp for every vehicle.
+
+Never pretend that stale GPS data is live.
+
+MODULE 2 — DRIVER MANAGEMENT
+
+Implement all IDs:
+
+2.01–2.30
+
+Features:
+
+- Driver registration.
+- Driver directory.
+- Unique driver ID.
+- Driver profiles.
+- Identity verification.
+- Aadhaar document verification workflow.
+- PAN verification workflow.
+- Driving licence verification.
+- Driver photograph.
+- Police verification status.
+- Address and contact details.
+- Emergency contacts.
+- Document uploads.
+- Document expiry reminders.
+- Approve/reject applications.
+- Suspend drivers.
+- Deactivate drivers.
+- Ratings and reviews.
+- Performance analytics.
+- Ride history.
+- Earnings history.
+- Attendance.
+- Online/offline status.
+- Disciplinary records.
+- Internal notes.
+- Blacklist.
+- Account recovery.
+- Support history.
+- Incentives and bonuses.
+- Verification audit history.
+
+Verification requirements
+
+Manual driver verification is the initial operating model.
+
+Provide:
+
+- Pending verification queue.
+- Document preview.
+- Approve button.
+- Reject button.
+- Mandatory rejection reason.
+- Verification notes.
+- Verification timestamps.
+- Verification history.
+
+Do not claim that uploading Aadhaar or PAN documents automatically verifies a government identity.
+
+Use authorized verification providers only when such integration is configured.
+
+Never store unnecessary sensitive identity information.
+
+Mask sensitive document numbers in ordinary dashboard views.
+
+MODULE 3 — VEHICLE MANAGEMENT
+
+Implement all IDs:
+
+3.01–3.24
+
+Features:
+
+- Vehicle registration.
+- Unique vehicle ID.
+- Registration number.
+- Vehicle owner information.
+- Manufacturer and model.
+- Vehicle category.
+- Photographs.
+- RC verification.
+- Insurance verification.
+- Pollution certificate.
+- Fitness certificate.
+- Permit verification.
+- Expiry reminders.
+- Driver assignment.
+- Driver reassignment.
+- Availability.
+- Maintenance records.
+- Repair history.
+- Inspection records.
+- Fuel and mileage tracking.
+- Accident records.
+- Suspension.
+- Complete vehicle history.
+
+Support company-owned and independently owned vehicles.
+
+Maintain ownership type separately from driver assignment.
+
+Prevent a vehicle from being assigned to multiple active rides simultaneously.
+
+MODULE 4 — CUSTOMER MANAGEMENT
+
+Implement all IDs:
+
+4.01–4.16
+
+Features:
+
+- Customer directory.
+- Customer profiles.
+- Unique customer IDs.
+- Phone and email.
+- Verification status.
+- Ride history.
+- Spending history.
+- Ratings.
+- Complaints.
+- Support history.
+- Block/unblock.
+- Suspicious account detection.
+- Loyalty status.
+- Wallet information.
+- Internal notes.
+- Account deletion requests.
+
+Protect customer personal information through role-based permissions.
+
+MODULE 5 — RIDE AND BOOKING MANAGEMENT
+
+Implement all IDs:
+
+5.01–5.20
+
+Features:
+
+- All bookings.
+- Ongoing rides.
+- Completed rides.
+- Cancelled rides.
+- Search by booking ID.
+- Search by driver or customer.
+- Pickup and destination.
+- Route.
+- Distance and duration.
+- Fare breakdown.
+- Manual driver assignment.
+- Driver reassignment.
+- Cancellation.
+- Refund processing.
+- Cancellation reasons.
+- Ride timestamps.
+- Dispute management.
+- Emergency ride monitoring.
+- Ride export.
+- Complete audit trail.
+
+Ride lifecycle
+
+Use a strict server-controlled state machine.
+
+Suggested states:
+
+BOOKING_CREATED
+DRIVER_SEARCHING
+DRIVER_ASSIGNED
+DRIVER_ACCEPTED
+DRIVER_ARRIVING
+DRIVER_AT_PICKUP
+OTP_PENDING
+OTP_VERIFIED
+RIDE_STARTED
+RIDE_COMPLETED
+PAYMENT_PENDING
+PAYMENT_COMPLETED
+CANCELLED
+DISPUTED
+
+Allow only valid state transitions.
+
+Prevent duplicate ride starts, duplicate payment processing and unauthorized state changes.
+
+6. CRITICAL CUSTOM OTP VERIFICATION SYSTEM
+
+This is one of the most important modules.
+
+Build a dedicated OTP VERIFICATION CENTER inside the Manager App.
+
+The Manager App must control OTP generation, delivery monitoring and verification results automatically through secure backend operations.
+
+No human manager should be required for normal OTP verification.
+
+Complete OTP workflow
+
+STEP 1:
+
+Customer books a ride through the future Customer App.
+
+STEP 2:
+
+The backend creates the booking record.
+
+STEP 3:
+
+The backend calculates and stores the booked route distance.
+
+STEP 4:
+
+After a driver has accepted the booking, the backend generates a cryptographically secure, ride-specific OTP.
+
+STEP 5:
+
+The OTP is securely delivered to the customer's registered phone number through an authorized SMS gateway.
+
+STEP 6:
+
+The Manager App receives the OTP generation and delivery status automatically.
+
+STEP 7:
+
+The customer shares the OTP verbally with the assigned driver.
+
+STEP 8:
+
+The driver opens the OTP screen in the future Driver App.
+
+STEP 9:
+
+The driver sees:
+
+- Booking ID.
+- Customer name as permitted.
+- Pickup location.
+- Destination.
+- Booked route distance.
+- Estimated fare.
+- OTP entry field.
+- Distance confirmation field.
+
+STEP 10:
+
+The driver enters the OTP and confirms the booked distance.
+
+STEP 11:
+
+The Driver App sends the OTP, booking identifier and distance confirmation to a secure backend endpoint.
+
+STEP 12:
+
+The backend independently validates:
+
+- Driver authentication.
+- Assigned driver identity.
+- Ride ownership.
+- Booking status.
+- OTP hash.
+- OTP expiration.
+- OTP attempt count.
+- Distance confirmation.
+- Whether the OTP was already used.
+- Whether the ride was cancelled.
+- Whether another ride-start operation already occurred.
+
+STEP 13:
+
+If all checks pass, the backend atomically:
+
+- Marks the OTP as verified.
+- Records the verification timestamp.
+- Changes the ride state to OTP_VERIFIED.
+- Records the driver confirmation.
+- Authorizes the ride-start transition.
+
+STEP 14:
+
+The Manager App automatically receives the verification result through Supabase Realtime.
+
+STEP 15:
+
+The driver can start the ride only after receiving successful backend authorization.
+
+OTP FEATURES
+
+Implement:
+
+OTP.01 — OTP verification dashboard.
+
+OTP.02 — Automatic OTP generation.
+
+OTP.03 — Automatic customer SMS delivery.
+
+OTP.04 — Manual OTP delivery option.
+
+OTP.05 — Authorized manual OTP generation.
+
+OTP.06 — Driver OTP submission monitoring.
+
+OTP.07 — Automatic server-side verification.
+
+OTP.08 — Successful verification status.
+
+OTP.09 — Incorrect OTP alerts.
+
+OTP.10 — OTP expiration management.
+
+OTP.11 — Resend OTP.
+
+OTP.12 — Maximum attempt restrictions.
+
+OTP.13 — Temporary lockout.
+
+OTP.14 — Delivery failure monitoring.
+
+OTP.15 — Ride-wise OTP history.
+
+OTP.16 — Verification timestamps.
+
+OTP.17 — Authorized manager override with mandatory reason and audit log.
+
+OTP.18 — Suspicious attempt detection.
+
+OTP.19 — SMS delivery provider logs.
+
+OTP.20 — Verification reports.
+
+OTP.21 — Display booked distance in Driver App.
+
+OTP.22 — Driver distance confirmation.
+
+OTP.23 — Server-side distance validation.
+
+OTP.24 — Display pickup and destination.
+
+OTP.25 — Display estimated fare.
+
+OTP.26 — Record distance confirmation timestamp.
+
+OTP.27 — Detect distance mismatch.
+
+OTP.28 — Manager mismatch alerts.
+
+OTP.29 — Authorized distance correction workflow.
+
+OTP.30 — Complete distance confirmation audit history.
+
+OTP SECURITY
+
+Mandatory rules:
+
+1. Use cryptographically secure random OTP generation.
+2. Store only a secure OTP hash.
+3. Never expose OTP values in ordinary admin dashboard logs.
+4. Never expose OTP to unauthorized employees.
+5. Make OTP unique to the booking.
+6. Use configurable expiry, initially five minutes.
+7. Allow configurable resend limits.
+8. Initially permit a maximum of five incorrect attempts.
+9. Apply temporary lockout after repeated failures.
+10. Invalidate OTP when the booking is cancelled.
+11. Permit submission only by the assigned driver.
+12. Prevent replay and duplicate submissions.
+13. Use server-side atomic transactions.
+14. Never allow the frontend to independently authorize a ride.
+15. Record every sensitive operation in audit logs.
+
+Manual OTP operation
+
+Provide two separate capabilities:
+
+A. Manual delivery:
+
+An authorized manager can initiate or retry delivery through the configured SMS provider.
+
+B. Exceptional manual verification:
+
+A separately permission-controlled manager can override a failed verification only under an explicit exceptional procedure, with a mandatory reason, identity confirmation and permanent audit entry.
+
+Never create a universal bypass that any administrator can use without traceability.
+
+BOOKED DISTANCE VS ACTUAL DISTANCE
+
+Store separate values:
+
+- booked_distance_km.
+- estimated_route_distance_km.
+- actual_distance_km.
+- final_billable_distance_km.
+
+The original booked distance must come from the server-generated booking record.
+
+The driver must confirm the displayed booked distance rather than arbitrarily editing it.
+
+If there is a mismatch:
+
+- Block normal verification if required.
+- Create a distance discrepancy record.
+- Alert the Manager App.
+- Allow an authorized correction workflow.
+- Preserve the original value.
+- Record the corrected value and reason.
+- Maintain a full audit trail.
+
+Actual travelled distance must be calculated and stored separately from booked distance.
+
+7. FINANCIAL MANAGEMENT
+
+Implement all IDs:
+
+6.01–6.20
+
+Features:
+
+- Total revenue.
+- Daily revenue.
+- Weekly revenue.
+- Monthly revenue.
+- Yearly revenue.
+- Company commission.
+- Driver commission.
+- Driver payouts.
+- Pending payments.
+- Completed payout history.
+- Refunds.
+- Cash payments.
+- Online payments.
+- UPI.
+- Wallet management.
+- Transaction history.
+- Discounts.
+- Financial exports.
+- Profit and loss.
+- GST reporting support.
+
+Use integer paise or another precise monetary representation for INR calculations.
+
+Never use floating-point arithmetic for financial calculations.
+
+Every financial transaction must have:
+
+- Unique transaction ID.
+- Reference booking.
+- Amount.
+- Currency.
+- Payment status.
+- Payment method.
+- Timestamp.
+- Provider reference where applicable.
+
+Do not mark a payment successful based only on a frontend response.
+
+Verify payment gateway webhooks server-side.
+
+Prevent duplicate payouts and duplicate refunds through idempotency controls.
+
+8. PRICING MANAGEMENT
+
+Implement all IDs:
+
+7.01–7.15
+
+Features:
+
+- Base fare.
+- Per-kilometre fare.
+- Per-minute fare.
+- Minimum fare.
+- Waiting charges.
+- Cancellation fees.
+- Night charges.
+- Peak-hour pricing.
+- Surge pricing.
+- City pricing.
+- Area pricing.
+- Vehicle-category pricing.
+- Scheduled pricing changes.
+- Fare preview.
+- Fare change history.
+
+Pricing must be calculated server-side.
+
+Store the applied pricing configuration with each booking so historical fares remain explainable.
+
+9. VEHICLE CATEGORIES AND SERVICES
+
+Implement all IDs:
+
+8.01–8.12
+
+Support:
+
+- Bike.
+- Auto.
+- Mini car.
+- Sedan.
+- SUV.
+- Premium.
+- Custom categories.
+- Enable/disable service.
+- City-wise availability.
+- Vehicle capacity.
+- Category-specific pricing.
+- Service schedules.
+
+Allow future service categories without rewriting the entire system.
+
+10. OFFERS AND MARKETING
+
+Implement all IDs:
+
+9.01–9.12
+
+Features:
+
+- Discount coupons.
+- Percentage discounts.
+- Fixed discounts.
+- First-ride offers.
+- Referral rewards.
+- Driver referrals.
+- Customer referrals.
+- Coupon expiry.
+- Usage limits.
+- City-specific promotions.
+- Campaign analytics.
+- Announcements.
+
+Validate coupons on the server.
+
+Prevent reuse, expired coupon abuse and unauthorized discounts.
+
+11. NOTIFICATIONS AND COMMUNICATION
+
+Implement all IDs:
+
+10.01–10.13
+
+Features:
+
+- Driver notifications.
+- Customer notifications.
+- Broadcast announcements.
+- Emergency notifications.
+- Booking alerts.
+- Payment alerts.
+- Document expiry reminders.
+- Approval notifications.
+- Push notification management.
+- Notification history.
+- SMS.
+- Email.
+- WhatsApp integration.
+
+Use an extensible notification provider architecture.
+
+Support Firebase Cloud Messaging for push notifications and an authorized SMS provider for OTP.
+
+Record provider delivery status where available.
+
+Never claim that a notification was delivered when the provider reports failure.
+
+12. COMPLAINTS, SUPPORT AND SAFETY
+
+Implement all IDs:
+
+11.01–11.15
+
+Features:
+
+- Customer complaints.
+- Driver complaints.
+- Support tickets.
+- Staff assignment.
+- Ticket priorities.
+- Resolution.
+- Lost-and-found.
+- Accident reporting.
+- Emergency SOS.
+- Live emergency monitoring.
+- Incident investigation.
+- Evidence uploads.
+- Fraud reports.
+- Dispute resolution.
+- Safety analytics.
+
+Emergency alerts must be clearly distinguishable from ordinary notifications.
+
+13. STAFF AND ADMIN MANAGEMENT
+
+Implement all IDs:
+
+12.01–12.15
+
+Create role-based administration.
+
+Required roles:
+
+- Super Admin.
+- Administrator.
+- Operations Manager.
+- Regional Manager.
+- City Manager.
+- Driver Verification Officer.
+- Customer Support Agent.
+- Finance Manager.
+- Safety Officer.
+- Read-only Analyst.
+
+Implement:
+
+- Staff account creation.
+- Multiple administrators.
+- Role management.
+- Fine-grained permissions.
+- Staff activity history.
+- Attendance.
+- Performance reports.
+- Sensitive-operation restrictions.
+- Account suspension.
+- Admin login history.
+
+Do not give every employee unrestricted access.
+
+Create a permission matrix for every sensitive action.
+
+14. CITIES AND GEOGRAPHICAL MANAGEMENT
+
+Implement all IDs:
+
+13.01–13.10
+
+Features:
+
+- Add cities.
+- Operating zones.
+- Service boundaries.
+- Restricted zones.
+- Airport and railway pickup zones.
+- City-wise driver statistics.
+- City-wise revenue.
+- Zone demand analytics.
+- Demand heatmaps.
+- Future city expansion.
+
+Initially activate one city, but make the architecture multi-city ready.
+
+15. REPORTS AND BUSINESS ANALYTICS
+
+Implement all IDs:
+
+14.01–14.15
+
+Features:
+
+- Revenue charts.
+- Booking charts.
+- Customer growth.
+- Driver growth.
+- Popular vehicle categories.
+- Active drivers.
+- Revenue-generating areas.
+- Cancellation analytics.
+- Customer retention.
+- Driver comparisons.
+- Peak demand.
+- Average ride value.
+- Average customer spending.
+- PDF/Excel/CSV exports.
+- Automated daily reports.
+
+Use Chart.js.
+
+Ensure all reports use real database data.
+
+Include date filters and appropriate permissions.
+
+16. SECURITY AND SYSTEM MANAGEMENT
+
+Implement all IDs:
+
+15.01–15.18
+
+Features:
+
+- Secure admin authentication.
+- Two-factor authentication.
+- Session management.
+- Device and login history.
+- Suspicious login detection.
+- Configurable IP security rules.
+- Database backup management.
+- Audit logs.
+- Permission-based access.
+- Sensitive data masking.
+- API access management.
+- Rate limiting.
+- Encryption.
+- Account lockout.
+- Privacy and consent.
+- Data retention.
+- System health.
+- Error logs.
+
+Implement Supabase Row Level Security on all sensitive tables.
+
+Never expose the Supabase service-role key in browser JavaScript, Android code or public repositories.
+
+Use server-side Edge Functions for privileged operations.
+
+17. AI AND AUTOMATION
+
+Implement all IDs:
+
+16.01–16.15
+
+Features:
+
+- AI business analytics assistant.
+- Demand prediction.
+- High-demand area detection.
+- Driver behaviour analysis.
+- Suspicious transaction detection.
+- Fraud signals.
+- Intelligent driver allocation.
+- Performance scoring.
+- Automated business summaries.
+- AI support assistant.
+- Revenue forecasting.
+- Maintenance prediction.
+- Cancellation analysis.
+- Operational alerts.
+- Natural-language dashboard queries.
+
+AI must be an optional service integration.
+
+Do not invent data or claim predictions are guaranteed.
+
+Keep deterministic business calculations outside the AI system.
+
+18. ADVANCED MANAGEMENT
+
+Implement all IDs:
+
+17.01–17.15
+
+Features:
+
+- Global settings.
+- Branding.
+- Logo and application name.
+- Multiple branches.
+- Branch-wise management.
+- Branch financial reports.
+- Custom business rules.
+- Maintenance mode.
+- Global announcements.
+- Third-party integrations.
+- API and webhook monitoring.
+- Data import/export.
+- System activity timeline.
+- Feature controls.
+- Configuration history.
+
+19. DATABASE ARCHITECTURE
+
+Create a normalized, scalable PostgreSQL database.
+
+At minimum, design the following tables:
+
+- profiles
+- admin_users
+- roles
+- permissions
+- role_permissions
+- admin_activity_logs
+- drivers
+- driver_documents
+- driver_verifications
+- driver_attendance
+- vehicles
+- vehicle_documents
+- vehicle_maintenance
+- vehicle_assignments
+- customers
+- customer_addresses
+- bookings
+- booking_stops
+- booking_status_history
+- driver_assignments
+- driver_locations
+- driver_location_history
+- ride_routes
+- ride_distance_records
+- ride_otps
+- otp_delivery_logs
+- otp_verification_attempts
+- otp_audit_logs
+- ride_discrepancies
+- payments
+- payment_webhook_events
+- refunds
+- driver_wallets
+- wallet_transactions
+- driver_payouts
+- pricing_rules
+- pricing_history
+- vehicle_categories
+- service_zones
+- cities
+- branches
+- coupons
+- referrals
+- campaigns
+- notifications
+- notification_delivery_logs
+- support_tickets
+- support_messages
+- safety_incidents
+- staff_accounts
+- staff_activity
+- system_settings
+- integration_settings
+- audit_logs
+
+You may add more tables when necessary.
+
+For every table, define:
+
+- Primary key.
+- Foreign keys.
+- Data types.
+- Required fields.
+- Unique constraints.
+- Indexes.
+- Timestamps.
+- Appropriate deletion behaviour.
+- RLS policies.
+
+Create proper database migrations.
+
+Do not rely on manually creating database tables without providing reproducible SQL migrations.
+
+20. SUPABASE SECURITY ARCHITECTURE
+
+Implement:
+
+- Secure authentication.
+- Role-based authorization.
+- Row Level Security.
+- Restricted document storage.
+- Signed URLs for sensitive documents.
+- Server-side validation.
+- Secure Edge Functions.
+- Rate limiting.
+- Audit trails.
+- Secure secrets management.
+
+Create separate authorization policies for:
+
+- Super Admin.
+- Administrator.
+- Operations.
+- Finance.
+- Support.
+- Verification staff.
+- Analyst.
+
+Ordinary staff must not access unrestricted identity documents, OTP secrets or payment credentials.
+
+The browser must never directly execute privileged database operations.
+
+21. REAL-TIME SYSTEM
+
+Use Supabase Realtime for:
+
+- Driver status.
+- Booking status.
+- Ride status.
+- OTP verification results.
+- Payment status.
+- Emergency alerts.
+- Operational notifications.
+
+Implement subscriptions carefully.
+
+Prevent duplicate listeners and memory leaks.
+
+Reconnect automatically after temporary network failures.
+
+Use appropriate caching and controlled update frequencies.
+
+For high-volume GPS updates, use a scalable ingestion design rather than unrestricted database broadcasts.
+
+22. GOOGLE MAPS INTEGRATION
+
+Use Google Maps for:
+
+- Interactive vehicle maps.
+- Places autocomplete.
+- Geocoding.
+- Directions.
+- Route visualization.
+- Distance calculation.
+- Estimated arrival.
+
+Restrict API keys by platform and API permissions.
+
+Do not put unrestricted server credentials in public frontend files.
+
+Explain all required Google Cloud API activation and billing settings.
+
+23. PAYMENT INTEGRATION
+
+Create an extensible payment architecture supporting:
+
+- UPI.
+- Cash.
+- Debit cards.
+- Credit cards.
+- Net banking.
+- Wallets.
+
+Use Razorpay or another suitable Indian payment gateway.
+
+Provide:
+
+- Payment initiation.
+- Payment status.
+- Webhook verification.
+- Refund processing.
+- Transaction history.
+- Reconciliation.
+- Idempotency.
+
+Do not store card numbers, CVV or sensitive payment credentials directly.
+
+24. OTP SMS PROVIDER
+
+Create a provider-independent SMS integration layer.
+
+It must support:
+
+- OTP SMS generation.
+- Automatic SMS delivery.
+- Resend.
+- Delivery status.
+- Failure handling.
+- Provider logs.
+- Manual delivery initiation.
+- Template management.
+
+Use authorized Indian SMS providers and explain required DLT registration, approved templates and credentials.
+
+Keep SMS credentials exclusively on the backend.
+
+25. PERFORMANCE AND RELIABILITY
+
+Optimize for:
+
+- Thousands of drivers.
+- Large booking histories.
+- Concurrent manager sessions.
+- High-frequency GPS updates.
+- Realtime notifications.
+- Large document uploads.
+
+Implement:
+
+- Database indexes.
+- Pagination.
+- Server-side filtering.
+- Debounced search.
+- Lazy loading.
+- Efficient queries.
+- Error boundaries at application level.
+- Retry logic.
+- Network failure handling.
+- Logging.
+
+Never download every booking or every driver record into the browser at once.
+
+26. TESTING REQUIREMENTS
+
+Provide a complete testing strategy.
+
+Test:
+
+- Authentication.
+- Permissions.
+- RLS.
+- Driver approval.
+- Vehicle registration.
+- Booking management.
+- OTP generation.
+- OTP delivery.
+- OTP expiration.
+- Incorrect OTP.
+- Repeated OTP attempts.
+- Driver assignment validation.
+- Distance confirmation.
+- Distance discrepancy handling.
+- Ride start authorization.
+- GPS tracking.
+- Payment webhooks.
+- Refunds.
+- Reports.
+- Staff permissions.
+- Audit logs.
+
+Include automated tests for important backend business logic.
+
+Include realistic test scenarios.
+
+Never use production customer or identity data in testing.
+
+27. DEVELOPMENT DELIVERY
+
+Implement every selected feature.
+
+Do not silently replace functional features with:
+
+- Static buttons.
+- Fake charts.
+- Dummy maps.
+- Simulated tracking.
+- Hardcoded statistics.
+- Fake verification.
+- Fake payment success.
+- Nonfunctional forms.
+
+If a third-party service requires credentials, implement the integration completely and provide a clearly labelled configuration step.
+
+Where credentials are unavailable, show an honest integration status rather than falsely claiming the service works.
+
+Use a configurable demo mode only when clearly separated from production mode.
+
+28. EXACT HOPEWEB COPY-PASTE INSTRUCTIONS
+
+This is extremely important.
+
+I will use Hopeweb to create and manage the project files.
+
+You must explain exactly where every generated file belongs.
+
+For every file, provide:
+
+1. Exact filename.
+2. Exact folder path.
+3. Whether the file is new or replaces an existing file.
+4. Complete file contents.
+5. Any dependencies required.
+6. Where to paste its contents.
+7. How it connects to other files.
+8. How to test it.
+
+For example:
+
+FILE 1:
+index.html
+
+LOCATION:
+Project root / web root.
+
+ACTION:
+Create or replace index.html.
+
+FILE 2:
+style.css
+
+LOCATION:
+Project root / web root.
+
+ACTION:
+Create or replace style.css.
+
+FILE 3:
+script.js
+
+LOCATION:
+Project root / web root.
+
+ACTION:
+Create or replace script.js.
+
+For all additional files, explain how to create their folders and place each file.
+
+For Supabase:
+
+- Explain how to create a Supabase project.
+- Explain where to execute SQL migrations.
+- Explain how to deploy Edge Functions.
+- Explain how to configure Storage buckets.
+- Explain how to enable Realtime.
+- Explain how to configure RLS.
+- Explain where to store secrets.
+
+For Google Maps:
+
+- Explain how to create a Google Cloud project.
+- Enable required APIs.
+- Configure restricted API keys.
+- Add the correct keys to the correct configuration locations.
+
+For SMS and payment gateways:
+
+- Explain account setup.
+- Explain credentials.
+- Explain webhooks.
+- Explain test mode.
+- Explain production activation.
+
+For Android:
+
+- Explain the complete Android Studio project structure.
+- Explain how to import the project.
+- Explain Gradle configuration.
+- Explain permissions.
+- Explain how to build and install an APK.
+
+Do not assume I already know how to configure these services.
+
+Provide beginner-friendly, numbered instructions.
+
+29. OWNERSHIP AND SECURITY
+
+The complete source code must belong to me.
+
+Do not include:
+
+- Hidden developer accounts.
+- Backdoors.
+- Secret administrator credentials.
+- Unauthorized remote access.
+- Hardcoded passwords.
+- Hidden telemetry.
+- Unnecessary external dependencies.
+
+I must be able to:
+
+- Access my source code.
+- Control my database.
+- Control my Supabase project.
+- Change service providers.
+- Export my business data.
+- Control administrator permissions.
+- Deploy the project independently.
+- Maintain the platform without depending on the original developer.
+
+Provide clear documentation of all external dependencies and costs.
+
+30. DEVELOPMENT PHASES
+
+Although I want full implementation, organize the work into controlled development phases.
+
+PHASE 1:
+Project foundation, architecture and database.
+
+PHASE 2:
+Authentication and administration permissions.
+
+PHASE 3:
+Dashboard and core management.
+
+PHASE 4:
+Drivers, vehicles and customers.
+
+PHASE 5:
+Bookings and ride management.
+
+PHASE 6:
+OTP verification center and distance confirmation.
+
+PHASE 7:
+GPS tracking and Google Maps.
+
+PHASE 8:
+Financial management and pricing.
+
+PHASE 9:
+Notifications, support and safety.
+
+PHASE 10:
+Staff, branches, cities and analytics.
+
+PHASE 11:
+AI, automation and advanced management.
+
+PHASE 12:
+Security hardening, testing and deployment.
+
+Do not stop at the end of Phase 1 and call the project complete.
+
+Continue until every selected feature has been implemented and tested to the extent possible.
+
+31. THREE-APPLICATION COMPATIBILITY
+
+Remember that this Manager App is only the first part of a three-app platform.
+
+Prepare backend interfaces for:
+
+FUTURE DRIVER APP:
+
+- Driver authentication.
+- Driver verification.
+- Vehicle assignment.
+- Online/offline status.
+- Ride requests.
+- OTP submission.
+- Distance confirmation.
+- GPS updates.
+- Ride start.
+- Ride completion.
+- Earnings.
+- Payouts.
+- Emergency alerts.
+
+FUTURE CUSTOMER APP:
+
+- Customer authentication.
+- Booking creation.
+- Vehicle selection.
+- Fare estimates.
+- OTP receipt.
+- Live tracking.
+- Payments.
+- Ride history.
+- Reviews.
+- Complaints.
+
+All three applications must use consistent booking IDs, driver IDs, customer IDs, vehicle IDs and transaction IDs.
+
+Do not create separate disconnected databases.
+
+32. FINAL QUALITY REQUIREMENTS
+
+The finished Manager App must:
+
+- Have a professional native-app-like interface.
+- Work on mobile, tablet and desktop.
+- Have functional navigation.
+- Have real backend persistence.
+- Have real authentication.
+- Have working permissions.
+- Have a complete dashboard.
+- Have operational driver and vehicle management.
+- Have working booking management.
+- Have real-time tracking integration.
+- Have secure OTP verification.
+- Have booked-versus-actual distance records.
+- Have financial management.
+- Have reporting.
+- Have administrative controls.
+- Have comprehensive audit logs.
+- Have complete documentation.
+
+Before declaring completion, perform a feature-by-feature verification against all 335 selected features.
+
+Provide a completion matrix showing:
+
+- Feature ID.
+- Feature name.
+- Implementation status.
+- Database dependency.
+- Integration dependency.
+- Test status.
+
+Clearly identify anything that still requires external credentials or real-world service activation.
+
+33. CRITICAL CODE OUTPUT INSTRUCTIONS
+
+DO NOT COMPROMISE OR SHORTEN THE CODE.
+
+If the code becomes long, output it in 2 or 3 parts.
+
+Write the maximum amount of code you can in Part 1.
+
+When I say "continue from last", continue the code exactly from the point where you stopped.
+
+DO NOT rewrite any part.
+
+DO NOT skip anything.
+
+DO NOT leave the code incomplete.
+
+DO NOT replace complete implementations with placeholders.
+
+DO NOT write statements such as "add the remaining code yourself".
+
+DO NOT omit CSS, JavaScript, SQL, Kotlin, configuration files or documentation.
+
+All code must be clean, properly structured, detailed and ready to copy and paste.
+
+Every file must be complete.
+
+When providing multiple files, clearly separate them using:
+
+FILE NAME:
+FILE LOCATION:
+ACTION:
+COMPLETE CODE:
+
+Do not mix contents of different files.
+
+After every delivery part, provide a precise list of:
+
+- Files completed.
+- Files remaining.
+- Installation steps completed.
+- Next file to create.
+
+When I say "continue from last", resume exactly from the next unfinished file or line.
+
+34. FIRST RESPONSE REQUIRED
+
+Before generating code, respond with:
+
+1. Acknowledgement of the full project specification.
+2. Confirmed technology architecture.
+3. Complete project folder structure.
+4. Required external accounts and services.
+5. Estimated development phases.
+6. Hopeweb setup instructions.
+7. Explanation of how code will be delivered in parts.
+
+Then begin actual implementation.
+
+Do not ask me to select features again.
+
+All Manager App features and all 30 OTP features are already approved.
+
+Your responsibility is to implement the complete project, not to redesign or reduce its scope.
+
+END OF MASTER CODING PROMPT.

@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+web/js/config.js
+*.keystore
+local.properties
+android/.gradle/
+android/app/google-services.json
+.env
+.env.*
+!.env.example

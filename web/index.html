@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <!-- Content-Security-Policy: scripts may only come from this site and the listed libraries; inline scripts are blocked.
+       If you self-host the libraries or use a custom Supabase domain, adjust the lists below. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.ggpht.com https://*.googleusercontent.com blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://*.googleapis.com https://*.gstatic.com https://*.google.com http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* data: blob:; frame-src https://*.supabase.co https://*.supabase.in blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="theme-color" content="#2563eb">
+  <title>Ride Manager</title>
+  <link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="css/themes.css">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/responsive.css">
+<script src="js/theme-boot.js"></script>
+</head>
+<body>
+  <!-- Boot / configuration problem screen -->
+  <div id="boot-screen" class="boot-screen">
+    <div class="boot-card">
+      <div class="brand-mark"><i class="fa-solid fa-route"></i></div>
+      <div class="spinner" id="boot-spinner" role="status" aria-label="Loading"></div>
+      <h1 id="boot-title">Starting…</h1>
+      <div id="boot-message" class="muted"></div>
+    </div>
+  </div>
+
+  <!-- Sign-in -->
+  <main id="auth-screen" class="auth-screen" hidden>
+    <section class="auth-art" aria-hidden="true">
+      <div class="auth-art-inner">
+        <div class="brand-mark lg"><i class="fa-solid fa-route"></i></div>
+        <h2 data-brand-name>Ride Manager</h2>
+        <p>Fleet, rides, payments and safety — one control room.</p>
+        <ul class="auth-points">
+          <li><i class="fa-solid fa-shield-halved"></i> Role-based access with audit history</li>
+          <li><i class="fa-solid fa-location-crosshairs"></i> Live tracking with honest freshness</li>
+          <li><i class="fa-solid fa-key"></i> Server-verified ride-start OTP</li>
+        </ul>
+      </div>
+    </section>
+    <section class="auth-panel">
+      <form id="login-form" class="auth-form" novalidate>
+        <h1>Sign in</h1>
+        <p class="muted">Staff accounts only. Access is granted by your administrator.</p>
+        <div class="field"><label for="login-email">Work e-mail</label>
+          <input id="login-email" name="email" type="email" autocomplete="username" required placeholder="you@company.com"></div>
+        <div class="field"><label for="login-password">Password</label>
+          <div class="input-affix"><input id="login-password" name="password" type="password" autocomplete="current-password" required minlength="8">
+            <button type="button" class="affix-btn" id="toggle-password" aria-label="Show password"><i class="fa-regular fa-eye"></i></button></div></div>
+        <div id="login-error" class="form-error" role="alert" hidden></div>
+        <button class="btn btn-primary btn-block" type="submit" id="login-submit"><i class="fa-solid fa-right-to-bracket"></i> Sign in</button>
+        <button class="btn btn-link btn-block" type="button" id="forgot-password">Forgot password?</button>
+      </form>
+
+      <form id="mfa-form" class="auth-form" novalidate hidden>
+        <h1>Two-step verification</h1>
+        <p class="muted">Enter the 6-digit code from your authenticator app.</p>
+        <div class="field"><label for="mfa-code">Authentication code</label>
+          <input id="mfa-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="otp-input"></div>
+        <div id="mfa-error" class="form-error" role="alert" hidden></div>
+        <button class="btn btn-primary btn-block" type="submit">Verify</button>
+        <button class="btn btn-link btn-block" type="button" id="mfa-cancel">Use a different account</button>
+      </form>
+
+      <form id="mfa-enrol-form" class="auth-form" novalidate hidden>
+        <h1>Set up two-step verification</h1>
+        <p class="muted">Your administrator requires an authenticator app (Google Authenticator, Authy, Microsoft Authenticator) for this account.</p>
+        <div id="mfa-enrol-qr" class="qr-box"></div>
+        <p class="muted small">Cannot scan? Enter this key manually: <code id="mfa-enrol-secret"></code></p>
+        <div class="field"><label for="mfa-enrol-code">Code shown in the app</label>
+          <input id="mfa-enrol-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required class="otp-input"></div>
+        <div id="mfa-enrol-error" class="form-error" role="alert" hidden></div>
+        <button class="btn btn-primary btn-block" type="submit">Confirm and continue</button>
+        <button class="btn btn-link btn-block" type="button" id="mfa-enrol-cancel">Sign out</button>
+      </form>
+
+      <form id="recovery-form" class="auth-form" novalidate hidden>
+        <h1>Choose a new password</h1>
+        <p class="muted">At least 10 characters, with a letter and a number.</p>
+        <div class="field"><label for="recovery-password">New password</label><input id="recovery-password" type="password" autocomplete="new-password" required minlength="10"></div>
+        <div class="field"><label for="recovery-password2">Repeat password</label><input id="recovery-password2" type="password" autocomplete="new-password" required minlength="10"></div>
+        <div id="recovery-error" class="form-error" role="alert" hidden></div>
+        <button class="btn btn-primary btn-block" type="submit">Save password</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- Application shell -->
+  <div id="app" class="app" hidden>
+    <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+      <div class="sidebar-brand">
+        <div class="brand-mark" id="brand-logo"><i class="fa-solid fa-route"></i></div>
+        <span class="brand-name" data-brand-name>Ride Manager</span>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <div class="sidebar-foot">
+        <div id="env-badge" class="env-badge" hidden></div>
+        <button class="nav-item" id="sidebar-collapse" type="button" title="Collapse sidebar"><i class="fa-solid fa-angles-left"></i><span>Collapse</span></button>
+      </div>
+    </aside>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+    <div class="main">
+      <div id="announcement-bar" class="announcement-bar" hidden></div>
+      <header class="topbar">
+        <button class="icon-btn only-mobile" id="menu-toggle" type="button" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
+        <div class="search" id="global-search">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input id="global-search-input" type="search" placeholder="Search bookings, drivers, customers, vehicles…" autocomplete="off" aria-label="Global search">
+          <div id="global-search-results" class="search-results" hidden></div>
+        </div>
+        <div class="topbar-actions">
+          <span id="connection-status" class="conn" title="Realtime connection"><i class="fa-solid fa-circle"></i><span class="hide-sm">Connecting</span></span>
+          <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Light / dark theme"><i class="fa-solid fa-moon"></i></button>
+          <div class="dropdown">
+            <button class="icon-btn" id="notif-toggle" type="button" aria-label="Notifications" aria-haspopup="true"><i class="fa-solid fa-bell"></i><span id="notif-count" class="dot-count" hidden>0</span></button>
+            <div id="notif-panel" class="dropdown-panel notif-panel" hidden></div>
+          </div>
+          <div class="dropdown">
+            <button class="profile-btn" id="profile-toggle" type="button" aria-haspopup="true">
+              <span class="avatar" id="profile-avatar">?</span>
+              <span class="profile-text hide-sm"><strong id="profile-name">—</strong><small id="profile-role">—</small></span>
+              <i class="fa-solid fa-chevron-down hide-sm"></i>
+            </button>
+            <div id="profile-panel" class="dropdown-panel" hidden>
+              <button class="menu-item" data-action="attendance-in"><i class="fa-solid fa-user-check"></i> Check in</button>
+              <button class="menu-item" data-action="attendance-out"><i class="fa-solid fa-user-clock"></i> Check out</button>
+              <a class="menu-item" href="#/security"><i class="fa-solid fa-shield-halved"></i> My security</a>
+              <button class="menu-item danger" data-action="logout"><i class="fa-solid fa-right-from-bracket"></i> Sign out</button>
+            </div>
+          </div>
+        </div>
+      </header>
+      <div id="emergency-bar" class="emergency-bar" hidden role="alert"></div>
+      <main id="content" class="content" tabindex="-1"></main>
+    </div>
+
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Quick navigation"></nav>
+  </div>
+
+  <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  <div id="modal-root"></div>
+
+  <noscript><div class="noscript">This console needs JavaScript.</div></noscript>
+
+  <!-- Libraries (pinned versions) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.12.4/dist/sweetalert2.all.min.js"></script>
+  <!-- Your project keys. Copy js/config.example.js to js/config.js and fill it in. -->
+  <script src="js/config.js"></script>
+  <script type="module" src="script.js"></script>
+</body>
+</html>

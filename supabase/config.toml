@@ -1,0 +1,7 @@
+# Supabase project configuration for Edge Functions.
+# Webhooks are called by outside providers (no user JWT) and authenticate by signature / token.
+[functions.payment-webhook]
+verify_jwt = false
+
+[functions.sms-webhook]
+verify_jwt = false

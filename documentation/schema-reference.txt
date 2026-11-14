@@ -1,0 +1,212 @@
+admin_activity_logs: id,staff_id,email,event,ip,user_agent,device_label,is_suspicious,details,created_at
+admin_sessions: session_id,staff_id,ip,user_agent,device_label,created_at,last_seen_at,revoked_at,revoked_by,revoked_reason
+admin_users: staff_id,mfa_required,failed_login_count,locked_until,last_login_at,last_login_ip,session_timeout_min,updated_at
+ai_insights: id,insight_type,title,body,payload,source,model,requested_by,created_at
+announcements: id,title,body,audience,city_id,is_emergency,starts_at,ends_at,is_published,created_by,created_at,updated_at
+api_keys: id,name,key_prefix,key_hash,scopes,last_used_at,expires_at,revoked_at,created_by,created_at
+audit_logs: id,actor_user_id,actor_staff_id,actor_type,action,entity_type,entity_id,old_data,new_data,reason,ip,created_at
+backup_records: id,backup_type,status,location,size_bytes,notes,recorded_by,created_at
+booking_status_history: id,booking_id,from_status,to_status,actor_type,actor_id,reason,created_at
+booking_stops: id,booking_id,stop_order,address,lat,lng,reached_at
+bookings: id,booking_code,customer_id,driver_id,vehicle_id,category_id,city_id,branch_id,status,status_before_dispute,pickup_address,pickup_lat,pickup_lng,drop_address,drop_lat,drop_lng,scheduled_for,booked_distance_km,estimated_route_distance_km,actual_distance_km,final_billable_distance_km,distance_source,estimated_duration_min,actual_duration_min,waiting_minutes,estimated_fare_paise,base_fare_paise,distance_fare_paise,time_fare_paise,waiting_fare_paise,surcharge_paise,discount_paise,tax_paise,total_fare_paise,commission_paise,driver_earning_paise,cancellation_fee_paise,pricing_snapshot,fare_breakdown,coupon_id,payment_method,payment_status,cancelled_by,cancellation_reason,is_emergency,created_via,created_by_staff,ride_start_authorized_at,assigned_at,accepted_at,arrived_at,otp_verified_at,started_at,completed_at,paid_at,cancelled_at,created_at,updated_at
+branches: id,city_id,name,code,address,phone,is_active,created_at,updated_at,manager_staff_id
+campaigns: id,name,campaign_type,audience,city_id,budget_paise,starts_at,ends_at,status,notes,created_by,created_at,updated_at
+category_city_availability: category_id,city_id,is_enabled,updated_by,updated_at
+cities: id,name,state,country,timezone,currency,center_lat,center_lng,is_active,launched_at,created_at,updated_at
+consent_records: id,subject_type,subject_id,consent_type,granted,policy_version,source,created_at
+coupon_redemptions: id,coupon_id,customer_id,booking_id,discount_paise,status,created_at
+coupons: id,code,description,discount_type,percent_bp,fixed_paise,max_discount_paise,min_fare_paise,first_ride_only,city_id,category_id,campaign_id,valid_from,valid_until,total_usage_limit,per_customer_limit,used_count,is_active,created_by,created_at,updated_at
+customer_addresses: id,customer_id,label,address,lat,lng,created_at
+customer_directory (view): id,customer_code,full_name,city_id,status,status_reason,is_suspicious,suspicious_reason,loyalty_tier,loyalty_points,rating_avg,rating_count,phone_verified,email_verified,deletion_requested_at,created_at,phone,email,wallet_balance_paise,total_bookings,total_spent_paise
+customer_notes: id,customer_id,body,staff_id,created_at
+customer_wallets: customer_id,balance_paise,updated_at
+customers: id,user_id,customer_code,full_name,phone,email,phone_verified,email_verified,city_id,status,status_reason,is_suspicious,suspicious_reason,loyalty_tier,loyalty_points,rating_avg,rating_count,referral_code,deletion_requested_at,deleted_at,created_at,updated_at
+daily_reports: report_date,city_id,payload,generated_at
+data_import_jobs: id,entity,file_name,total_rows,imported_rows,failed_rows,errors,created_by,created_at
+data_retention_policies: id,entity,retain_days,is_active,last_run_at,last_deleted_count,updated_by,updated_at
+device_tokens: id,user_id,app,platform,token,last_seen_at,created_at
+distance_audit_logs: id,booking_id,event,actor_type,actor_id,details,created_at
+driver_assignments: id,booking_id,driver_id,vehicle_id,assignment_type,status,reason,assigned_by,created_at,responded_at
+driver_attendance: id,driver_id,work_date,first_online_at,last_offline_at,online_seconds,rides_completed
+driver_documents: id,driver_id,doc_type,storage_path,doc_number_masked,expiry_date,status,rejection_reason,notes,reviewed_by,reviewed_at,uploaded_by,created_at,updated_at
+driver_incentives: id,driver_id,incentive_type,amount_paise,reason,status,credited_at,created_by,created_at
+driver_location_history: id,driver_id,booking_id,lat,lng,speed_kmh,heading,accuracy_m,recorded_at,received_at
+driver_locations: driver_id,lat,lng,speed_kmh,heading,accuracy_m,battery_pct,booking_id,is_sharing,gps_status,recorded_at,received_at
+driver_notes: id,driver_id,kind,severity,body,staff_id,created_at
+driver_payouts: id,txn_code,driver_id,amount_paise,currency,status,method,provider_reference,failure_reason,idempotency_key,requested_by,approved_by,paid_at,created_at,updated_at
+driver_verifications: id,driver_id,document_id,action,from_status,to_status,reason,notes,staff_id,created_at
+driver_wallets: driver_id,balance_paise,updated_at
+drivers: id,user_id,driver_code,full_name,phone,email,date_of_birth,gender,address_line,locality,pincode,city_id,branch_id,photo_path,status,status_reason,availability,availability_changed_at,aadhaar_last4,pan_masked,licence_masked,licence_expiry,police_verification_status,emergency_contact_name,emergency_contact_phone,rating_avg,rating_count,referral_code,location_consent_at,approved_at,approved_by,created_by,created_at,updated_at
+error_logs: id,source,level,message,context,user_id,created_at
+evidence_files: id,incident_id,ticket_id,storage_path,file_name,mime_type,uploaded_by,created_at
+expenses: id,category,description,amount_paise,incurred_on,city_id,branch_id,created_by,created_at
+integration_events: id,kind,provider,direction,operation,status,http_status,duration_ms,error,reference,created_at
+integration_settings: id,kind,provider,is_enabled,mode,public_config,status,last_checked_at,last_error,updated_by,created_at,updated_at
+ip_rules: id,cidr,action,note,is_active,created_by,created_at,updated_at
+notification_delivery_logs: id,notification_id,channel,provider,status,recipients_count,provider_message_id,error,created_at
+notification_templates: id,code,channel,title,body,dlt_template_id,is_active,updated_by,created_at,updated_at
+notifications: id,audience,recipient_staff_id,recipient_driver_id,recipient_customer_id,city_id,category,priority,title,body,data,channels,dispatch_status,read_at,created_by,created_at
+otp_audit_logs: id,booking_id,otp_id,event,actor_type,actor_id,details,created_at
+otp_delivery_logs: id,otp_id,booking_id,channel,provider,delivery_type,status,provider_message_id,phone_masked,error,initiated_by_staff,provider_response,created_at,updated_at
+otp_verification_attempts: id,otp_id,booking_id,driver_id,result,submitted_distance_km,is_suspicious,ip,created_at
+payment_webhook_events: id,provider,event_id,event_type,signature_valid,payload,processing_status,processing_note,received_at,processed_at
+payments: id,txn_code,booking_id,customer_id,amount_paise,refunded_paise,currency,method,status,provider,provider_order_id,provider_payment_id,failure_reason,idempotency_key,recorded_by,captured_at,created_at,updated_at
+permissions: code,module,description,is_sensitive
+pricing_history: id,pricing_rule_id,change_type,old_data,new_data,changed_by,created_at
+pricing_rules: id,category_id,city_id,zone_id,base_fare_paise,per_km_paise,per_minute_paise,minimum_fare_paise,free_waiting_minutes,waiting_per_minute_paise,cancellation_fee_paise,night_start,night_end,night_multiplier_bp,peak_windows,surge_multiplier_bp,commission_bp,gst_bp,effective_from,effective_to,is_active,created_by,created_at,updated_at
+profiles: id,user_type,full_name,phone,avatar_path,created_at,updated_at
+rate_limits: key,window_start,count
+referrals: id,referral_kind,referrer_customer_id,referrer_driver_id,referee_customer_id,referee_driver_id,code_used,status,reward_paise,rewarded_at,created_at
+refunds: id,txn_code,payment_id,booking_id,amount_paise,currency,reason,status,provider_refund_id,failure_reason,idempotency_key,requested_by,completed_at,created_at,updated_at
+reviews: id,booking_id,reviewer_type,driver_id,customer_id,rating,comment,created_at
+ride_discrepancies: id,booking_id,discrepancy_type,expected_km,reported_km,reported_by_driver,status,corrected_km,resolution_reason,resolved_by,resolved_at,created_at
+ride_disputes: id,booking_id,raised_by_type,category,description,status,resolution,opened_by,resolved_by,resolved_at,created_at,updated_at
+ride_distance_records: booking_id,original_booked_distance_km,booked_distance_km,estimated_route_distance_km,driver_confirmed_distance_km,driver_confirmed_at,driver_confirmed_by,actual_distance_km,final_billable_distance_km,corrected_by,corrected_at,correction_reason,updated_at
+ride_otp_overview (view): id,booking_id,booking_code,booking_status,city_id,status,generation_type,expires_at,attempt_count,max_attempts,locked_until,verified_at,override_by_staff,override_reason,invalidated_reason,created_at,booked_distance_km,pickup_address,drop_address,estimated_fare_paise,driver_name,driver_code,customer_name,last_delivery_status,delivery_count
+ride_otps: id,booking_id,otp_hash,salt,status,generation_type,generated_by_staff,expires_at,attempt_count,max_attempts,locked_until,verified_at,verified_by_driver,override_by_staff,override_reason,invalidated_reason,created_at
+ride_routes: id,booking_id,route_kind,encoded_polyline,distance_km,duration_min,provider,created_at
+role_permissions: role_id,permission_code,granted_by,created_at
+roles: id,code,name,description,is_system,rank,created_at,updated_at
+safety_incidents: id,incident_code,incident_type,severity,status,booking_id,driver_id,customer_id,vehicle_id,reported_by_type,lat,lng,description,investigation_notes,resolution,assigned_staff_id,acknowledged_at,resolved_at,created_by,created_at,updated_at
+service_zones: id,city_id,name,zone_type,polygon,surge_multiplier_bp,is_active,notes,created_by,created_at,updated_at
+settings_history: id,key,old_value,new_value,changed_by,reason,created_at
+staff_accounts: id,user_id,employee_code,full_name,email,phone,role_id,city_scope,branch_id,status,suspended_reason,created_by,created_at,updated_at
+staff_activity: id,staff_id,activity_type,entity_type,entity_id,summary,created_at
+support_messages: id,ticket_id,sender_type,sender_id,body,is_internal,created_at
+support_tickets: id,ticket_code,ticket_type,raised_by_type,customer_id,driver_id,booking_id,subject,description,priority,status,assigned_staff_id,resolution,resolved_at,item_description,item_status,created_by,created_at,updated_at
+system_settings: key,value,category,description,is_public,updated_by,created_at,updated_at
+tracking_alerts: id,driver_id,booking_id,zone_id,alert_type,message,lat,lng,acknowledged_at,acknowledged_by,created_at
+vehicle_assignments: id,vehicle_id,driver_id,is_active,assigned_by,assigned_at,unassigned_at,unassigned_reason
+vehicle_categories: id,code,name,description,capacity,icon,is_active,is_custom,schedule,sort_order,created_at,updated_at
+vehicle_documents: id,vehicle_id,doc_type,storage_path,doc_number_masked,expiry_date,status,rejection_reason,reviewed_by,reviewed_at,uploaded_by,created_at,updated_at
+vehicle_maintenance: id,vehicle_id,record_type,description,cost_paise,odometer_km,fuel_litres,performed_on,next_due_on,next_due_odometer_km,vendor,driver_id,created_by,created_at
+vehicles: id,vehicle_code,registration_number,category_id,ownership_type,owner_name,owner_phone,owner_driver_id,manufacturer,model,manufacture_year,color,fuel_type,seating_capacity,city_id,branch_id,status,status_reason,odometer_km,gps_device_id,photos,created_by,created_at,updated_at
+wallet_transactions: id,txn_code,owner_type,driver_id,customer_id,direction,amount_paise,balance_after_paise,reason,booking_id,reference,idempotency_key,created_by,created_at
+---
+acknowledge_tracking_alert(p_alert_id bigint)
+adjust_customer_wallet(p_customer_id uuid, p_direction text, p_amount_paise bigint, p_reason text, p_idempotency_key text)
+ai_context()
+allocation_candidates(p_booking_id uuid, p_limit integer?)
+analytics_breakdowns(p_from timestamp with time zone, p_to timestamp with time zone, p_city_id uuid?)
+analytics_timeseries(p_from timestamp with time zone, p_to timestamp with time zone, p_bucket text?, p_city_id uuid?)
+[svc] apply_payment_webhook(p_provider text, p_event_id text, p_event_type text, p_signature_valid boolean, p_payload jsonb, p_kind text, p_order_id text?, p_payment_id text?, p_amount_paise bigint?, p_method text?, p_refund_id text?, p_failure_reason text?)
+apply_retention()
+assign_driver(p_booking_id uuid, p_driver_id uuid, p_reason text?, p_actor_staff_id uuid?)
+assign_vehicle(p_vehicle_id uuid, p_driver_id uuid, p_reason text?)
+auto_assign_driver(p_booking_id uuid)
+begin_session(p_device text?)
+booking_transition_allowed(p_from booking_status, p_to booking_status)
+[svc] bootstrap_super_admin(p_email text, p_full_name text?)
+calculate_fare(p_category_id uuid, p_city_id uuid, p_distance_km numeric, p_duration_min integer?, p_at timestamp with time zone?, p_waiting_min integer?, p_pickup_lat numeric?, p_pickup_lng numeric?)
+campaign_analytics()
+cancel_booking(p_booking_id uuid, p_reason text)
+[svc] check_rate_limit(p_key text, p_max integer, p_window_seconds integer)
+city_stats()
+complete_ride(p_booking_id uuid, p_reason text?)
+[svc] coupon_discount(p_code text, p_customer_id uuid, p_city_id uuid, p_category_id uuid, p_gross_paise bigint, p_lock boolean?)
+create_api_key(p_name text, p_scopes text[], p_expires_at timestamp with time zone?)
+create_booking(p_customer_id uuid, p_category_id uuid, p_city_id uuid, p_pickup_address text, p_pickup_lat numeric, p_pickup_lng numeric, p_drop_address text, p_drop_lat numeric, p_drop_lng numeric, p_payment_method text?, p_coupon_code text?, p_scheduled_for timestamp with time zone?, p_route_distance_km numeric?, p_route_duration_min integer?, p_encoded_polyline text?, p_actor_staff_id uuid?)
+create_payout(p_driver_id uuid, p_amount_paise bigint, p_method text, p_idempotency_key text)
+[svc] create_staff_record(p_actor_staff_id uuid, p_user_id uuid, p_full_name text, p_email text, p_phone text, p_role_code text, p_city_scope uuid[]?, p_branch_id uuid?, p_mfa_required boolean?)
+credit_incentive(p_incentive_id uuid)
+current_customer_id()
+current_driver_id()
+current_staff_id()
+dashboard_stats(p_from timestamp with time zone, p_to timestamp with time zone, p_city_id uuid?)
+demand_heatmap(p_city_id uuid, p_from timestamp with time zone, p_to timestamp with time zone, p_cell_deg numeric?)
+detect_suspicious_customers()
+[svc] document_expiry_scan()
+driver_location_trail(p_driver_id uuid?, p_booking_id uuid?, p_from timestamp with time zone?, p_to timestamp with time zone?)
+driver_otp_context(p_booking_id uuid)
+driver_performance(p_from timestamp with time zone, p_to timestamp with time zone, p_city_id uuid?, p_limit integer?)
+driver_respond_assignment(p_booking_id uuid, p_accept boolean, p_reason text?)
+driver_update_ride(p_booking_id uuid, p_action text)
+end_session()
+fare_from_rule(p_rule jsonb, p_distance_km numeric, p_duration_min integer, p_waiting_min integer, p_at timestamp with time zone, p_timezone text, p_zone_surge_bp integer, p_discount_paise bigint)
+finance_summary(p_from timestamp with time zone, p_to timestamp with time zone, p_city_id uuid?)
+[svc] find_pricing_rule(p_category_id uuid, p_city_id uuid, p_at timestamp with time zone, p_lat numeric, p_lng numeric)
+[svc] finish_refund(p_refund_id uuid, p_success boolean, p_provider_refund_id text, p_failure_reason text)
+flag_customer(p_customer_id uuid, p_suspicious boolean, p_reason text)
+forecast_demand(p_city_id uuid?, p_weeks integer?)
+forecast_revenue(p_history_days integer?, p_forecast_days integer?)
+fraud_signals()
+generate_daily_report(p_date date?)
+[svc] get_setting(p_key text, p_default jsonb?)
+global_search(p_query text)
+gst_report(p_month date, p_city_id uuid?)
+has_permission(p_code text)
+haversine_km(lat1 numeric, lng1 numeric, lat2 numeric, lng2 numeric)
+import_rows(p_entity text, p_rows jsonb, p_file_name text?)
+ingest_driver_location(p_lat numeric, p_lng numeric, p_recorded_at timestamp with time zone, p_speed_kmh numeric?, p_heading numeric?, p_accuracy_m numeric?, p_battery_pct integer?, p_gps_status text?)
+ingest_driver_locations_batch(p_points jsonb)
+[svc] invalidate_ride_otp(p_booking_id uuid, p_reason text)
+ip_allowed()
+is_direct_db()
+is_privileged()
+jwt_claims()
+log_auth_event(p_event text)
+log_client_error(p_source text, p_level text, p_message text, p_context jsonb?)
+[svc] log_integration_event(p_kind text, p_provider text, p_direction text, p_operation text, p_status text, p_http_status integer?, p_duration_ms integer?, p_error text?, p_reference text?)
+login_precheck(p_email text)
+maintenance_predictions()
+mark_notifications_read(p_ids uuid[]?)
+mask_phone(p text)
+my_access()
+next_code(p_prefix text, p_seq regclass)
+[svc] notification_dispatch_result(p_notification_id uuid, p_logs jsonb)
+[svc] notify_staff(p_permission text, p_category text, p_priority text, p_title text, p_body text, p_data jsonb?)
+open_dispute(p_booking_id uuid, p_category text, p_description text)
+operational_alerts()
+otp_dashboard(p_from timestamp with time zone?, p_to timestamp with time zone?)
+[svc] otp_expire_sweep()
+[svc] otp_hash(p_otp text, p_booking_id uuid, p_salt text)
+[svc] otp_issue(p_booking_id uuid, p_generation_type text?, p_staff_id uuid?)
+[svc] otp_override(p_booking_id uuid, p_staff_id uuid, p_reason text, p_identity_confirmation text)
+[svc] otp_random_digits(p_length integer)
+[svc] otp_record_delivery(p_otp_id uuid, p_channel text, p_provider text, p_status text, p_provider_message_id text?, p_error text?, p_delivery_type text?, p_staff_id uuid?, p_response jsonb?)
+[svc] otp_update_delivery_status(p_provider text, p_provider_message_id text, p_status text, p_error text?)
+otp_verify(p_booking_id uuid, p_otp text, p_confirmed_distance_km numeric)
+[svc] payment_attach_order(p_booking_id uuid, p_provider text, p_order_id text, p_method text?)
+point_in_polygon(p_lat numeric, p_lng numeric, p_polygon jsonb)
+process_deletion_request(p_customer_id uuid, p_approve boolean, p_reason text)
+raise_sos(p_booking_id uuid, p_lat numeric?, p_lng numeric?, p_description text?, p_incident_type text?)
+recent_activity(p_limit integer?)
+record_cash_payment(p_booking_id uuid, p_reason text?)
+record_login_failure(p_email text)
+[svc] refund_gateway_result(p_refund_id uuid, p_state text, p_provider_refund_id text?, p_failure_reason text?)
+[svc] report_integration_status(p_kind text, p_provider text, p_status text, p_error text?)
+request_account_deletion()
+request_header(p_name text)
+request_ip()
+request_refund(p_payment_id uuid, p_amount_paise bigint, p_reason text, p_idempotency_key text)
+require_permission(p_code text)
+resolve_dispute(p_dispute_id uuid, p_outcome text, p_resolution text)
+resolve_distance_discrepancy(p_discrepancy_id uuid, p_action text, p_corrected_km numeric, p_reason text)
+review_driver_document(p_document_id uuid, p_approve boolean, p_reason text?, p_notes text?)
+review_vehicle_document(p_document_id uuid, p_approve boolean, p_reason text?)
+revoke_api_key(p_id uuid)
+revoke_session(p_session_id uuid, p_reason text)
+[svc] run_scheduled_jobs()
+[svc] scan_tracking_health()
+send_notification(p_audience text, p_title text, p_body text, p_category text?, p_priority text?, p_channels text[]?, 'push'::text], p_recipient_id uuid?, p_city_id uuid?)
+[svc] set_actor(p_reason text?, p_staff_override uuid?)
+set_customer_status(p_customer_id uuid, p_status text, p_reason text)
+set_driver_availability(p_online boolean)
+set_driver_status(p_driver_id uuid, p_status text, p_reason text?, p_notes text?)
+set_role_permission(p_role_code text, p_permission text, p_grant boolean)
+set_vehicle_status(p_vehicle_id uuid, p_status text, p_reason text?)
+[svc] setting_bool(p_key text, p_default boolean)
+[svc] setting_int(p_key text, p_default integer)
+[svc] settle_booking_payment(p_booking_id uuid, p_payment_id uuid)
+staff_attendance(p_action text)
+staff_city_ok(p_city_id uuid)
+[svc] staff_has_permission(p_staff_id uuid, p_code text)
+system_health()
+tracking_snapshot(p_city_id uuid?, p_search text?, p_include_offline boolean?)
+update_payout(p_payout_id uuid, p_action text, p_reference text?, p_reason text?)
+update_setting(p_key text, p_value jsonb, p_reason text?)
+update_staff(p_staff_id uuid, p_role_code text?, p_status text?, p_reason text?, p_city_scope uuid[]?, p_clear_city_scope boolean?, p_branch_id uuid?, p_mfa_required boolean?, p_session_timeout_min integer?, p_unlock boolean?)
+validate_coupon(p_code text, p_customer_id uuid, p_city_id uuid, p_category_id uuid, p_gross_paise bigint)
+[svc] wallet_post(p_owner_type text, p_owner_id uuid, p_direction text, p_amount_paise bigint, p_reason text, p_booking_id uuid, p_reference text, p_idempotency_key text)
+[svc] write_audit(p_action text, p_entity_type text, p_entity_id text, p_old jsonb?, p_new jsonb?, p_reason text?, p_staff_override uuid?)
+zone_at(p_city_id uuid, p_lat numeric, p_lng numeric, p_types text[])
