@@ -191,7 +191,7 @@ create table public.admin_activity_logs (
   staff_id uuid references public.staff_accounts(id) on delete set null,
   email text,
   event text not null check (event in ('login_success','login_failed','login_blocked','logout',
-    'mfa_enrolled','mfa_verified','mfa_failed','password_reset','locked','session_revoked')),
+    'mfa_enrolled','mfa_verified','mfa_failed','mfa_removed','password_reset','locked','session_revoked')),
   ip text,
   user_agent text,
   device_label text,

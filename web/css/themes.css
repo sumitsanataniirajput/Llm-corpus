@@ -1,0 +1,41 @@
+/* Design tokens. Light is the default; [data-theme="dark"] overrides. */
+:root {
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --radius: 10px; --radius-sm: 8px; --radius-lg: 14px;
+  --sidebar-w: 248px; --sidebar-w-min: 68px; --topbar-h: 60px;
+
+  --primary: #2563eb; --primary-600: #1d4ed8; --primary-soft: #eff4ff; --on-primary: #fff;
+  --bg: #f4f6fa; --surface: #ffffff; --surface-2: #f8fafc; --surface-glass: rgba(255,255,255,.82);
+  --border: #e3e8ef; --border-strong: #cbd5e1;
+  --text: #0f172a; --text-2: #475569; --text-3: #8492a6;
+  --success: #15803d; --success-soft: #e7f6ec;
+  --warning: #b45309; --warning-soft: #fdf3e1;
+  --danger: #b91c1c; --danger-soft: #fdecec;
+  --info: #0369a1; --info-soft: #e5f3fb;
+  --violet: #6d28d9; --violet-soft: #f1ebfe;
+  --neutral-soft: #eef1f5;
+  --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
+  --shadow: 0 1px 3px rgba(15,23,42,.07), 0 8px 24px -12px rgba(15,23,42,.12);
+  --shadow-lg: 0 20px 48px -16px rgba(15,23,42,.28);
+  --focus: 0 0 0 3px rgba(37,99,235,.28);
+  --chart-grid: #e7ecf2; --chart-text: #64748b;
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  --primary: #5b8dff; --primary-600: #7ba3ff; --primary-soft: #18243f; --on-primary: #08122b;
+  --bg: #0b1120; --surface: #121a2b; --surface-2: #172135; --surface-glass: rgba(18,26,43,.82);
+  --border: #24304a; --border-strong: #33425f;
+  --text: #e6ebf5; --text-2: #a7b3c9; --text-3: #71809b;
+  --success: #4ade80; --success-soft: #10291c;
+  --warning: #fbbf24; --warning-soft: #2e2410;
+  --danger: #f87171; --danger-soft: #331618;
+  --info: #38bdf8; --info-soft: #0f2937;
+  --violet: #a78bfa; --violet-soft: #231a3d;
+  --neutral-soft: #1c2639;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  --shadow-lg: 0 20px 48px -16px rgba(0,0,0,.75);
+  --focus: 0 0 0 3px rgba(91,141,255,.35);
+  --chart-grid: #24304a; --chart-text: #94a3b8;
+  color-scheme: dark;
+}

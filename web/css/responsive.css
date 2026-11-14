@@ -1,0 +1,43 @@
+/* Tablet */
+@media (max-width: 1100px) {
+  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-2-1 { grid-template-columns: minmax(0, 1fr); }
+  .map-layout { grid-template-columns: minmax(0, 1fr); } .map-side { max-height: 300px; order: 2; }
+  .auth-screen { grid-template-columns: 1fr; } .auth-art { display: none; }
+}
+/* Mobile: sidebar becomes an off-canvas drawer, bottom navigation appears */
+@media (max-width: 860px) {
+  .app, .app.collapsed { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { position: fixed; left: 0; top: 0; width: 280px; transform: translateX(-100%); transition: transform .2s ease; box-shadow: var(--shadow-lg); }
+  .app.menu-open .sidebar { transform: none; }
+  .app.collapsed .brand-name, .app.collapsed .nav-item span, .app.collapsed .nav-group { display: initial; }
+  .app.collapsed .nav-item { justify-content: flex-start; } .app.collapsed .sidebar-brand { justify-content: flex-start; padding: 12px 16px; }
+  #sidebar-collapse { display: none; }
+  .topbar { padding: 0 12px; gap: 8px; }
+  .content { padding: 16px 12px calc(84px + env(safe-area-inset-bottom)); }
+  .bottom-nav { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; background: var(--surface-glass); backdrop-filter: blur(12px); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
+  .bottom-nav a { display: grid; justify-items: center; gap: 2px; padding: 8px 4px; font-size: 10.5px; font-weight: 500; color: var(--text-2); position: relative; }
+  .bottom-nav a i { font-size: 17px; } .bottom-nav a.active { color: var(--primary); } .bottom-nav a:hover { text-decoration: none; }
+  .bottom-nav .nav-badge { position: absolute; top: 4px; left: calc(50% + 6px); background: var(--danger); color: #fff; border-radius: 999px; font-size: 9.5px; padding: 0 5px; }
+  .grid-2, .grid-3, .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .stat { padding: 12px; } .stat-value { font-size: 18px; } .stat-ico { width: 32px; height: 32px; }
+  .hide-sm { display: none !important; }
+  .modal-backdrop { padding: 0; place-items: end stretch; } .modal, .modal.lg, .modal.xl, .modal.sm { max-width: none; max-height: 94vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .drawer { height: 94vh; } .map { height: 62vh; } .map.sm { height: 260px; } .chart-box { height: 240px; }
+  .toast-region { bottom: calc(76px + env(safe-area-inset-bottom)); right: 12px; }
+  .dl { grid-template-columns: 1fr; gap: 2px 0; } .dl dd { margin-bottom: 8px; }
+  /* Tables turn into stacked cards so nothing needs sideways scrolling */
+  table.table.responsive thead { display: none; }
+  table.table.responsive, table.table.responsive tbody, table.table.responsive tr, table.table.responsive td { display: block; width: 100%; }
+  table.table.responsive tr { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  table.table.responsive td { border: 0; padding: 3px 0; display: flex; justify-content: space-between; gap: 14px; text-align: right; }
+  table.table.responsive td::before { content: attr(data-label); color: var(--text-3); font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; text-align: left; flex: none; padding-top: 2px; }
+  table.table.responsive td.actions { justify-content: flex-end; width: 100%; padding-top: 8px; } table.table.responsive td.actions::before { display: none; }
+  table.table.responsive td[data-label=""]::before { display: none; }
+  .table-toolbar .tb-search { max-width: none; flex-basis: 100%; }
+}
+@media (min-width: 861px) { .only-mobile { display: none !important; } .sidebar-backdrop { display: none !important; } }
+@media print {
+  .sidebar, .topbar, .bottom-nav, .page-actions, .table-toolbar, .table-foot, .toast-region, .emergency-bar, .announcement-bar { display: none !important; }
+  .app { display: block; } .content { padding: 0; } .card { box-shadow: none; break-inside: avoid; } body { background: #fff; color: #000; }
+}

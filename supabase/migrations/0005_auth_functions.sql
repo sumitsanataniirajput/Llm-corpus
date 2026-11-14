@@ -351,7 +351,7 @@ create or replace function public.log_auth_event(p_event text) returns void
 language plpgsql security definer set search_path = public as $$
 declare v_staff uuid;
 begin
-  if p_event not in ('mfa_enrolled','mfa_verified','mfa_failed','password_reset') then
+  if p_event not in ('mfa_enrolled','mfa_verified','mfa_failed','mfa_removed','password_reset') then
     raise exception 'INVALID_EVENT';
   end if;
   select id into v_staff from staff_accounts where user_id = auth.uid();
