@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ride Manager</string>
+    <string name="channel_alerts">Operational alerts</string>
+    <string name="channel_alerts_desc">Emergencies, failed OTP deliveries and other alerts from the control room</string>
+</resources>

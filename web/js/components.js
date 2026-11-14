@@ -325,7 +325,10 @@ export function printReport(title, innerHtml) {
     body{font-family:Inter,system-ui,sans-serif;color:#0f172a;margin:28px;font-size:12.5px}h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:22px 0 8px}
     .muted{color:#64748b}table{width:100%;border-collapse:collapse;margin-top:6px}th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left}th{background:#f1f5f9}
     td.num,th.num{text-align:right}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.kpi{border:1px solid #cbd5e1;border-radius:6px;padding:8px}.kpi b{display:block;font-size:16px}
-    @media print{button{display:none}}</style></head><body><button onclick="window.print()" style="float:right;padding:8px 14px">Print / Save as PDF</button>
+    @media print{button{display:none}}</style></head><body><button id="print-btn" style="float:right;padding:8px 14px">Print / Save as PDF</button>
     <h1>${esc(title)}</h1>${innerHtml}</body></html>`);
-  w.document.close(); w.focus();
+  w.document.close();
+  // Attached from here (not as an inline onclick) so it works under the Content-Security-Policy.
+  const btn = w.document.getElementById('print-btn'); if (btn) btn.addEventListener('click', () => w.print());
+  w.focus();
 }

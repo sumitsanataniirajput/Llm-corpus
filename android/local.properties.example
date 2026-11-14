@@ -1,0 +1,12 @@
+# Copy this file to "local.properties" (same folder) and fill in your values.
+# local.properties is ignored by Git, so these values are never uploaded.
+#
+# Android Studio adds the sdk.dir line by itself when you open the project.
+#
+# Use ONLY the public "anon" / "publishable" key here. NEVER the service_role key:
+# anything inside an APK can be read by anyone who downloads it.
+SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+SUPABASE_ANON_KEY=YOUR-ANON-KEY
+# Google Maps SDK for Android key, restricted to package com.ridemanager.app + your signing SHA-1.
+# Leave empty to build without the map (the Map tab then shows a list).
+MAPS_API_KEY=

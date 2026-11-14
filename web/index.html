@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
+  <!-- Content-Security-Policy: scripts may only come from this site and the listed libraries; inline scripts are blocked.
+       If you self-host the libraries or use a custom Supabase domain, adjust the lists below. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.ggpht.com https://*.googleusercontent.com blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.supabase.in wss://*.supabase.in https://*.googleapis.com https://*.gstatic.com https://*.google.com http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* data: blob:; frame-src https://*.supabase.co https://*.supabase.in blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="theme-color" content="#2563eb">
   <title>Ride Manager</title>
@@ -16,10 +19,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/responsive.css">
-  <script>
-    // Apply the saved theme before first paint (no flash).
-    (function () { try { var t = localStorage.getItem('rms.theme'); if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
-  </script>
+<script src="js/theme-boot.js"></script>
 </head>
 <body>
   <!-- Boot / configuration problem screen -->
@@ -156,7 +156,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.12.4/dist/sweetalert2.all.min.js"></script>
   <!-- Your project keys. Copy js/config.example.js to js/config.js and fill it in. -->
-  <script src="js/config.js" onerror="window.RMS_CONFIG_MISSING = true"></script>
+  <script src="js/config.js"></script>
   <script type="module" src="script.js"></script>
 </body>
 </html>
