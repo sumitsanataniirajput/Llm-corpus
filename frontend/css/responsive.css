@@ -1,0 +1,173 @@
+/* ========================================
+   CORPUS ULTIMATE — Responsive
+   ======================================== */
+
+@media (max-width: 1023px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+
+  .main-content {
+    margin-left: 0;
+    padding-bottom: var(--bottom-nav-height);
+  }
+
+  .page-container {
+    padding: var(--space-4);
+  }
+
+  .app-bar {
+    display: flex;
+  }
+
+  .bottom-nav {
+    display: flex;
+  }
+
+  .chat-container {
+    height: 85vh;
+    width: 100%;
+    border-radius: 0;
+    margin: 0;
+  }
+
+  .chat-sidebar {
+    display: none;
+  }
+
+  .chat-message {
+    max-width: 85%;
+  }
+
+  .training-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-chart-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .model-actions {
+    flex-direction: column;
+  }
+
+  .training-actions {
+    flex-direction: column;
+  }
+
+  .training-actions .btn {
+    min-width: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-bar-title {
+    max-width: 160px;
+  }
+
+  .app-bar-subtitle {
+    display: none;
+  }
+
+  .stat-card {
+    padding: var(--space-3);
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+  }
+
+  .modal-content {
+    margin: var(--space-2);
+    max-height: 95vh;
+  }
+
+  .auth-card {
+    padding: var(--space-4);
+  }
+
+  .page-container {
+    padding: var(--space-3);
+  }
+
+  .chart-container {
+    height: 240px;
+    padding: var(--space-3);
+  }
+
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .worker-specs {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-message {
+    max-width: 90%;
+  }
+
+  .prediction-card {
+    padding: var(--space-3);
+  }
+
+  .layer-node {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .arrow {
+    align-self: flex-start;
+    margin-left: var(--space-3);
+  }
+}
+
+/* Landscape mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .bottom-nav {
+    height: 56px;
+  }
+
+  .nav-link i {
+    font-size: 1.25rem;
+  }
+
+  .nav-link span {
+    font-size: var(--text-label-small);
+  }
+
+  .main-content {
+    padding-bottom: 56px;
+  }
+
+  .chat-container {
+    height: 70vh;
+  }
+
+  .chart-container {
+    height: 200px;
+  }
+}
+
+/* Tablet */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .page-container {
+    max-width: 900px;
+  }
+
+  .chat-container {
+    max-width: 700px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

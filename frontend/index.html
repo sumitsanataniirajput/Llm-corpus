@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CORPUS ULTIMATE — Personal LLM development, training, and monitoring platform">
+  <title>CORPUS ULTIMATE</title>
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- Supabase JS client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- AOS animations -->
+  <link href="https://unpkg.com/aos@2.3.4/dist/aos.css" rel="stylesheet">
+  <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
+  <!-- Application styles -->
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/pages.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Auth modal -->
+  <div id="auth-modal" class="modal hidden">
+    <div class="modal-backdrop" onclick="auth.closeModal()"></div>
+    <div class="modal-content auth-card">
+      <button class="modal-close" onclick="auth.closeModal()">&times;</button>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login" onclick="auth.switchTab('login')">Sign in</button>
+        <button class="auth-tab" data-tab="signup" onclick="auth.switchTab('signup')">Create account</button>
+      </div>
+      <div id="auth-form-container">
+        <!-- forms injected by auth.js -->
+      </div>
+      <div class="auth-divider"><span>or continue with</span></div>
+      <div class="auth-social">
+        <button class="social-btn google" id="google-signin"><i class="fab fa-google"></i> Google</button>
+        <button class="social-btn github" id="github-signin"><i class="fab fa-github"></i> GitHub</button>
+      </div>
+      <p class="auth-help" id="auth-reset-link" style="cursor:pointer;">Forgot password?</p>
+    </div>
+  </div>
+
+  <!-- Offline indicator -->
+  <div id="offline-banner" class="offline-banner hidden">
+    <i class="fas fa-wifi"></i>
+    <span>You are offline. Some features are unavailable.</span>
+  </div>
+
+  <!-- Connection indicator -->
+  <div id="connection-indicator" class="connection-indicator hidden">
+    <i class="fas fa-circle text-success"></i>
+    <span id="connection-text">Connected</span>
+  </div>
+
+  <!-- Top app bar (mobile) -->
+  <header class="app-bar">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
+      <i class="fas fa-bars"></i>
+    </button>
+    <div class="app-bar-title">
+      <div class="app-logo">
+        <i class="fas fa-brain"></i>
+        <span>CORPUS</span>
+      </div>
+      <div class="app-bar-subtitle">ULTIMATE</div>
+    </div>
+    <div class="app-bar-actions">
+      <button class="icon-btn" id="notifications-btn" aria-label="Notifications">
+        <i class="fas fa-bell"></i>
+        <span class="badge" id="notification-badge">0</span>
+      </button>
+      <button class="icon-btn" id="user-profile-btn" aria-label="User profile">
+        <i class="fas fa-user-circle"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Desktop sidebar -->
+  <aside class="sidebar hidden" id="sidebar">
+    <div class="sidebar-header">
+      <div class="app-logo">
+        <i class="fas fa-brain"></i>
+        <span>CORPUS ULTIMATE</span>
+      </div>
+      <button class="sidebar-close" id="sidebar-close" aria-label="Close sidebar">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <nav class="sidebar-nav" id="sidebar-nav">
+      <!-- navigation items injected by router.js -->
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-info" id="sidebar-user-info" style="display:none;">
+        <div class="user-avatar" id="sidebar-user-avatar"></div>
+        <div class="user-meta">
+          <div class="user-name" id="sidebar-user-name">User</div>
+          <div class="user-email" id="sidebar-user-email">user@example.com</div>
+        </div>
+      </div>
+      <button class="nav-item logout-btn" id="sidebar-logout" style="display:none;">
+        <i class="fas fa-sign-out-alt"></i>
+        <span>Sign out</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Sidebar overlay -->
+  <div class="sidebar-overlay hidden" id="sidebar-overlay" onclick="router.closeSidebar()"></div>
+
+  <!-- Main content -->
+  <main class="main-content" id="main-content">
+    <!-- Page container -->
+    <div class="page-container" id="page-container">
+      <!-- Pages injected by router.js -->
+    </div>
+  </main>
+
+  <!-- Mobile bottom navigation -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <a href="#/dashboard" class="nav-link active" data-route="dashboard">
+      <i class="fas fa-home"></i><span>Dashboard</span>
+    </a>
+    <a href="#/models" class="nav-link" data-route="models">
+      <i class="fas fa-cube"></i><span>Models</span>
+    </a>
+    <a href="#/training" class="nav-link" data-route="training">
+      <i class="fas fa-flask"></i><span>Training</span>
+    </a>
+    <a href="#/chat" class="nav-link" data-route="chat">
+      <i class="fas fa-comments"></i><span>Chat</span>
+    </a>
+    <a href="#/settings" class="nav-link" data-route="settings">
+      <i class="fas fa-cog"></i><span>Settings</span>
+    </a>
+  </nav>
+
+  <!-- Confirmation dialog -->
+  <div id="confirm-dialog" class="modal hidden">
+    <div class="modal-backdrop" onclick="ui.closeConfirm()"></div>
+    <div class="modal-content confirm-card">
+      <div class="confirm-header">
+        <h3 id="confirm-title">Confirm action</h3>
+        <button class="modal-close" onclick="ui.closeConfirm()">&times;</button>
+      </div>
+      <p id="confirm-message">Are you sure?</p>
+      <div class="confirm-actions">
+        <button class="btn btn-outline" onclick="ui.closeConfirm()">Cancel</button>
+        <button class="btn btn-danger" id="confirm-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application JavaScript -->
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app-context.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/models.js"></script>
+  <script src="js/training.js"></script>
+  <script src="js/statistics.js"></script>
+  <script src="js/chat.js"></script>
+  <script src="js/prediction.js"></script>
+  <script src="js/neural-lab.js"></script>
+  <script src="js/ai-information.js"></script>
+  <script src="js/datasets.js"></script>
+  <script src="js/evaluation.js"></script>
+  <script src="js/compute.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/experiments.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/app-bootstrap.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Supabase local development config (optional)
+[general]
+project_id = "corpus-ultimate"
+
+[api]
+enabled = true
+
+[db]
+enabled = true
+
+[storage]
+enabled = true
