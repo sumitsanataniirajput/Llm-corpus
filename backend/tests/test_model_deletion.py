@@ -268,6 +268,9 @@ async def test_delete_model_blocks_active_training_and_stops_worker_when_request
 
     await asyncio.wait_for(worker_task, timeout=3.0)
     assert await db_rows(Model, id=model["id"]) == []
-    assert await db_rows(TrainingJob, id=job_id) == []
+    jobs = await db_rows(TrainingJob, id=job_id)
+    assert len(jobs) == 1
+    assert jobs[0].model_id is None
+    assert jobs[0].status == "stopped"
     # Shared dataset still exists.
     assert len(await db_rows(Dataset, id=dataset["id"])) == 1

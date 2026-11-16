@@ -452,13 +452,16 @@ window.models = (function () {
       if (!token) {
         throw new Error('Authentication required. Please sign in again.');
       }
-      await window.CORPUS_API.deleteModel(id, token, options);
+      const result = await window.CORPUS_API.deleteModel(id, token, options);
       state.removeModel(id);
       const active = state.getActiveModel ? state.getActiveModel() : null;
       if (active && active.id === id && state.setActiveModel) {
         state.setActiveModel(null);
       }
       ui.toast('Model deleted', 'success');
+      if (result && result.storage_cleanup_warning) {
+        ui.toast(result.storage_cleanup_warning, 'warning', 7000);
+      }
       await loadModels();
     } catch (err) {
       if (err && err.status === 409 && !options.stopActive) {

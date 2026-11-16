@@ -248,7 +248,7 @@ async def delete_model(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"Model '{model.name}' has an active training job ({first.id}, status: {first.status}). "
+                    f"Model '{model.name}' has active training jobs ({first.id}, status: {first.status}). "
                     "Stop the training job first before deleting this model."
                 ),
             )
@@ -296,10 +296,14 @@ async def delete_model(
         if isinstance(val, str) and val.strip():
             candidate_paths.append(val.strip())
 
+    tok_ref = getattr(model, "tokenizer_ref", None)
+    if isinstance(tok_ref, str) and tok_ref.strip():
+        candidate_paths.append(tok_ref.strip())
+
     # Deduplicate while preserving order.
     storage_paths = list(dict.fromkeys(candidate_paths))
 
-    # Guard against removing any path still referenced by another model.
+    # Guard against removing any path still referenced by another model or dataset file.
     if storage_paths:
         other_ckpts = await db.execute(
             select(Checkpoint.storage_path).where(
@@ -308,6 +312,12 @@ async def delete_model(
             )
         )
         shared_paths = {row[0] for row in other_ckpts.all() if row[0]}
+        if await _table_exists(db, "dataset_files"):
+            ds_files = await db.execute(
+                text("SELECT storage_path FROM public.dataset_files WHERE storage_path = ANY(:paths)"),
+                {"paths": storage_paths},
+            )
+            shared_paths.update(row[0] for row in ds_files.all() if row[0])
         storage_paths = [p for p in storage_paths if p not in shared_paths]
 
     # 3. Remove model-specific artifacts from private storage BEFORE deleting DB rows.
@@ -329,48 +339,30 @@ async def delete_model(
                 ),
             )
 
-    # 4. Clean up model-dependent DB references atomically without touching datasets.
+    # 4. Detach historical references & delete model-owned rows without touching datasets.
     job_ids = [j.id for j in model_jobs]
 
     if job_ids:
         await db.execute(
-            text("DELETE FROM public.training_metrics WHERE job_id = ANY(:job_ids)"),
-            {"job_ids": job_ids},
+            text("UPDATE public.training_jobs SET model_id = NULL WHERE model_id = :model_id"),
+            {"model_id": model_id},
         )
         await db.execute(
-            text("DELETE FROM public.training_job_events WHERE job_id = ANY(:job_ids)"),
-            {"job_ids": job_ids},
-        )
-        await db.execute(
-            delete(Checkpoint).where(Checkpoint.job_id.in_(job_ids))
+            text("UPDATE public.checkpoints SET job_id = NULL WHERE job_id = ANY(:job_ids) AND model_id != :model_id"),
+            {"job_ids": job_ids, "model_id": model_id},
         )
 
     await db.execute(delete(Checkpoint).where(Checkpoint.model_id == model_id))
 
-    eval_ids_result = await db.execute(
-        select(EvaluationRun.id).where(EvaluationRun.model_id == model_id)
-    )
-    eval_ids = [row[0] for row in eval_ids_result.all()]
-    if eval_ids and await _table_exists(db, "evaluation_results"):
+    if await _table_exists(db, "evaluation_runs"):
         await db.execute(
-            text("DELETE FROM public.evaluation_results WHERE run_id = ANY(:run_ids)"),
-            {"run_ids": eval_ids},
-        )
-    await db.execute(delete(EvaluationRun).where(EvaluationRun.model_id == model_id))
-
-    if await _table_exists(db, "conversations"):
-        conv_result = await db.execute(
-            text("SELECT id FROM public.conversations WHERE model_id = :model_id"),
+            text("UPDATE public.evaluation_runs SET model_id = NULL WHERE model_id = :model_id"),
             {"model_id": model_id},
         )
-        conv_ids = [row[0] for row in conv_result.all()]
-        if conv_ids and await _table_exists(db, "messages"):
-            await db.execute(
-                text("DELETE FROM public.messages WHERE conversation_id = ANY(:conv_ids)"),
-                {"conv_ids": conv_ids},
-            )
+
+    if await _table_exists(db, "conversations"):
         await db.execute(
-            text("DELETE FROM public.conversations WHERE model_id = :model_id"),
+            text("UPDATE public.conversations SET model_id = NULL WHERE model_id = :model_id"),
             {"model_id": model_id},
         )
 
@@ -381,12 +373,11 @@ async def delete_model(
                 {"model_id": model_id},
             )
 
-    await db.execute(delete(TrainingJob).where(TrainingJob.model_id == model_id))
     await db.execute(delete(Model).where(Model.id == model_id))
     await db.commit()
 
     logger.info(
-        "Deleted model=%s owner=%s removed_files=%d removed_jobs=%d",
+        "Deleted model=%s owner=%s removed_files=%d detached_jobs=%d",
         model_id,
         owner_uuid,
         len(storage_paths),
@@ -396,6 +387,8 @@ async def delete_model(
         "ok": True,
         "model_id": model_id,
         "removed_files": len(storage_paths),
+        "removed_storage_files": len(storage_paths),
+        "storage_cleanup_warning": None,
         "removed_checkpoints": len(checkpoints),
         "removed_jobs": len(job_ids),
     }
