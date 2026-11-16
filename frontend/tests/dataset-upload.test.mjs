@@ -364,3 +364,21 @@ test('failed upload stays visible and retry reuses the created dataset record', 
   assert.equal(app.XHRStub.instances.length, 2);
   assert.match(app.doc.getElementById('toast-container').textContent, /1 dataset uploaded/i);
 });
+
+
+test('returning from Android file selection keeps the datasets route and selected file queue', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+  app.window.location.hash = '#/datasets';
+  app.window.datasets.showUpload();
+
+  const input = app.doc.getElementById('datasets-file');
+  let submitCount = 0;
+  app.doc.addEventListener('submit', () => { submitCount += 1; });
+  setFiles(app, input, ['mobile-selection.txt']);
+
+  assert.equal(app.window.location.hash, '#/datasets');
+  assert.equal(submitCount, 0, 'file selection must not submit or reload the page');
+  assert.equal(app.doc.querySelectorAll('#datasets-file-list .file-row').length, 1);
+  assert.match(app.doc.getElementById('datasets-file-list').textContent, /mobile-selection\.txt/);
+});
