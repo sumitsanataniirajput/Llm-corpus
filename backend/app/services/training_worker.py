@@ -17,7 +17,7 @@ from supabase import create_client
 
 from app.config import settings
 from app.core.database import get_session_factory
-from app.core.models import Model, TrainingJob
+from app.core.models import Dataset, Model, TrainingJob
 from corpus_engine.tokenizer.tokenizer import CorpusTokenizer
 from corpus_engine.pytorch_engine.pytorch_trainer import PyTorchTrainer
 
@@ -119,6 +119,12 @@ async def run_training_job(job_id: str, owner_id: str):
                 return
             if not job.dataset_id:
                 raise ValueError("Select a dataset before starting training.")
+            dataset_result = await db.execute(select(Dataset).where(
+                Dataset.id == job.dataset_id, Dataset.owner_id == job.owner_id
+            ))
+            dataset = dataset_result.scalar_one_or_none()
+            if not dataset:
+                raise ValueError("The selected dataset was not found or is not owned by this account.")
             model_result = await db.execute(select(Model).where(Model.id == job.model_id, Model.owner_id == job.owner_id))
             model = model_result.scalar_one_or_none()
             if not model:
