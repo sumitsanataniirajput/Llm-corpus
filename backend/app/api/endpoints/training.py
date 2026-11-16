@@ -3,7 +3,7 @@
 Create, list, pause, resume, stop training jobs.
 Real PyTorch and custom numerical engines are invoked here.
 """
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uuid
@@ -70,7 +70,7 @@ async def list_jobs(user=Depends(require_user), db: AsyncSession = Depends(get_d
 
 
 @router.post("/", response_model=JobOut, tags=["training"])
-async def create_job(config: TrainingConfig, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+async def create_job(config: TrainingConfig, background_tasks: BackgroundTasks, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     job_id = "job_" + uuid.uuid4().hex[:12]
     owner_id = uuid.UUID(user["user_id"])
     now = datetime.now(timezone.utc)
@@ -89,6 +89,8 @@ async def create_job(config: TrainingConfig, user=Depends(require_user), db: Asy
     db.add(job)
     await db.commit()
     await db.refresh(job)
+    from app.services.training_worker import run_training_job
+    background_tasks.add_task(run_training_job, job_id, str(owner_id))
     return _job_to_out(job)
 
 
