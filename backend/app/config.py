@@ -24,6 +24,21 @@ class Settings(BaseSettings):
     # ── Database ──
     DATABASE_URL: str = ""
 
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        """Ensure PostgreSQL URLs use the asyncpg driver required by SQLAlchemy."""
+        if not isinstance(v, str):
+            return v
+        if v.startswith("postgres://"):
+            return "postgresql+asyncpg://" + v[len("postgres://"):]
+        if v.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + v[len("postgresql://"):]
+        if v.startswith("postgresql+psycopg2://"):
+            return "postgresql+asyncpg://" + v[len("postgresql+psycopg2://"):]
+        return v
+
     # ── Security (for internal app tokens only, NOT for Supabase JWT verification) ──
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
