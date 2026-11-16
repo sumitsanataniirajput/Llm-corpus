@@ -53,7 +53,7 @@ async def list_models(user=Depends(require_user), db: AsyncSession = Depends(get
     return [
         ModelOut(
             id=m.id,
-            owner_id=m.owner_id,
+            owner_id=str(m.owner_id),
             name=m.name,
             config=m.config,
             version=m.version,
@@ -89,7 +89,7 @@ async def create_model(config: ModelConfig, user=Depends(require_user), db: Asyn
     await db.refresh(model)
     return ModelOut(
         id=model.id,
-        owner_id=model.owner_id,
+        owner_id=str(model.owner_id),
         name=model.name,
         config=model.config,
         version=model.version,
@@ -110,7 +110,7 @@ async def get_model(model_id: str, user=Depends(require_user), db: AsyncSession 
         raise HTTPException(status_code=403, detail="Not authorized")
     return ModelOut(
         id=model.id,
-        owner_id=model.owner_id,
+        owner_id=str(model.owner_id),
         name=model.name,
         config=model.config,
         version=model.version,
@@ -138,7 +138,7 @@ async def update_model(model_id: str, updates: dict, user=Depends(require_user),
     await db.refresh(model)
     return ModelOut(
         id=model.id,
-        owner_id=model.owner_id,
+        owner_id=str(model.owner_id),
         name=model.name,
         config=model.config,
         version=model.version,
@@ -176,7 +176,7 @@ async def clone_model(model_id: str, user=Depends(require_user), db: AsyncSessio
     now = datetime.now(timezone.utc)
     clone = Model(
         id=new_id,
-        owner_id=model.owner_id,
+        owner_id=str(model.owner_id),
         name=model.name + " (clone)",
         config=model.config,
         version="1.0",
@@ -189,7 +189,7 @@ async def clone_model(model_id: str, user=Depends(require_user), db: AsyncSessio
     await db.refresh(clone)
     return ModelOut(
         id=clone.id,
-        owner_id=clone.owner_id,
+        owner_id=str(clone.owner_id),
         name=clone.name,
         config=clone.config,
         version=clone.version,
