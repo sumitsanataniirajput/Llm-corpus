@@ -23,7 +23,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 # Bump when a shipped fix must be verified in production.
-BUILD_ID = "2026-11-16.4"
+BUILD_ID = "2026-11-16.5"
 
 # Behaviour markers that must be present in a healthy production deployment.
 FEATURES = [

@@ -233,6 +233,52 @@ window.router = (function () {
     }
   }
 
+  function lastRecordedScriptError() {
+    try {
+      if (!window.CORPUS_APP || typeof window.CORPUS_APP.getDiagnostics !== 'function') return null;
+      const log = (window.CORPUS_APP.getDiagnostics() || {}).errorLog || [];
+      for (let i = log.length - 1; i >= 0; i -= 1) {
+        const entry = log[i];
+        if (entry && (entry.source === 'uncaught-error' || entry.source === 'resource-error')) return entry;
+      }
+      // Legacy bootstrap entries were recorded under 'bootstrap'.
+      for (let i = log.length - 1; i >= 0; i -= 1) {
+        const entry = log[i];
+        if (entry && entry.source === 'bootstrap' && /uncaught|failed to load/i.test(entry.message || '')) return entry;
+      }
+    } catch (e) { /* diagnostics must never break rendering */ }
+    return null;
+  }
+
+  function missingModulePanel(route, moduleName, iconClass) {
+    const diag = lastRecordedScriptError();
+    const globalName = PAGE_MODULES[route] || route;
+    const globalState = globalName && typeof window[globalName] === 'undefined'
+      ? 'The module global <code>window.' + escapeHtml(globalName) + '</code> is undefined — its script did not execute (failed download or a syntax/runtime error before registration).'
+      : 'The module global exists, but its <code>render()</code> function is missing.';
+    const detail = diag
+      ? '<div style="text-align:left; margin:var(--space-3) auto; max-width:640px;">' +
+          '<p style="margin:0 0 var(--space-1);"><strong>Last recorded error (' + escapeHtml(diag.source || 'error') + '):</strong></p>' +
+          '<pre style="white-space:pre-wrap; word-break:break-word; text-align:left; background:var(--color-bg-muted); color:var(--color-text-variant); padding:var(--space-3); border-radius:var(--radius-md); font-size:var(--text-caption); line-height:1.5; max-height:40vh; overflow:auto;">' +
+            escapeHtml(diag.message || '') + (diag.stack ? '\n' + escapeHtml(diag.stack) : '') +
+          '</pre>' +
+        '</div>'
+      : '<p style="color:var(--color-text-variant);">No JavaScript error was captured. If this persists, open DevTools → Network and check that the module file is requested and returns HTTP 200 — a failed download leaves no console error for the page to display.</p>';
+    return `
+      <div class="empty-state" style="max-width:720px; margin:var(--space-6) auto;">
+        <i class="fas ${escapeHtml(iconClass || 'fa-triangle-exclamation')}"></i>
+        <h3>${escapeHtml(moduleName)}</h3>
+        <p>${escapeHtml(moduleName)} module not loaded.</p>
+        <p style="font-size:var(--text-body-small);">${globalState}</p>
+        ${detail}
+        <div class="form-actions" style="justify-content:center;">
+          <button class="btn btn-outline" type="button" onclick="location.reload()">Reload page</button>
+          <button class="btn btn-primary" type="button" onclick="router.navigate('${escapeHtml(route)}')">Retry</button>
+        </div>
+      </div>
+    `;
+  }
+
   function renderErrorPanel(route, error) {
     const msg = error && error.message ? error.message : String(error || 'Unknown error');
     return `
@@ -312,7 +358,7 @@ window.router = (function () {
       if (window.dashboard && typeof window.dashboard.render === 'function') {
         await window.dashboard.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-home"></i><h3>Dashboard</h3><p>Dashboard module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('dashboard', 'Dashboard', 'fa-home');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderDashboard', err.message, err);
@@ -326,7 +372,7 @@ window.router = (function () {
       if (window.models && typeof window.models.render === 'function') {
         await window.models.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-cube"></i><h3>Models</h3><p>Models module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('models', 'Models', 'fa-cube');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderModels', err.message, err);
@@ -340,7 +386,7 @@ window.router = (function () {
       if (window.training && typeof window.training.render === 'function') {
         await window.training.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-flask"></i><h3>Training Center</h3><p>Training module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('training', 'Training Center', 'fa-flask');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderTraining', err.message, err);
@@ -354,7 +400,7 @@ window.router = (function () {
       if (window.statistics && typeof window.statistics.render === 'function') {
         await window.statistics.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-chart-line"></i><h3>Statistics</h3><p>Statistics module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('statistics', 'Statistics', 'fa-chart-line');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderStatistics', err.message, err);
@@ -368,7 +414,7 @@ window.router = (function () {
       if (window.aiInfo && typeof window.aiInfo.render === 'function') {
         await window.aiInfo.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-info-circle"></i><h3>AI Information</h3><p>AI Information module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('ai-information', 'AI Information', 'fa-info-circle');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderAIInformation', err.message, err);
@@ -382,7 +428,7 @@ window.router = (function () {
       if (window.chat && typeof window.chat.render === 'function') {
         await window.chat.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><h3>AI Chat</h3><p>Chat module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('chat', 'AI Chat', 'fa-comments');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderChat', err.message, err);
@@ -396,7 +442,7 @@ window.router = (function () {
       if (window.prediction && typeof window.prediction.render === 'function') {
         await window.prediction.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-microscope"></i><h3>Prediction Lab</h3><p>Prediction Lab module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('prediction-lab', 'Prediction Lab', 'fa-microscope');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderPredictionLab', err.message, err);
@@ -410,7 +456,7 @@ window.router = (function () {
       if (window.neuralLab && typeof window.neuralLab.render === 'function') {
         await window.neuralLab.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-microchip"></i><h3>Neural Lab</h3><p>Neural Lab module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('neural-lab', 'Neural Lab', 'fa-microchip');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderNeuralLab', err.message, err);
@@ -424,7 +470,7 @@ window.router = (function () {
       if (window.datasets && typeof window.datasets.render === 'function') {
         await window.datasets.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-database"></i><h3>Datasets</h3><p>Datasets module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('datasets', 'Datasets', 'fa-database');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderDatasets', err.message, err);
@@ -438,7 +484,7 @@ window.router = (function () {
       if (window.evaluation && typeof window.evaluation.render === 'function') {
         await window.evaluation.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-check-double"></i><h3>Evaluation</h3><p>Evaluation module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('evaluation', 'Evaluation', 'fa-check-double');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderEvaluation', err.message, err);
@@ -452,7 +498,7 @@ window.router = (function () {
       if (window.compute && typeof window.compute.render === 'function') {
         await window.compute.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-server"></i><h3>Compute</h3><p>Compute module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('compute', 'Compute', 'fa-server');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderCompute', err.message, err);
@@ -466,7 +512,7 @@ window.router = (function () {
       if (window.storage && typeof window.storage.render === 'function') {
         await window.storage.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-cloud"></i><h3>Cloud Storage</h3><p>Storage module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('cloud-storage', 'Cloud Storage', 'fa-cloud');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderStorage', err.message, err);
@@ -480,7 +526,7 @@ window.router = (function () {
       if (window.experiments && typeof window.experiments.render === 'function') {
         await window.experiments.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-flask"></i><h3>Experiments</h3><p>Experiments module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('experiments', 'Experiments', 'fa-flask');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderExperiments', err.message, err);
@@ -494,7 +540,7 @@ window.router = (function () {
       if (window.settings && typeof window.settings.render === 'function') {
         await window.settings.render();
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-cog"></i><h3>Settings</h3><p>Settings module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('settings', 'Settings', 'fa-cog');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderSettings', err.message, err);
@@ -508,7 +554,7 @@ window.router = (function () {
       if (window.auth && typeof window.auth.renderForm === 'function') {
         container.innerHTML = '<div class="empty-state"><i class="fas fa-user-circle"></i><h3>Authentication</h3><p>Please use the profile button to sign in or create an account.</p></div>';
       } else {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-user-circle"></i><h3>Authentication</h3><p>Auth module not loaded.</p></div>';
+        container.innerHTML = missingModulePanel('auth', 'Authentication', 'fa-user-circle');
       }
     } catch (err) {
       window.CORPUS_APP.recordError('renderAuth', err.message, err);

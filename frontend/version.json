@@ -1,10 +1,14 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-16.4",
+  "buildId": "2026-11-16.5",
   "sourceRef": "main",
   "notes": [
-    "Dataset upload on mobile: the drop zone is a plain container with a transparent full-size <input type=file> overlay, plus a click fallback that opens the native picker exactly once — tapping the zone, the icon, the copy or the 'Tap to choose files' pill all open the phone's file manager (frontend/js/datasets.js, frontend/css/components.css).",
+    "Datasets diagnostics: when the Datasets (or any page) module fails to load, the page now shows the actual recorded error \u2014 script URL, line number, message and stack \u2014 plus a Reload/Retry action, instead of only a generic missing-module message (frontend/js/router.js missingModulePanel, frontend/js/app-bootstrap.js uncaught-error/resource-error capture). Script/stylesheet 404s are captured in the capture phase and recorded as resource-error entries.",
+    "The Datasets file-selection change handler is fully awaited inside try/catch with a visible warning if the selection cannot be persisted to this device; failures are logged to the diagnostics ring buffer instead of becoming unhandled rejections (frontend/js/datasets.js).",
+    "Dataset upload flow unchanged in behaviour: one dataset record per file, file bytes through the backend to private Supabase Storage, IndexedDB pending-queue restore for Android, datasetId reused on retry.",
+    "Local CSS/JS are requested with ?v=<buildId> so a cached stylesheet can never hide a shipped fix again (frontend/index.html).",
+    "Dataset upload on mobile: the drop zone is a plain container with a transparent full-size <input type=file> overlay, plus a click fallback that opens the native picker exactly once \u2014 tapping the zone, the icon, the copy or the 'Tap to choose files' pill all open the phone's file manager (frontend/js/datasets.js, frontend/css/components.css).",
     "Pending selected files are persisted in IndexedDB per signed-in account and restored, with the chosen dataset name, if Android recreates the app after returning from the system file picker.",
     "The upload queue removes its local saved copy after successful upload or explicit Clear; a failed/interrupted upload keeps the file and dataset record id for retry.",
     "Android file input now clears the previous value before the chooser opens (not during change), and selection events stop bubbling into unrelated page handlers.",
@@ -14,5 +18,5 @@
     "Fluid scaling for every aspect ratio: root font-size steps at 1440/1920/2560px, --page-max grows to 1680px/2080px, extra grid columns instead of stretched cards, ultra-wide (21:9, 32:9) keeps a measured reading column, portrait tablets keep a narrow column, TV/remote focus rings are 3px, and print hides chrome (frontend/css/responsive.css).",
     "Local CSS/JS are requested with ?v=<buildId> so a cached stylesheet can never hide a shipped fix again (frontend/index.html)."
   ],
-  "howToVerify": "GET <frontend-url>/version.json — the deployed buildId must equal the buildId committed in frontend/version.json on main."
+  "howToVerify": "GET <frontend-url>/version.json \u2014 the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }
