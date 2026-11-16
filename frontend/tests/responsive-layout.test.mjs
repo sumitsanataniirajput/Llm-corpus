@@ -209,3 +209,17 @@ test('the file-picker overlay survives the responsive layer', () => {
   assert.match(responsive, /\.drop-zone > input\[type="file"\][^{]*\{[^}]*pointer-events:\s*auto/s);
   assert.doesNotMatch(components, /\.drop-zone > input\[type="file"\][^{]*\{[^}]*appearance:\s*none/s);
 });
+
+
+test('training chart empty placeholders stay inside their chart and cannot overlap logs', () => {
+  const chartContainer = components.match(/\.chart-container\s*\{[^}]*\}/s);
+  const chartEmpty = components.match(/\.chart-empty\s*\{[^}]*\}/s);
+  assert.ok(chartContainer, 'chart container rule exists');
+  assert.ok(chartEmpty, 'chart empty rule exists');
+  assert.match(chartContainer[0], /position:\s*relative/);
+  assert.match(chartContainer[0], /overflow:\s*hidden/);
+  assert.match(chartEmpty[0], /position:\s*absolute/);
+  assert.match(chartEmpty[0], /inset:\s*0/);
+  assert.match(chartEmpty[0], /height:\s*auto/);
+  assert.match(chartEmpty[0], /min-height:\s*0/);
+});

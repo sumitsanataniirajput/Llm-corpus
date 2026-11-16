@@ -178,13 +178,22 @@ async def create_job(config: TrainingConfig, background_tasks: BackgroundTasks, 
 
 @router.get("/checkpoints", tags=["training"])
 async def list_checkpoints(model_id: Optional[str] = None, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+    """List checkpoints only through models owned by the authenticated user.
+
+    The production checkpoints table has no owner_id column. Ownership is
+    inherited from the parent model, and the join enforces that boundary in
+    the database query itself.
+    """
     from app.core.models import Checkpoint
     owner_id = uuid.UUID(user["user_id"])
-    query = select(Checkpoint)
+    query = (
+        select(Checkpoint)
+        .join(Model, Checkpoint.model_id == Model.id)
+        .where(Model.owner_id == owner_id)
+    )
     if model_id:
         query = query.where(Checkpoint.model_id == model_id)
-    query = query.where(Checkpoint.owner_id == owner_id)
-    result = await db.execute(query)
+    result = await db.execute(query.order_by(Checkpoint.created_at.desc()))
     checkpoints = result.scalars().all()
     return [
         {
@@ -194,7 +203,7 @@ async def list_checkpoints(model_id: Optional[str] = None, user=Depends(require_
             "storage_path": c.storage_path,
             "step": c.step,
             "loss": c.loss,
-            "created_at": c.created_at.isoformat(),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in checkpoints
     ]
@@ -202,16 +211,42 @@ async def list_checkpoints(model_id: Optional[str] = None, user=Depends(require_
 
 @router.post("/checkpoints", tags=["training"])
 async def save_checkpoint(data: dict, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+    """Save a checkpoint against a model owned by the caller."""
     from app.core.models import Checkpoint
     owner_id = uuid.UUID(user["user_id"])
+    model_id = str(data.get("model_id") or "").strip()
+    if not model_id:
+        raise HTTPException(status_code=400, detail="model_id is required for a checkpoint.")
+
+    model_result = await db.execute(select(Model).where(Model.id == model_id))
+    model = model_result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    if model.owner_id != owner_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    job_id = data.get("job_id")
+    if job_id:
+        job_result = await db.execute(select(TrainingJob).where(TrainingJob.id == job_id))
+        job = job_result.scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Training job not found")
+        if job.owner_id != owner_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        if job.model_id != model_id:
+            raise HTTPException(status_code=400, detail="The checkpoint job does not belong to the selected model.")
+
+    storage_path = str(data.get("storage_path") or "").strip()
+    if not storage_path:
+        raise HTTPException(status_code=400, detail="storage_path is required.")
+
     checkpoint_id = "ckpt_" + uuid.uuid4().hex[:8]
     now = datetime.now(timezone.utc)
     checkpoint = Checkpoint(
         id=checkpoint_id,
-        owner_id=owner_id,
-        model_id=data.get("model_id"),
-        job_id=data.get("job_id"),
-        storage_path=data.get("storage_path", ""),
+        model_id=model_id,
+        job_id=job_id,
+        storage_path=storage_path,
         step=data.get("step"),
         loss=data.get("loss"),
         created_at=now,
@@ -224,15 +259,19 @@ async def save_checkpoint(data: dict, user=Depends(require_user), db: AsyncSessi
 
 @router.post("/checkpoints/{checkpoint_id}/load", tags=["training"])
 async def load_checkpoint(checkpoint_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+    """Authorize checkpoint access through the owning model."""
     from app.core.models import Checkpoint
     owner_id = uuid.UUID(user["user_id"])
     result = await db.execute(
-        select(Checkpoint).where(Checkpoint.id == checkpoint_id)
+        select(Checkpoint, Model)
+        .join(Model, Checkpoint.model_id == Model.id)
+        .where(Checkpoint.id == checkpoint_id)
     )
-    checkpoint = result.scalar_one_or_none()
-    if not checkpoint:
+    row = result.first()
+    if not row:
         raise HTTPException(status_code=404, detail="Checkpoint not found")
-    if checkpoint.owner_id != owner_id:
+    checkpoint, model = row
+    if model.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
     return {"ok": True, "checkpoint_id": checkpoint.id}
 

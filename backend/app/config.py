@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # ── API ──
     API_BASE_URL: str = "http://localhost:8000"
     CORS_ORIGINS: List[str] = [
+        "https://corpus-ultimate-web.onrender.com",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
         "http://localhost:41625",

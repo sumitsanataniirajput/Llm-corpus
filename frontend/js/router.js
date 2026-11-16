@@ -139,7 +139,18 @@ window.router = (function () {
   function getRouteFromHash() {
     try {
       const hash = window.location.hash;
-      if (!hash) return 'dashboard';
+      if (!hash) {
+        // Android may recreate the web process when returning from the system
+        // file picker. Restore the last SPA page instead of unexpectedly
+        // sending the user to Dashboard after that browser reload.
+        try {
+          const saved = window.sessionStorage.getItem('corpus:last-route');
+          if (saved && routes[saved]) return saved;
+        } catch (storageError) {
+          // Session storage may be disabled in embedded browsers.
+        }
+        return 'dashboard';
+      }
       let route = hash.replace(/^#\/?/, '');
       route = route.trim();
       if (!route || !routes[route]) return 'dashboard';
@@ -156,6 +167,11 @@ window.router = (function () {
 
     try {
       if (!routes[route]) route = 'dashboard';
+      try {
+        window.sessionStorage.setItem('corpus:last-route', route);
+      } catch (storageError) {
+        // Routing must continue to work when session storage is unavailable.
+      }
 
       // If auth is still initializing, show a loading state instead of "Sign in required"
       if (window.state && window.state.isAuthLoading()) {

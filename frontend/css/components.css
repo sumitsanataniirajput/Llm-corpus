@@ -374,24 +374,35 @@ tbody tr:hover td { background: var(--color-surface-elevated); }
   height: 260px;
   width: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 .chart-container canvas { max-width: 100%; }
 
 .chart-empty {
+  /* Empty state is an overlay INSIDE the fixed-height chart box. Keeping it
+     in normal flow made its 100%-height box spill over the Training log on
+     narrow screens and create the dotted overlapping rectangle in the UI. */
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  height: 100%;
-  min-height: 180px;
   text-align: center;
   color: var(--color-text-muted);
   font-size: var(--text-body-small);
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-4);
+  pointer-events: none;
 }
 
 .chart-empty i { font-size: 1.4rem; color: var(--color-accent); }

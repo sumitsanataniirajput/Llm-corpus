@@ -185,11 +185,14 @@ class EvaluationRun(Base):
 
 
 class Checkpoint(Base):
-    """Model checkpoint — owned by a Supabase user."""
+    """Model checkpoint; ownership is inherited from its parent model.
+
+    The live public.checkpoints table has no owner_id column. All reads and
+    writes must therefore authorize through the referenced models.owner_id.
+    """
     __tablename__ = "checkpoints"
 
     id = Column(String, primary_key=True, default=lambda: "ckpt_" + uuid.uuid4().hex[:12])
-    owner_id = Column(UUID(as_uuid=True), nullable=False)
     model_id = Column(String, ForeignKey("models.id"), nullable=True)
     job_id = Column(String, ForeignKey("training_jobs.id"), nullable=True)
     storage_path = Column(String, nullable=False)
@@ -198,6 +201,5 @@ class Checkpoint(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
 
     __table_args__ = (
-        Index("ix_checkpoints_owner_id", "owner_id"),
         Index("ix_checkpoints_model_id", "model_id"),
     )
