@@ -3,7 +3,7 @@
    ======================================== */
 
 window.dashboard = (function () {
-  let charts = {};
+  let chartInstances = {};
 
   async function render() {
     const user = state.getUser();
@@ -137,7 +137,7 @@ window.dashboard = (function () {
     const jobs = state.getTrainingJobs() || [];
     const labels = jobs.map(j => (j.created_at ? new Date(j.created_at).toLocaleDateString() : '—'));
     const values = jobs.map(() => 1);
-    charts.activity = charts.createLineChart('dashboard-activity-chart', labels, [
+    chartInstances.activity = window.charts.createLineChart('dashboard-activity-chart', labels, [
       { label: 'Jobs', data: values, borderColor: '#6750a4', backgroundColor: 'rgba(103, 80, 164, 0.1)', tension: 0.4, fill: true },
     ]);
 
@@ -145,7 +145,7 @@ window.dashboard = (function () {
     const models = state.getModels() || [];
     const statuses = {};
     models.forEach(m => { statuses[m.status || 'unknown'] = (statuses[m.status || 'unknown'] || 0) + 1; });
-    charts.models = charts.createDonutChart('dashboard-models-chart',
+    chartInstances.models = window.charts.createDonutChart('dashboard-models-chart',
       Object.keys(statuses),
       Object.values(statuses)
     );
