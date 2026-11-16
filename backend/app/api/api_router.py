@@ -67,6 +67,12 @@ try:
 except Exception:
     pass
 
+try:
+    from app.api.endpoints import version as version_endpoints
+    api_router.include_router(version_endpoints.router, prefix="/version", tags=["version"])
+except Exception:
+    pass
+
 # Health is in main.py
 
 __all__ = ["api_router"]

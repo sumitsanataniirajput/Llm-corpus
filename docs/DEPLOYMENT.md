@@ -153,6 +153,30 @@ A cloud worker runs on a separate server:
 
 ---
 
+## Verifying what a Render deployment is actually running
+
+A merged commit on `main` does **not** mean the live services run it. Use
+[`docs/PRODUCTION_VERIFICATION.md`](PRODUCTION_VERIFICATION.md):
+
+* backend: `GET https://corpus-ultimate-api.onrender.com/api/v1/version`
+  (`build_id`, `commit` from `RENDER_GIT_COMMIT`, `features`),
+* frontend: `GET https://corpus-ultimate-web.onrender.com/version.json`.
+
+Both must match `main`. If they do not, the deployment is stale — redeploy from
+the Render dashboard and check the build log.
+
+## Database migrations
+
+Run these once, in order, in the Supabase SQL editor:
+
+1. `supabase/migrations/001_initial_schema.sql`
+2. `supabase/migrations/002_add_api_key_hash.sql`
+3. `supabase/migrations/003_dataset_upload_status.sql`
+4. `supabase/migrations/004_normalize_models_owner_id.sql` — converts
+   `models.owner_id` from `text` to `uuid` (idempotent; never reassigns owners)
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |

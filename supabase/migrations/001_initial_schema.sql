@@ -50,9 +50,13 @@ create policy "Users can manage own devices"
 -- -----------------------------------------------------
 -- models
 -- -----------------------------------------------------
+-- owner_id is uuid, not text: auth.users.id is uuid, so a text column cannot
+-- even carry the foreign key (PostgreSQL rejects it: "foreign key constraint
+-- cannot be implemented"), and a text column breaks UUID comparisons in the
+-- API. Existing databases are normalized by 004_normalize_models_owner_id.sql.
 create table models (
   id text primary key,
-  owner_id text references auth.users not null,
+  owner_id uuid references auth.users not null,
   name text not null,
   config jsonb not null,
   version text default '1.0',
@@ -66,7 +70,7 @@ alter table models enable row level security;
 
 create policy "Users can manage own models"
   on models for all
-  using (auth.uid()::text = owner_id);
+  using (auth.uid() = owner_id);
 
 -- -----------------------------------------------------
 -- model_versions

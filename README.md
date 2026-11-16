@@ -107,6 +107,19 @@ Datasets are read as text with per-format extraction: `.txt`, `.md`, `.csv`,
 `.json`, `.jsonl` and text-layer `.pdf` (no OCR). Binary, empty and scanned files
 are rejected with an explanation instead of being trained on as noise.
 
+## Deployment verification
+
+A merged commit on `main` is not proof that the live Render services run it.
+Check what the deployment actually executes:
+
+- backend: `GET https://corpus-ultimate-api.onrender.com/api/v1/version`
+  (`build_id`, `commit`, `features`)
+- frontend: `GET https://corpus-ultimate-web.onrender.com/version.json`
+
+See [docs/PRODUCTION_VERIFICATION.md](docs/PRODUCTION_VERIFICATION.md) for the
+full playbook (deployment identity, `403 Not authorized` diagnostics, database
+migration `004`, and the real-device Android file-picker checklist).
+
 ## UI documentation
 
 Design tokens, mobile/layout contract, data-honesty rules, dataset formats and
