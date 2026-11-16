@@ -3,11 +3,8 @@
 Real API key management with cryptographic key generation,
 secure hashing, and database persistence.
 
-NOTE: The live Supabase database table "api_keys_metadata" does NOT yet have
-a key_hash column. A separate forward-only migration is required to add it.
-Until then, API keys are stored as metadata only (id, owner_id, name, prefix,
-created_at, last_used, revoked). The full key is generated and returned once
-to the user but is NOT persisted for verification until the migration is applied.
+API keys are returned in full only once. The backend persists a SHA-256 digest
+in api_keys_metadata.key_hash; the raw API key is never stored.
 """
 import hashlib
 import secrets
@@ -105,12 +102,7 @@ async def list_api_keys(user=Depends(require_user), db: AsyncSession = Depends(g
 
 @router.post("/api-keys", tags=["settings"])
 async def create_api_key(data: ApiKeyCreate, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    """Create a new API key. Returns the full key only once.
-
-    NOTE: key_hash is NOT persisted because the live database table
-    api_keys_metadata does not have a key_hash column yet. A separate
-    migration is required to add it before key verification can work.
-    """
+    """Create a new API key, persist only its SHA-256 digest, and return it once."""
     full_key = _generate_api_key()
     key_prefix = _key_prefix(full_key)
     now = datetime.now(timezone.utc)
@@ -121,6 +113,7 @@ async def create_api_key(data: ApiKeyCreate, user=Depends(require_user), db: Asy
         owner_id=owner_id,
         name=data.name or "Unnamed key",
         prefix=key_prefix,
+        key_hash=_hash_key(full_key),
         created_at=now,
         last_used=None,
         revoked=False,
