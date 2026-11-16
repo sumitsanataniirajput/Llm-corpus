@@ -3,7 +3,7 @@
    ======================================== */
 
 window.training = (function () {
-  let charts = {};
+  let chartInstances = {};
   let wsJobId = null;
 
   async function render() {
@@ -197,12 +197,12 @@ window.training = (function () {
       state.addTrainingJob(job);
       state.setActiveJob(job);
       wsJobId = job.id;
-      ui.toast('Training job started', 'success');
+      ui.toast('Training job queued', 'success');
       log('Job ' + job.id + ' created — status: ' + job.status);
       updateControls(job);
       await loadJobs();
-      connectJobWS(job.id);
       renderCharts();
+      connectJobWS(job.id);
     } catch (err) {
       ui.toast(err.message || 'Failed to start training', 'error');
       log('Error: ' + (err.message || 'unknown'), 'error');
@@ -286,11 +286,11 @@ window.training = (function () {
       log('Step ' + (metric.step || '—') + ' — loss: ' + metric.loss.toFixed(4), 'info');
     }
     // Update charts
-    if (charts.loss) {
-      const labels = charts.loss.data.labels || [];
+    if (chartInstances.loss) {
+      const labels = chartInstances.loss.data.labels || [];
       labels.push(metric.step || labels.length + 1);
       if (labels.length > 50) labels.shift();
-      charts.updateChart('training-loss-chart', labels, [
+      window.charts.updateChart('training-loss-chart', labels, [
         { label: 'Loss', data: [...(charts.loss.data.datasets[0]?.data || []), metric.loss], borderColor: '#6750a4', fill: false, tension: 0.4 },
       ]);
     }
@@ -312,10 +312,10 @@ window.training = (function () {
         </div>
       </div>
     `;
-    charts.loss = charts.createLineChart('training-loss-chart', [], [
+    chartInstances.loss = window.charts.createLineChart('training-loss-chart', [], [
       { label: 'Loss', data: [], borderColor: '#6750a4', fill: false, tension: 0.4 },
     ]);
-    charts.throughput = charts.createLineChart('training-throughput-chart', [], [
+    chartInstances.throughput = window.charts.createLineChart('training-throughput-chart', [], [
       { label: 'Tokens/sec', data: [], borderColor: '#10b981', fill: false, tension: 0.4 },
     ]);
   }
