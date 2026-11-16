@@ -242,8 +242,8 @@ async def delete_model(model_id: str, user=Depends(require_user), db: AsyncSessi
         else:
             try:
                 storage = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
-                storage.storage.from_(settings.STORAGE_BUCKET).remove(sorted(storage_paths))
-                removed_storage_files = len(storage_paths)
+                removed = storage.storage.from_(settings.STORAGE_BUCKET).remove(sorted(storage_paths))
+                removed_storage_files = len(removed) if isinstance(removed, list) else len(storage_paths)
             except Exception as exc:
                 storage_cleanup_warning = (
                     "Model deleted, but some private artifacts may remain in storage: " + str(exc)[:180]

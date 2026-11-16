@@ -439,9 +439,12 @@ window.models = (function () {
     ui.confirm('Delete model', 'Permanently delete ' + label + ' and its checkpoints? This cannot be undone.', async () => {
       try {
         const token = await state.getAccessToken();
-        await window.CORPUS_API.deleteModel(id, token);
+        const result = await window.CORPUS_API.deleteModel(id, token);
         state.removeModel(id);
         ui.toast('Model deleted', 'success');
+        if (result && result.storage_cleanup_warning) {
+          ui.toast(result.storage_cleanup_warning, 'warning', 7000);
+        }
         await loadModels();
       } catch (err) {
         ui.toast(err.message || 'Delete failed', 'error');
