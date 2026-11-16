@@ -312,10 +312,10 @@ async def run_training_job(job_id: str, owner_id: str):
             checkpoint_id = "ckpt_" + uuid.uuid4().hex[:8]
             await db.execute(text("""
                 INSERT INTO public.checkpoints
-                (id, owner_id, model_id, job_id, storage_path, step, loss)
-                VALUES (:id, :owner_id, :model_id, :job_id, :storage_path, :step, :loss)
+                (id, model_id, job_id, storage_path, step, loss)
+                VALUES (:id, :model_id, :job_id, :storage_path, :step, :loss)
             """), {
-                "id": checkpoint_id, "owner_id": owner_id, "model_id": model_id,
+                "id": checkpoint_id, "model_id": model_id,
                 "job_id": job_id, "storage_path": checkpoint_path,
                 "step": metrics[-1]["step"], "loss": metrics[-1]["loss"],
             })
