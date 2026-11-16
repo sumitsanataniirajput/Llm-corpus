@@ -468,7 +468,7 @@ window.CORPUS_API = (function () {
 
   // ---------- Health ----------
   async function health() {
-    return request('/api/v1/health');
+    return healthCheck();
   }
 
   // ---------- WebSocket ----------
