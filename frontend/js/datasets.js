@@ -399,6 +399,7 @@ window.datasets = (function () {
         : [];
       if (!files.length) return;
       setQueue(files);
+      void persistPendingQueue();
     });
   }
 
