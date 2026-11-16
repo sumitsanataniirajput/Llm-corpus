@@ -189,11 +189,18 @@ window.datasets = (function () {
     const drop = document.getElementById('datasets-drop');
     if (input && input.dataset.bound !== '1') {
       input.dataset.bound = '1';
-      input.addEventListener('change', () => {
+      // Clear the previous selection before opening the native chooser, not
+      // inside change. Android file providers can otherwise invalidate the
+      // just-returned selection when the input is reset synchronously.
+      input.addEventListener('click', () => {
+        try { input.value = ''; } catch (e) { /* read-only in mocked inputs */ }
+      });
+      input.addEventListener('change', (event) => {
+        // The picker is a local selection action; it must never bubble into a
+        // parent form/router handler or trigger a document-level submit path.
+        event.stopPropagation();
         const picked = Array.prototype.slice.call(input.files || []);
         if (picked.length) setQueue(picked);
-        // Reset input value so re-picking the exact same file after clear/retry still fires change.
-        try { input.value = ''; } catch (e) { /* read-only in mocked inputs */ }
       });
     }
     if (!drop || drop.dataset.bound === '1') return;
