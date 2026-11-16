@@ -23,7 +23,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 # Bump when a shipped fix must be verified in production.
-BUILD_ID = "2026-11-17.1"
+BUILD_ID = "2026-11-16.3"
 
 # Behaviour markers that must be present in a healthy production deployment.
 FEATURES = [
@@ -33,6 +33,8 @@ FEATURES = [
     "model-delete-cleanup",          # checkpoints/tokenizer/jobs cleaned, datasets kept
     "ownership-diagnostics",         # GET /api/v1/models/ownership-diagnostics
     "version-endpoint-present",      # this route exists at all on the deployed API
+    "checkpoint-model-ownership",    # checkpoints inherit access from their parent model
+    "production-web-cors-origin",    # deployed frontend origin is accepted by CORS
 ]
 
 _STARTED_AT = datetime.datetime.now(datetime.timezone.utc).isoformat()
