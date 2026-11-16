@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
@@ -31,6 +31,8 @@ SELECT_DATASET_MESSAGE = "Select a dataset before starting training."
 
 
 class TrainingConfig(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     model_id: str
     dataset_id: Optional[str] = None
     engine: str = "pytorch"
@@ -44,6 +46,8 @@ class TrainingConfig(BaseModel):
 
 
 class JobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
     id: str
     owner_id: str
     model_id: Optional[str]
@@ -53,9 +57,6 @@ class JobOut(BaseModel):
     compute: str
     created_at: str
     updated_at: str
-
-    class Config:
-        from_attributes = True
 
 
 def _job_to_out(job: TrainingJob) -> JobOut:
@@ -80,9 +81,9 @@ async def resolve_training_resources(
 ):
     """Validate that the caller can actually train with this model + dataset.
 
-    Returns ``(dataset, file_row)`` on success. Raises ``HTTPException`` with a
-    clear, user-facing message otherwise — this is what stops jobs from being
-    created with ``dataset_id = null`` or with an unusable dataset.
+    Returns ``(model, dataset, file_row)`` on success. Raises ``HTTPException``
+    with a clear, user-facing message otherwise — this is what stops jobs from
+    being created with ``dataset_id = null`` or with an unusable dataset.
     """
     dataset_id = (dataset_id or "").strip()
     model_id = (model_id or "").strip()
@@ -108,7 +109,7 @@ async def resolve_training_resources(
             status_code=400,
             detail=(
                 f"Dataset '{dataset.name}' has no uploaded file yet. "
-                "Upload a .txt file in Dataset Manager, then select it here."
+                "Upload a dataset file in Dataset Manager, then select it here."
             ),
         )
     if dataset.status in UNUSABLE_STATUSES:
@@ -127,9 +128,10 @@ async def resolve_training_resources(
             detail="Model not found for this account. Refresh the model list and select one of your own models.",
         )
 
-    return dataset, file_row
+    return model, dataset, file_row
 
 
+@router.get("", response_model=List[JobOut], include_in_schema=False)
 @router.get("/", response_model=List[JobOut], tags=["training"])
 async def list_jobs(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
@@ -142,23 +144,27 @@ async def list_jobs(user=Depends(require_user), db: AsyncSession = Depends(get_d
     return [_job_to_out(j) for j in jobs]
 
 
+@router.post("", response_model=JobOut, include_in_schema=False)
 @router.post("/", response_model=JobOut, tags=["training"])
 async def create_job(config: TrainingConfig, background_tasks: BackgroundTasks, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    dataset, _file_row = await resolve_training_resources(
+    model, dataset, _file_row = await resolve_training_resources(
         db, owner_id, config.model_id, config.dataset_id
     )
     job_id = "job_" + uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc)
+    job_config = config.model_dump()
+    job_config["model_id"] = model.id
+    job_config["dataset_id"] = dataset.id
     job = TrainingJob(
         id=job_id,
         owner_id=owner_id,
-        model_id=config.model_id,
+        model_id=model.id,
         dataset_id=dataset.id,
         status="queued",
         engine=config.engine,
         compute=config.compute,
-        config=config.model_dump(),
+        config=job_config,
         created_at=now,
         updated_at=now,
     )
@@ -168,6 +174,67 @@ async def create_job(config: TrainingConfig, background_tasks: BackgroundTasks, 
     from app.services.training_worker import run_training_job
     background_tasks.add_task(run_training_job, job_id, str(owner_id))
     return _job_to_out(job)
+
+
+@router.get("/checkpoints", tags=["training"])
+async def list_checkpoints(model_id: Optional[str] = None, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+    from app.core.models import Checkpoint
+    owner_id = uuid.UUID(user["user_id"])
+    query = select(Checkpoint)
+    if model_id:
+        query = query.where(Checkpoint.model_id == model_id)
+    query = query.where(Checkpoint.owner_id == owner_id)
+    result = await db.execute(query)
+    checkpoints = result.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "model_id": c.model_id,
+            "job_id": c.job_id,
+            "storage_path": c.storage_path,
+            "step": c.step,
+            "loss": c.loss,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in checkpoints
+    ]
+
+
+@router.post("/checkpoints", tags=["training"])
+async def save_checkpoint(data: dict, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+    from app.core.models import Checkpoint
+    owner_id = uuid.UUID(user["user_id"])
+    checkpoint_id = "ckpt_" + uuid.uuid4().hex[:8]
+    now = datetime.now(timezone.utc)
+    checkpoint = Checkpoint(
+        id=checkpoint_id,
+        owner_id=owner_id,
+        model_id=data.get("model_id"),
+        job_id=data.get("job_id"),
+        storage_path=data.get("storage_path", ""),
+        step=data.get("step"),
+        loss=data.get("loss"),
+        created_at=now,
+    )
+    db.add(checkpoint)
+    await db.commit()
+    await db.refresh(checkpoint)
+    return {"ok": True, "checkpoint_id": checkpoint.id}
+
+
+@router.post("/checkpoints/{checkpoint_id}/load", tags=["training"])
+async def load_checkpoint(checkpoint_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+    from app.core.models import Checkpoint
+    owner_id = uuid.UUID(user["user_id"])
+    result = await db.execute(
+        select(Checkpoint).where(Checkpoint.id == checkpoint_id)
+    )
+    checkpoint = result.scalar_one_or_none()
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    if checkpoint.owner_id != owner_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return {"ok": True, "checkpoint_id": checkpoint.id}
 
 
 @router.get("/{job_id}", response_model=JobOut, tags=["training"])
@@ -247,67 +314,6 @@ async def list_logs(job_id: str, user=Depends(require_user), db: AsyncSession = 
         ORDER BY created_at ASC
     """), {"job_id": job_id})
     return [dict(row) for row in result.mappings().all()]
-
-
-@router.get("/checkpoints", tags=["training"])
-async def list_checkpoints(model_id: Optional[str] = None, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    from app.core.models import Checkpoint
-    owner_id = uuid.UUID(user["user_id"])
-    query = select(Checkpoint)
-    if model_id:
-        query = query.where(Checkpoint.model_id == model_id)
-    query = query.where(Checkpoint.owner_id == owner_id)
-    result = await db.execute(query)
-    checkpoints = result.scalars().all()
-    return [
-        {
-            "id": c.id,
-            "model_id": c.model_id,
-            "job_id": c.job_id,
-            "storage_path": c.storage_path,
-            "step": c.step,
-            "loss": c.loss,
-            "created_at": c.created_at.isoformat(),
-        }
-        for c in checkpoints
-    ]
-
-
-@router.post("/checkpoints", tags=["training"])
-async def save_checkpoint(data: dict, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    from app.core.models import Checkpoint
-    owner_id = uuid.UUID(user["user_id"])
-    checkpoint_id = "ckpt_" + uuid.uuid4().hex[:8]
-    now = datetime.now(timezone.utc)
-    checkpoint = Checkpoint(
-        id=checkpoint_id,
-        owner_id=owner_id,
-        model_id=data.get("model_id"),
-        job_id=data.get("job_id"),
-        storage_path=data.get("storage_path", ""),
-        step=data.get("step"),
-        loss=data.get("loss"),
-        created_at=now,
-    )
-    db.add(checkpoint)
-    await db.commit()
-    await db.refresh(checkpoint)
-    return {"ok": True, "checkpoint_id": checkpoint.id}
-
-
-@router.post("/checkpoints/{checkpoint_id}/load", tags=["training"])
-async def load_checkpoint(checkpoint_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    from app.core.models import Checkpoint
-    owner_id = uuid.UUID(user["user_id"])
-    result = await db.execute(
-        select(Checkpoint).where(Checkpoint.id == checkpoint_id)
-    )
-    checkpoint = result.scalar_one_or_none()
-    if not checkpoint:
-        raise HTTPException(status_code=404, detail="Checkpoint not found")
-    if checkpoint.owner_id != owner_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    return {"ok": True, "checkpoint_id": checkpoint.id}
 
 
 # ---------------------------------------------------------------------------

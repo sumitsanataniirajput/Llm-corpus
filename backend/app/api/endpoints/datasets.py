@@ -158,6 +158,7 @@ def _storage_client():
         raise HTTPException(status_code=503, detail=f"Could not initialise Supabase Storage client: {str(exc)[:200]}")
 
 
+@router.get("", response_model=List[DatasetOut], include_in_schema=False)
 @router.get("/", response_model=List[DatasetOut], tags=["datasets"])
 async def list_datasets(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
@@ -171,6 +172,7 @@ async def list_datasets(user=Depends(require_user), db: AsyncSession = Depends(g
     return [_dataset_to_out(d, files.get(d.id)) for d in datasets]
 
 
+@router.post("", response_model=DatasetOut, include_in_schema=False)
 @router.post("/", response_model=DatasetOut, tags=["datasets"])
 async def create_dataset(data: DatasetIn, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     name = (data.name or "").strip()

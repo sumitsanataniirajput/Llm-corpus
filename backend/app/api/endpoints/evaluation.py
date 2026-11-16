@@ -42,6 +42,7 @@ def _eval_to_out(ev: EvaluationRun) -> EvalOut:
     )
 
 
+@router.get("", response_model=List[EvalOut], include_in_schema=False)
 @router.get("/", response_model=List[EvalOut], tags=["evaluation"])
 async def list_evaluations(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])

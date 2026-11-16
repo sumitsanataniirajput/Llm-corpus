@@ -43,6 +43,7 @@ class ModelOut(BaseModel):
         from_attributes = True
 
 
+@router.get("", response_model=List[ModelOut], include_in_schema=False)
 @router.get("/", response_model=List[ModelOut], tags=["models"])
 async def list_models(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     """List models owned by the current user."""
@@ -65,6 +66,7 @@ async def list_models(user=Depends(require_user), db: AsyncSession = Depends(get
     ]
 
 
+@router.post("", response_model=ModelOut, include_in_schema=False)
 @router.post("/", response_model=ModelOut, tags=["models"])
 async def create_model(config: ModelConfig, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     """Create a new model configuration after validation."""
