@@ -175,6 +175,156 @@
   .page-container { padding-top: var(--space-8); }
 }
 
+/* ============================================================
+   Large displays — desktop, laptop, TV, ultra-wide
+   ------------------------------------------------------------
+   Everything in this design is sized in `rem`, so scaling the root font size
+   scales the whole UI proportionally: type, spacing, controls and touch/DPad
+   targets. That keeps a 1920×1080 TV, a 2560×1440 monitor and a 32:9
+   ultra-wide looking like the same product instead of a phone layout stretched
+   across the room, and it avoids inventing per-component pixel overrides.
+   ============================================================ */
+
+/* ---------- Big laptops / desktop (1440+) ---------- */
+@media (min-width: 1440px) {
+  html { font-size: 17px; }
+
+  :root {
+    --page-max: 1360px;
+    --sidebar-width: 276px;
+  }
+
+  .page-container { padding: var(--space-6) var(--space-8) var(--space-10); }
+
+  /* More room means denser grids, not wider cards. */
+  .model-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 350px), 1fr)); }
+  .dataset-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); }
+  .training-charts,
+  .stats-chart-row { grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); }
+}
+
+/* ---------- Full HD / TV (1920+) ---------- */
+@media (min-width: 1920px) {
+  html { font-size: 19px; }
+
+  :root {
+    --page-max: 1680px;
+    --sidebar-width: 300px;
+    --top-bar-height: 68px;
+  }
+
+  .dashboard-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .dashboard-layout { grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); gap: var(--space-6); }
+  .model-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+  .dataset-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); }
+  .form-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+  .upload-form-grid { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+
+  /* TVs overscan: the outermost ~5% of a 1080p panel can be cropped by the
+     set itself, so content keeps a viewport-relative margin instead of sitting
+     on the very edge. */
+  .page-container { padding-inline: max(var(--space-8), 2.5vw); }
+
+  /* Charts must not become billboards. */
+  .chart-container { height: 280px; max-height: 42vh; }
+  .chat-container { max-width: 1400px; margin-inline: auto; }
+
+  /* TV viewing distance: bigger text and controls, calmer density. */
+  .section-title { font-size: clamp(1.75rem, 1.4rem + 0.4vw, 2.25rem); }
+  .card-title { font-size: var(--text-title-large); }
+  .btn { min-height: 2.9rem; }
+  .btn-sm { min-height: 2.4rem; }
+  .nav-link { min-height: 3rem; }
+}
+
+/* ---------- 4K / very large panels (2560+) ---------- */
+@media (min-width: 2560px) {
+  html { font-size: 22px; }
+
+  :root {
+    --page-max: 2080px;
+    --sidebar-width: 330px;
+  }
+
+  .dashboard-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  .model-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
+  .dataset-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); }
+  .chart-container { height: 320px; max-height: 38vh; }
+}
+
+/* ---------- Ultra-wide (21:9, 32:9, TV side-by-side) ----------
+   A single 1fr column would stretch text to unreadable line lengths, so the
+   content stays in a measured column and the extra width becomes columns. */
+@media (min-aspect-ratio: 21/9) and (min-width: 1600px) {
+  :root { --page-max: min(2100px, 78vw); }
+
+  .page-container { margin-inline: auto; }
+
+  /* Long-form text never runs edge to edge. */
+  .section-subtitle,
+  .card-subtitle,
+  .field-hint { max-width: 88ch; }
+
+  .dashboard-layout { grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr); }
+  .model-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); }
+  .dataset-library { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
+  .training-charts,
+  .stats-chart-row { grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); }
+  .upload-form-grid { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+/* ---------- Very tall windows (portrait tablets, split screen) ----------
+   Keep a reading column instead of letting cards stretch the full height. */
+@media (min-aspect-ratio: 1/2) and (max-aspect-ratio: 3/4) and (min-width: 900px) {
+  :root { --page-max: 1100px; }
+}
+
+/* ---------- TV / DPad / keyboard navigation ----------
+   Remotes and keyboards cannot hover, so the focus ring is the only affordance
+   that says "this is selected". Make it unmistakable. */
+@media (hover: none), (pointer: coarse) {
+  :focus-visible {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 3px;
+    border-radius: var(--radius-sm, 6px);
+  }
+
+  /* Hover-only styling is meaningless on a TV; keep the layout static. */
+  .model-card:hover,
+  .dataset-card:hover,
+  .stat-card:hover { transform: none; box-shadow: var(--shadow-card); }
+}
+
+/* Large screens with a keyboard/remote: visible focus + no hover dependency */
+@media (min-width: 1600px) {
+  a:focus-visible,
+  button:focus-visible,
+  .btn:focus-visible,
+  .nav-link:focus-visible,
+  .icon-btn:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  .drop-zone:focus-within {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+}
+
+/* ---------- Print / PDF export ---------- */
+@media print {
+  .sidebar,
+  .app-bar,
+  .bottom-nav,
+  .toast-container,
+  .connection-indicator,
+  .page-header-actions { display: none !important; }
+
+  .main-content { margin: 0; padding: 0; }
+  .page-container { max-width: none; }
+  body { background: #fff; color: #000; }
+}
+
 /* ---------- Touch devices ---------- */
 @media (hover: none) {
   .stat-card:hover,
@@ -196,4 +346,46 @@
   .accordion-body { animation: none !important; }
 
   .status-badge i.fa-circle { animation: none !important; }
+}
+
+/* ---------- Cross-device robustness ----------
+   Independent of the breakpoint above: content must never be able to create a
+   sideways scrollbar or spill out of its card, whatever the viewport. */
+
+body {
+  /* Long dataset/model names and unbroken URLs wrap instead of overflowing. */
+  overflow-wrap: break-word;
+  /* The 100vw trap: a fixed 100vw element plus a visible scrollbar causes
+     horizontal scroll on desktop Windows. */
+  max-width: 100%;
+}
+
+img,
+video,
+iframe,
+svg {
+  max-width: 100%;
+}
+
+/* Canvas is deliberately excluded: Chart.js owns its width/height attributes,
+   and `max-width: 100%` on a canvas distorts the drawn aspect ratio. */
+
+table {
+  max-width: 100%;
+}
+
+pre,
+code {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* Any flex/grid child that must be allowed to shrink (text ellipsis, long
+   names, chart wrappers) — the classic source of mobile overflow. */
+.card,
+.stat-card,
+.model-card,
+.dataset-card,
+.file-row-main {
+  min-width: 0;
 }

@@ -836,6 +836,9 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   overflow: hidden;
+  /* Contain the overlay input's z-index so nothing later in the page can be
+     painted above the tap target. */
+  isolation: isolate;
 }
 
 .drop-zone:hover,
@@ -895,7 +898,13 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
    "hidden"): a real tap lands on the real control, which is what opens the
    Android Chrome file manager. It must never get pointer-events:none, a 1px
    clip, display:none or visibility:hidden — that is what previously broke
-   mobile selection. Kept last so it wins over .drop-zone > * above. */
+   mobile selection. Kept last so it wins over .drop-zone > * above.
+
+   NOTE: deliberately NOT `appearance: none`. Stripping the native widget
+   rendering on `input[type=file]` removes the platform "Choose file" control
+   in some Android Chrome/WebView builds, and a transparent input without that
+   control can stop responding to taps. `opacity: 0` already hides the native
+   chrome, so the default rendering is kept. */
 .drop-zone > input[type="file"],
 .drop-zone input.drop-zone-input {
   position: absolute;
@@ -911,8 +920,6 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
   border: 0;
   opacity: 0;
   background: transparent;
-  -webkit-appearance: none;
-  appearance: none;
   color: transparent;
   font-size: var(--text-body-small);
   pointer-events: auto;

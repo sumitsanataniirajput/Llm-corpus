@@ -134,27 +134,66 @@ test('search filters the dataset library and reports the count', async () => {
   assert.match(app.doc.getElementById('datasets-library').textContent, /No matching datasets/);
 });
 
-test('drop zone is a native label bound to the file input and toggles cleanly without duplicate clicks', async () => {
+test('drop zone is a plain container (never a <label>) wrapping one native file input', async () => {
   const app = createApp(datasetFixtures());
   await app.window.datasets.render();
 
   const drop = app.doc.getElementById('datasets-drop');
   const input = app.doc.getElementById('datasets-file');
-  assert.equal(drop.tagName, 'LABEL');
-  assert.equal(drop.getAttribute('for'), 'datasets-file');
+  assert.equal(drop.tagName, 'DIV', 'a <label for> would add a second browser activation path');
+  assert.equal(drop.hasAttribute('for'), false, 'no label forwarding to fight with the JS fallback');
+  assert.equal(input.type, 'file');
+  assert.equal(input.id, 'datasets-file');
   assert.ok(input.getAttribute('accept').includes('.pdf'));
   assert.ok(input.getAttribute('accept').includes('application/pdf'));
+  assert.equal(drop.getAttribute('role'), 'group');
+  assert.equal(input.getAttribute('aria-labelledby'), 'datasets-drop-title');
 
   let clickCount = 0;
   input.addEventListener('click', () => { clickCount += 1; });
 
-  // Open, close, and re-open the upload panel, then tap the drop-zone CTA.
+  // Open, close, and re-open the upload panel (must not re-bind a second
+  // handler), then tap the drop-zone CTA.
   app.window.datasets.showUpload();
   app.window.datasets.showUpload();
   app.window.datasets.showUpload();
   const cta = drop.querySelector('.drop-zone-cta');
   cta.click();
-  assert.equal(clickCount, 1, 'tapping drop zone opens file picker exactly once');
+  assert.equal(clickCount, 1, 'tapping the CTA opens the native picker exactly once');
+});
+
+test('a tap anywhere in the drop zone opens the picker exactly once', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+  app.window.datasets.showUpload();
+
+  const drop = app.doc.getElementById('datasets-drop');
+  const input = app.doc.getElementById('datasets-file');
+
+  let opens = 0;
+  input.addEventListener('click', () => { opens += 1; });
+
+  // Every visible part of the zone: the icon, the copy, the CTA pill, and the
+  // zone itself (the gap between them). This is the fallback path used when the
+  // overlay input is not the topmost hit target on a real phone.
+  const targets = [
+    ['the icon', drop.querySelector('i')],
+    ['the heading', app.doc.getElementById('datasets-drop-title')],
+    ['the meta copy', app.doc.getElementById('datasets-drop-meta')],
+    ['the CTA pill', drop.querySelector('.drop-zone-cta')],
+    ['the zone itself', drop],
+  ];
+  for (const [label, target] of targets) {
+    opens = 0;
+    target.click();
+    assert.equal(opens, 1, `tapping ${label} opens the picker exactly once`);
+  }
+
+  // A tap that lands on the real input is already native: the forwarding
+  // handler must not add a second click.
+  opens = 0;
+  input.click();
+  assert.equal(opens, 1, 'the native path stays a single click');
 });
 
 test('the real file input is a full-size transparent overlay, not a 1px clipped control', async () => {
@@ -170,7 +209,7 @@ test('the real file input is a full-size transparent overlay, not a 1px clipped 
   assert.equal(input.parentElement, drop, 'the input is a direct child of the drop zone');
   assert.equal(input.hasAttribute('disabled'), false, 'the input must stay enabled');
   assert.equal(input.multiple, true, 'multi-file selection is preserved');
-  assert.equal(drop.querySelectorAll('button').length, 0, 'no nested interactive button inside the label');
+  assert.equal(drop.querySelectorAll('button').length, 0, 'no nested interactive button inside the zone');
 
   // Tap target: nothing in the zone may have pointer-events:none applied inline
   // to the input, and no inline handler may open the picker programmatically.
@@ -209,6 +248,10 @@ test('the real file input is a full-size transparent overlay, not a 1px clipped 
   assert.doesNotMatch(overlay, /width:\s*1px/);
   assert.doesNotMatch(overlay, /display:\s*none/);
   assert.doesNotMatch(overlay, /visibility:\s*hidden/);
+  // Stripping the native widget rendering can stop Android Chrome from opening
+  // the picker at all; opacity:0 already hides it.
+  assert.doesNotMatch(overlay, /(^|[^-])appearance:\s*none/, 'keep the native file-input rendering');
+  assert.doesNotMatch(overlay, /-webkit-appearance:\s*none/, 'keep the native file-input rendering');
 
   // Decorative children are inert, and the overlay rule comes after that rule
   // so it wins the cascade.
@@ -225,7 +268,7 @@ test('the real file input is a full-size transparent overlay, not a 1px clipped 
   );
 });
 
-test('the drop zone never opens the picker programmatically (no double-open)', async () => {
+test('the picker never opens twice and keyboard activation stays native', async () => {
   const app = createApp(datasetFixtures());
   await app.window.datasets.render();
   app.window.datasets.showUpload();
@@ -246,10 +289,16 @@ test('the drop zone never opens the picker programmatically (no double-open)', a
   drop.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   assert.equal(opens, 0, 'no JS handler synthesises a click on keydown');
 
-  // Tapping the decorative copy is forwarded by the label exactly once.
-  opens = 0;
-  drop.querySelector('.drop-zone-cta').click();
-  assert.equal(opens, 1);
+  // Re-binding after a re-render must not stack handlers (that is the other way
+  // a single tap ends up opening two dialogs).
+  await app.window.datasets.render();
+  app.window.datasets.showUpload();
+  const rebornDrop = app.doc.getElementById('datasets-drop');
+  const rebornInput = app.doc.getElementById('datasets-file');
+  let rebornOpens = 0;
+  rebornInput.addEventListener('click', () => { rebornOpens += 1; });
+  rebornDrop.querySelector('.drop-zone-cta').click();
+  assert.equal(rebornOpens, 1, 'one tap, one dialog, after a re-render');
 });
 
 test('pdf upload works and oversized files are rejected client-side', async () => {
