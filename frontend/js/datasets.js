@@ -341,12 +341,26 @@ window.datasets = (function () {
         // The picker is a local selection action; it must never bubble into a
         // parent form/router handler or trigger a document-level submit path.
         event.stopPropagation();
-        const picked = Array.prototype.slice.call(input.files || []);
-        if (picked.length) {
-          setQueue(picked);
-          // Persist the File blobs immediately. Android may suspend/recreate
-          // the page after returning from the system document picker.
-          await persistPendingQueue();
+        try {
+          const picked = Array.prototype.slice.call(input.files || []);
+          if (picked.length) {
+            setQueue(picked);
+            // Persist the File blobs immediately. Android may suspend/recreate
+            // the page after returning from the system document picker.
+            // persistPendingQueue() never rejects — it returns false instead —
+            // but stay defensive: a failure here must not lose the selection
+            // silently. The queue is already set in memory above.
+            const saved = await persistPendingQueue();
+            if (!saved && queueOwnerKey()) {
+              ui.toast('Files selected, but this device could not save them for restore. Upload before leaving the page.', 'warning');
+            }
+          }
+        } catch (err) {
+          console.error('[CORPUS] File selection failed:', err);
+          if (window.CORPUS_APP && window.CORPUS_APP.recordError) {
+            window.CORPUS_APP.recordError('datasets.file-selection', err && err.message ? err.message : String(err), err);
+          }
+          ui.toast('Could not process the selected file(s): ' + (err && err.message ? err.message : err), 'error');
         }
       });
     }
@@ -392,14 +406,21 @@ window.datasets = (function () {
     // `drop` fires on the transparent overlay input and bubbles up to the zone.
     // preventDefault() stops the browser from also assigning input.files (which
     // would fire a second `change` event) — the queue is filled exactly once.
-    drop.addEventListener('drop', (event) => {
+    drop.addEventListener('drop', async (event) => {
       event.preventDefault();
       const files = event.dataTransfer && event.dataTransfer.files
         ? Array.prototype.slice.call(event.dataTransfer.files)
         : [];
       if (!files.length) return;
       setQueue(files);
-      void persistPendingQueue();
+      try {
+        const saved = await persistPendingQueue();
+        if (!saved && queueOwnerKey() && document.getElementById('datasets-file-list')) {
+          ui.toast('Files selected, but this device could not save them for restore. Upload before leaving the page.', 'warning');
+        }
+      } catch (err) {
+        console.error('[CORPUS] Could not persist dropped files:', err);
+      }
     });
   }
 
@@ -450,12 +471,13 @@ window.datasets = (function () {
     if (uploading) return;
     queue.splice(index, 1);
     renderQueue();
+    void persistPendingQueue();
   }
 
-  function clearSelection() {
+  async function clearSelection() {
     if (uploading) return;
     queue = [];
-    void persistPendingQueue();
+    await persistPendingQueue();
     renderQueue();
     const input = document.getElementById('datasets-file');
     if (input) input.value = '';

@@ -271,9 +271,21 @@ window.CORPUS_BOOTSTRAP = (function () {
     }
   }
 
-  // Global error handlers
+  // Global error handlers. Note: resource (script/stylesheet) load failures
+  // arrive as events whose target is the <script>/<link> element and do NOT
+  // bubble — they are handled by the capture-phase listener below.
   window.addEventListener('error', (event) => {
-    error('Uncaught JavaScript error', event.error);
+    const target = event.target;
+    if (target && target !== window && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+      return; // handled by the capture-phase listener
+    }
+    const where = (event.filename || 'unknown script') +
+      (event.lineno != null ? ':' + event.lineno + (event.colno != null ? ':' + event.colno : '') : '');
+    const detail = where + ' — ' + (event.message || 'unknown JavaScript error');
+    if (window.CORPUS_APP && window.CORPUS_APP.recordError) {
+      window.CORPUS_APP.recordError('uncaught-error', detail, event.error || null);
+    }
+    error('Uncaught JavaScript error at ' + detail, event.error);
     try {
       window.CORPUS_APP.logDiagnostic('uncaught-error', {
         message: event.message,
@@ -282,6 +294,21 @@ window.CORPUS_BOOTSTRAP = (function () {
       });
     } catch (e) {}
   });
+
+  // Resource error events do not bubble up to window listeners — they must be
+  // captured in the capture phase or a 404 <script> stays invisible.
+  window.addEventListener('error', (event) => {
+    const target = event.target;
+    if (target && target !== window && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+      const url = target.src || target.href || '(unknown url)';
+      if (window.CORPUS_APP && window.CORPUS_APP.recordError) {
+        window.CORPUS_APP.recordError('resource-error', 'Failed to load ' + target.tagName.toLowerCase() + ': ' + url, null);
+      }
+      try {
+        window.CORPUS_APP.logDiagnostic('resource-error', { url, tag: target.tagName.toLowerCase() });
+      } catch (e) {}
+    }
+  }, true);
 
   window.addEventListener('unhandledrejection', (event) => {
     error('Unhandled promise rejection', event.reason);
