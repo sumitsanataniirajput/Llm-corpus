@@ -263,3 +263,52 @@ test('empty dataset library shows guidance and keeps training disabled', async (
   assert.match(app.doc.getElementById('t-form-error').textContent, /Select a dataset/i);
   assert.equal(app.net.calls.filter((c) => c.method === 'POST').length, 0);
 });
+
+test('backend failure event surfaces the real error message instead of "unknown"', async () => {
+  const fx = datasetFixtures();
+  const app = createApp(fx);
+  await app.window.training.render();
+
+  app.doc.getElementById('t-model').value = 'model_1';
+  const select = app.doc.getElementById('t-dataset');
+  select.value = 'ds_uploaded';
+  select.dispatchEvent(new app.window.Event('change'));
+
+  await app.window.training.startTraining();
+  await tick(10);
+
+  const socket = app.WebSocketStub.opened[app.WebSocketStub.opened.length - 1];
+  assert.ok(socket, 'training socket was opened');
+
+  socket.onmessage({
+    data: JSON.stringify({
+      type: 'training.' + app.window.state.getTrainingJobs()[0].id,
+      event: 'error',
+      data: {
+        job_id: app.window.state.getTrainingJobs()[0].id,
+        status: 'failed',
+        event: 'failed',
+        data: { error: 'Select a dataset before starting training.' },
+      },
+    }),
+  });
+  await tick(10);
+
+  assert.match(app.doc.getElementById('t-form-error').textContent, /Select a dataset before starting training/i);
+  assert.match(app.doc.getElementById('t-logs').textContent, /Select a dataset before starting training/i);
+  assert.doesNotMatch(app.doc.getElementById('t-logs').textContent, /Live stream error: unknown/);
+  assert.equal(app.doc.getElementById('t-start').disabled, false, 'user can adjust selection and retry');
+
+  app.window.training.dispose();
+});
+
+test('API client uses trailing slashes on collection endpoints to avoid 307 redirects', async () => {
+  const fx = datasetFixtures();
+  const app = createApp(fx);
+  await app.window.training.render();
+
+  const datasetsGet = app.net.calls.find((c) => c.method === 'GET' && c.route === '/api/v1/datasets');
+  const modelsGet = app.net.calls.find((c) => c.method === 'GET' && c.route === '/api/v1/models');
+  assert.ok(datasetsGet && new URL(datasetsGet.url).pathname.endsWith('/api/v1/datasets/'));
+  assert.ok(modelsGet && new URL(modelsGet.url).pathname.endsWith('/api/v1/models/'));
+});

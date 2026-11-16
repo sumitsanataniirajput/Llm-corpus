@@ -48,11 +48,13 @@ class ApiKeyCreated(ApiKeyOut):
     key: str
 
 
+@router.get("", include_in_schema=False)
 @router.get("/", tags=["settings"])
 async def get_settings(user=Depends(require_user)):
     return {"theme": "dark", "notifications": True}
 
 
+@router.put("", include_in_schema=False)
 @router.put("/", tags=["settings"])
 async def update_settings(data: SettingsIn, user=Depends(require_user)):
     return {"ok": True, "theme": data.theme, "notifications": data.notifications}

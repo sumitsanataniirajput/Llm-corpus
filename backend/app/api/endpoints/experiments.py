@@ -41,6 +41,7 @@ def _experiment_to_out(exp: Experiment) -> ExperimentOut:
     )
 
 
+@router.get("", response_model=List[ExperimentOut], include_in_schema=False)
 @router.get("/", response_model=List[ExperimentOut], tags=["experiments"])
 async def list_experiments(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
@@ -53,6 +54,7 @@ async def list_experiments(user=Depends(require_user), db: AsyncSession = Depend
     return [_experiment_to_out(e) for e in experiments]
 
 
+@router.post("", response_model=ExperimentOut, include_in_schema=False)
 @router.post("/", response_model=ExperimentOut, tags=["experiments"])
 async def create_experiment(data: ExperimentIn, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     eid = "exp_" + uuid.uuid4().hex[:12]

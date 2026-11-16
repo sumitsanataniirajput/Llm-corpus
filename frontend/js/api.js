@@ -237,7 +237,7 @@ window.CORPUS_API = (function () {
 
   // ---------- Models ----------
   async function listModels(token) {
-    return request('/api/v1/models', { token });
+    return request('/api/v1/models/', { token });
   }
 
   async function getModel(modelId, token) {
@@ -245,7 +245,7 @@ window.CORPUS_API = (function () {
   }
 
   async function createModel(config, token) {
-    return request('/api/v1/models', { method: 'POST', token, body: config });
+    return request('/api/v1/models/', { method: 'POST', token, body: config });
   }
 
   async function updateModel(modelId, updates, token) {
@@ -274,7 +274,7 @@ window.CORPUS_API = (function () {
 
   // ---------- Datasets ----------
   async function listDatasets(token) {
-    return request('/api/v1/datasets', { token });
+    return request('/api/v1/datasets/', { token });
   }
 
   async function getDataset(datasetId, token) {
@@ -282,7 +282,7 @@ window.CORPUS_API = (function () {
   }
 
   async function createDataset(data, token) {
-    return request('/api/v1/datasets', { method: 'POST', token, body: data });
+    return request('/api/v1/datasets/', { method: 'POST', token, body: data });
   }
 
   async function updateDataset(datasetId, updates, token) {
@@ -467,7 +467,7 @@ window.CORPUS_API = (function () {
 
   // ---------- Evaluation ----------
   async function listEvaluations(token) {
-    return request('/api/v1/evaluation', { token });
+    return request('/api/v1/evaluation/', { token });
   }
 
   async function runEvaluation(config, token) {
@@ -480,11 +480,11 @@ window.CORPUS_API = (function () {
 
   // ---------- Experiments ----------
   async function listExperiments(token) {
-    return request('/api/v1/experiments', { token });
+    return request('/api/v1/experiments/', { token });
   }
 
   async function createExperiment(data, token) {
-    return request('/api/v1/experiments', { method: 'POST', token, body: data });
+    return request('/api/v1/experiments/', { method: 'POST', token, body: data });
   }
 
   // ---------- Compute / Workers ----------
@@ -515,11 +515,11 @@ window.CORPUS_API = (function () {
 
   // ---------- Settings ----------
   async function getSettings(token) {
-    return request('/api/v1/settings', { token });
+    return request('/api/v1/settings/', { token });
   }
 
   async function updateSettings(data, token) {
-    return request('/api/v1/settings', { method: 'PUT', token, body: data });
+    return request('/api/v1/settings/', { method: 'PUT', token, body: data });
   }
 
   async function listApiKeys(token) {

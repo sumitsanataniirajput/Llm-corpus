@@ -26,6 +26,7 @@ window.training = (function () {
   let startInFlight = false;
   let checkpointsCache = [];
   let checkpointsModelId = null;
+  let reportedFailureJobId = null;
 
   const DATASET_UNUSABLE_STATUSES = ['failed', 'deleted'];
   const ACTIVE_STATUSES = ['queued', 'running', 'pausing', 'paused', 'stopping'];
@@ -53,6 +54,7 @@ window.training = (function () {
     seenSteps = new Set();
     checkpointsCache = [];
     checkpointsModelId = null;
+    reportedFailureJobId = null;
 
     container.innerHTML = `
       <div class="page-header">
@@ -435,6 +437,7 @@ window.training = (function () {
     }
     updateDatasetInfo();
     updateStartButtonState();
+    updateEstimate();
   }
 
   function selectedDataset() {
@@ -779,6 +782,7 @@ window.training = (function () {
       state.addTrainingJob(job);
       state.setActiveJob(job);
       wsJobId = job.id;
+      reportedFailureJobId = null;
       seenSteps = new Set();
       metricSeries = { steps: [], loss: [], throughput: [] };
       ui.toast('Training job queued', 'success');
@@ -881,6 +885,25 @@ window.training = (function () {
     `;
   }
 
+  function reportJobFailure(jobId, message) {
+    const text = message || 'Training job failed.';
+    if (reportedFailureJobId !== jobId) {
+      reportedFailureJobId = jobId;
+      log('Job ' + jobId + ' failed: ' + text, 'error');
+      showFormError(text);
+      ui.toast(text, 'error');
+    }
+  }
+
+  function extractStreamError(err) {
+    if (!err) return 'unknown';
+    if (typeof err === 'string') return err;
+    if (err.data && typeof err.data.error === 'string' && err.data.error) return err.data.error;
+    if (err.message) return err.message;
+    if (err.detail) return err.detail;
+    return 'unknown';
+  }
+
   function connectJobStream(jobId) {
     disconnectJobStream();
     startPolling(jobId);
@@ -892,7 +915,13 @@ window.training = (function () {
         refreshJob(jobId);
       },
       onError: (err) => {
-        log('Live stream error: ' + ((err && (err.message || err.detail)) || 'unknown'), 'error');
+        const message = extractStreamError(err);
+        if (err && err.status === 'failed') {
+          applyStatus(jobId, err);
+          reportJobFailure(jobId, message);
+          return;
+        }
+        log('Live stream error: ' + message, 'error');
       },
     }).then((socket) => {
       activeSocket = socket;
@@ -1004,6 +1033,15 @@ window.training = (function () {
         stopPolling();
         disconnectJobStream();
         if (!quiet) loadJobs();
+        if (job.status === 'failed' && reportedFailureJobId !== jobId && window.CORPUS_API.listTrainingLogs) {
+          try {
+            const events = await window.CORPUS_API.listTrainingLogs(jobId, token);
+            const failed = Array.isArray(events)
+              ? events.slice().reverse().find(ev => ev && ev.event === 'failed' && ev.data && ev.data.error)
+              : null;
+            if (failed) reportJobFailure(jobId, failed.data.error);
+          } catch (e) { /* ignore log lookup error */ }
+        }
       }
       const metrics = await window.CORPUS_API.listTrainingMetrics(jobId, token);
       (metrics || []).forEach(applyMetric);

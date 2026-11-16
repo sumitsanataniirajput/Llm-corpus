@@ -150,9 +150,12 @@ async def run_training_job(job_id: str, owner_id: str):
             if not model:
                 raise ValueError("The selected model was not found or is not owned by this account.")
             file_result = await db.execute(text(
-                "SELECT storage_path, file_name, checksum FROM public.dataset_files "
-                "WHERE dataset_id = :dataset_id ORDER BY uploaded_at DESC LIMIT 1"
-            ), {"dataset_id": dataset_id})
+                "SELECT df.storage_path, df.file_name, df.checksum "
+                "FROM public.dataset_files df "
+                "JOIN public.datasets d ON d.id = df.dataset_id "
+                "WHERE df.dataset_id = :dataset_id AND d.owner_id = :owner_id "
+                "ORDER BY df.uploaded_at DESC LIMIT 1"
+            ), {"dataset_id": dataset_id, "owner_id": job.owner_id})
             file_row = file_result.mappings().first()
             if not file_row:
                 raise ValueError("This dataset has no stored file. Re-upload the dataset before training.")

@@ -212,3 +212,58 @@ async def test_jobs_are_scoped_to_the_owner(http, http_as_other, recorded_jobs):
 
     # Another account must not be able to read someone else's dataset id either.
     assert OTHER_USER_ID != USER_ID
+
+
+@pytest.mark.asyncio
+async def test_checkpoints_route_is_not_shadowed_by_job_id(http):
+    model = await _create_model(http)
+
+    empty = await http.get("/api/v1/training/checkpoints")
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == []
+
+    saved = await http.post(
+        "/api/v1/training/checkpoints",
+        json={"model_id": model["id"], "storage_path": "checkpoints/test/model.pt", "step": 1, "loss": 1.25},
+    )
+    assert saved.status_code == 200, saved.text
+    ckpt_id = saved.json()["checkpoint_id"]
+
+    by_model = await http.get(f"/api/v1/training/checkpoints?model_id={model['id']}")
+    assert by_model.status_code == 200, by_model.text
+    assert [c["id"] for c in by_model.json()] == [ckpt_id]
+
+
+@pytest.mark.asyncio
+async def test_collection_routes_accept_without_trailing_slash(http, recorded_jobs):
+    # Without follow_redirects, none of these should return a 307 redirect.
+    assert (await http.get("/api/v1/datasets")).status_code == 200
+    assert (await http.get("/api/v1/models")).status_code == 200
+    assert (await http.get("/api/v1/training")).status_code == 200
+
+    model = await _create_model(http)
+    bad = await http.post("/api/v1/training", json={"model_id": model["id"], "dataset_id": None})
+    assert bad.status_code == 400
+    assert bad.json()["detail"] == "Select a dataset before starting training."
+
+
+@pytest.mark.asyncio
+async def test_trimmed_model_and_dataset_ids_are_saved_in_job_and_config(http, recorded_jobs):
+    model = await _create_model(http)
+    dataset = await _create_dataset(http)
+
+    resp = await http.post(
+        "/api/v1/training/",
+        json={"model_id": f"  {model['id']} ", "dataset_id": f" {dataset['id']}  "},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["model_id"] == model["id"]
+    assert body["dataset_id"] == dataset["id"]
+
+    rows = await db_rows(TrainingJob)
+    assert len(rows) == 1
+    assert rows[0].model_id == model["id"]
+    assert rows[0].dataset_id == dataset["id"]
+    assert rows[0].config["model_id"] == model["id"]
+    assert rows[0].config["dataset_id"] == dataset["id"]
