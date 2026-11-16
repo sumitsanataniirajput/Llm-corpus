@@ -6,8 +6,7 @@ All user-owned tables include owner_id for Row Level Security.
 IMPORTANT: These models must match the existing Supabase database schema.
 - owner_id is UUID type (matches live DB, not text)
 - ApiKey table is "api_keys_metadata" (matches live DB, not "api_keys")
-- No key_hash/key_prefix columns (they don't exist in live DB yet;
-  a separate forward-only migration is required to add them)
+- key_hash is present after migration 002 and stores only a SHA-256 digest.
 """
 import uuid
 from datetime import datetime, timezone
@@ -46,9 +45,7 @@ class ApiKey(Base):
     """API key metadata — owned by a Supabase user.
 
     Maps to the existing "api_keys_metadata" table in Supabase.
-    Only stores metadata (id, owner_id, name, prefix, created_at, last_used, revoked).
-    Full key hashes are NOT stored here — a separate migration is required
-    to add a key_hash column before secure key verification can be implemented.
+    Stores key metadata and a SHA-256 hash of the full key, never the raw key.
     """
     __tablename__ = "api_keys_metadata"
 
@@ -56,6 +53,7 @@ class ApiKey(Base):
     owner_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     name = Column(String, nullable=False)
     prefix = Column(String, nullable=False, default="corpus_")
+    key_hash = Column(Text, nullable=True, unique=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     last_used = Column(DateTime(timezone=True), nullable=True)
     revoked = Column(Boolean, nullable=False, default=False)
