@@ -13,7 +13,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.api import api_router
+from app.api.api_router import api_router
 from app.core.database import get_session_factory, dispose_engine
 from app.core.security import rate_limit_middleware
 
