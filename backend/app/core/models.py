@@ -96,7 +96,7 @@ class Dataset(Base):
     format = Column(String, nullable=True)
     size = Column(BigInteger, nullable=True, default=0)  # bigint in DB
     # pending → no stored file yet; uploaded → file present and trainable
-    status = Column(String, nullable=False, default="pending")
+    status = Column(String, nullable=False, default="pending", server_default="'pending'")
     token_count = Column(BigInteger, nullable=True, default=0)  # bigint in DB
     checksum = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
@@ -156,7 +156,7 @@ class StorageObject(Base):
     bucket = Column(String, nullable=False)
     path = Column(String, nullable=False)
     file_name = Column(String, nullable=True)
-    file_size = Column(Text, nullable=True)  # bigint in DB
+    file_size = Column(BigInteger, nullable=True)  # bigint in DB
     mime_type = Column(String, nullable=True)
     checksum = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
