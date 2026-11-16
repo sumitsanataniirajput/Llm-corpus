@@ -1,11 +1,14 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-17.1",
+  "buildId": "2026-11-16.3",
   "sourceRef": "main",
   "notes": [
     "Dataset upload on mobile: the drop zone is a plain container with a transparent full-size <input type=file> overlay, plus a click fallback that opens the native picker exactly once — tapping the zone, the icon, the copy or the 'Tap to choose files' pill all open the phone's file manager (frontend/js/datasets.js, frontend/css/components.css).",
-    "The file input keeps its native rendering (no appearance:none) because stripping it can stop Android Chrome from opening the picker.",
+    "Android file input now clears the previous value before the chooser opens (not during change), and selection events stop bubbling into unrelated page handlers.",
+    "The last route is held in session storage so returning from Android's system file chooser does not unexpectedly reset the SPA to Dashboard.",
+    "Training chart empty states are absolutely contained inside their fixed-height chart box, preventing the dashed placeholder from covering the Training log.",
+    "Backend checkpoint reads/writes use the owning model because the live checkpoints table has no owner_id column; production web origin is included in the backend CORS allowlist.",
     "Fluid scaling for every aspect ratio: root font-size steps at 1440/1920/2560px, --page-max grows to 1680px/2080px, extra grid columns instead of stretched cards, ultra-wide (21:9, 32:9) keeps a measured reading column, portrait tablets keep a narrow column, TV/remote focus rings are 3px, and print hides chrome (frontend/css/responsive.css).",
     "Local CSS/JS are requested with ?v=<buildId> so a cached stylesheet can never hide a shipped fix again (frontend/index.html)."
   ],
