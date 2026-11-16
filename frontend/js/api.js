@@ -325,35 +325,35 @@ window.CORPUS_API = (function () {
 
   // ---------- Training ----------
   async function listTrainingJobs(token) {
-    return request('/api/v1/training/jobs', { token });
+    return request('/api/v1/training/', { token });
   }
 
   async function createTrainingJob(config, token) {
-    return request('/api/v1/training/jobs', { method: 'POST', token, body: config });
+    return request('/api/v1/training/', { method: 'POST', token, body: config });
   }
 
   async function getTrainingJob(jobId, token) {
-    return request('/api/v1/training/jobs/' + encodeURIComponent(jobId), { token });
+    return request('/api/v1/training/' + encodeURIComponent(jobId), { token });
   }
 
   async function pauseTrainingJob(jobId, token) {
-    return request('/api/v1/training/jobs/' + encodeURIComponent(jobId) + '/pause', { method: 'POST', token });
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/pause', { method: 'POST', token });
   }
 
   async function resumeTrainingJob(jobId, token) {
-    return request('/api/v1/training/jobs/' + encodeURIComponent(jobId) + '/resume', { method: 'POST', token });
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/resume', { method: 'POST', token });
   }
 
   async function stopTrainingJob(jobId, token) {
-    return request('/api/v1/training/jobs/' + encodeURIComponent(jobId) + '/stop', { method: 'POST', token });
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/stop', { method: 'POST', token });
   }
 
   async function listTrainingMetrics(jobId, token) {
-    return request('/api/v1/training/jobs/' + encodeURIComponent(jobId) + '/metrics', { token });
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/metrics', { token });
   }
 
   async function listTrainingLogs(jobId, token) {
-    return request('/api/v1/training/jobs/' + encodeURIComponent(jobId) + '/logs', { token });
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/logs', { token });
   }
 
   async function listCheckpoints(modelId, token) {
