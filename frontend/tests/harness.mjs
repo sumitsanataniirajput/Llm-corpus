@@ -24,6 +24,7 @@ const MODULES = [
   'js/api.js',
   'js/components.js',
   'js/charts.js',
+  'js/dashboard.js',
   'js/training.js',
   'js/datasets.js',
 ];
@@ -53,6 +54,29 @@ class WebSocketStub {
   close() { this.readyState = 3; this.closed = true; }
 }
 WebSocketStub.opened = [];
+
+class XHRStub {
+  constructor() {
+    this.upload = { onprogress: null };
+    this.status = 0;
+    this.responseText = '';
+    this.headers = {};
+    this.sent = [];
+    XHRStub.instances.push(this);
+  }
+  open(method, url) { this.method = method; this.url = url; }
+  setRequestHeader(name, value) { this.headers[name] = value; }
+  getResponseHeader(name) { return name.toLowerCase() === 'content-type' ? 'application/json' : null; }
+  send(body) {
+    this.sent.push(body);
+    const total = body && body.__size ? body.__size : 1000;
+    if (this.upload.onprogress) this.upload.onprogress({ lengthComputable: true, loaded: total, total });
+    this.status = 200;
+    this.responseText = JSON.stringify({ ok: true, dataset: { id: 'uploaded_' + XHRStub.instances.length } });
+    if (this.onload) this.onload();
+  }
+}
+XHRStub.instances = [];
 
 function jsonResponse(data, status = 200) {
   return {
@@ -85,9 +109,11 @@ function createAppFromFiles(options) {
     runScripts: 'outside-only',
   });
   const { window } = dom;
+  XHRStub.instances = [];
 
   window.Chart = ChartStub;
   window.WebSocket = WebSocketStub;
+  window.XMLHttpRequest = XHRStub;
   window.AOS = { refresh() {}, init() {} };
   window.Swal = { fire: (opts) => { window.__lastSwal = opts; } };
   window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
@@ -101,6 +127,8 @@ function createAppFromFiles(options) {
     datasets: options.datasets ? [...options.datasets] : [],
     models: options.models ? [...options.models] : [],
     jobs: options.jobs ? [...options.jobs] : [],
+    checkpoints: options.checkpoints ? [...options.checkpoints] : [],
+    health: options.health === undefined ? { status: 'ok' } : options.health,
     calls: [],
     createJobResponses: [],
     preview: options.preview || {
@@ -128,6 +156,31 @@ function createAppFromFiles(options) {
     }
     if (route === '/api/v1/training' && method === 'GET') {
       return jsonResponse([...state.jobs]);
+    }
+    if (route === '/api/v1/training/checkpoints' && method === 'GET') {
+      return jsonResponse([...state.checkpoints]);
+    }
+    if (route === '/api/v1/health') {
+      if (state.health === null) {
+        const err = new Error('Failed to fetch');
+        err.networkError = true;
+        throw err;
+      }
+      return jsonResponse(state.health);
+    }
+    if (route === '/api/v1/datasets' && method === 'POST') {
+      const body = JSON.parse(opts.body);
+      const created = {
+        id: 'ds_created_' + (state.datasets.length + 1),
+        name: body.name,
+        format: body.format,
+        size: body.size,
+        status: 'pending',
+        has_file: false,
+        file_name: null,
+      };
+      state.datasets.push(created);
+      return jsonResponse(created);
     }
     if (route === '/api/v1/training' && method === 'POST') {
       const body = JSON.parse(opts.body);
@@ -182,7 +235,7 @@ function createAppFromFiles(options) {
   window.state.setUser({ id: 'user-1', email: 'tester@example.com' });
   window.state.setAuthReady(true);
 
-  return { dom, window, doc: window.document, net: state, ChartStub, WebSocketStub };
+  return { dom, window, doc: window.document, net: state, ChartStub, WebSocketStub, XHRStub };
 }
 
 export function datasetFixtures() {

@@ -1,67 +1,101 @@
 /* ========================================
-   CORPUS ULTIMATE — Experiment Manager page
+   CORPUS ULTIMATE — Experiment Manager
    ======================================== */
 
 window.experiments = (function () {
+  'use strict';
+
+  function esc(value) {
+    return ui.escapeHtml(value == null ? '' : String(value));
+  }
+
   async function render() {
     const user = state.getUser();
     const container = window.CORPUS_APP.getPageContainer();
     if (!container) return;
     if (!user) {
-      container.innerHTML = '<div class="empty-state"><i class="fas fa-user-circle"></i><h3>Sign in required</h3><p>Please sign in to manage experiments.</p></div>';
+      container.innerHTML = ui.emptyState({
+        icon: 'fa-user-circle',
+        title: 'Sign in required',
+        text: 'Please sign in to view experiments.',
+        actionLabel: 'Sign in',
+        actionOnclick: "auth.openModal('login')",
+        actionIcon: 'fa-sign-in-alt',
+      });
       return;
     }
 
     container.innerHTML = `
-      <div class="experiments-header">
-        <div>
+      <div class="page-header">
+        <div class="page-header-copy">
+          <span class="eyebrow"><i class="fas fa-flask"></i> Reproducibility</span>
           <h1 class="section-title">Experiment Manager</h1>
-          <p class="section-subtitle">Track training configurations, datasets, seeds, and metrics for reproducibility.</p>
+          <p class="section-subtitle">Experiment records returned by the backend: configuration, status and notes.</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-outline" type="button" onclick="experiments.loadExperiments()">
+            <i class="fas fa-rotate"></i> Refresh
+          </button>
         </div>
       </div>
 
       <div class="experiment-grid" id="experiments-grid">
-        <!-- experiment cards -->
+        ${ui.skeletonCards(2)}
       </div>
     `;
 
     await loadExperiments();
   }
 
-  function escapeHtml(text) {
-    const d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-  }
-
   async function loadExperiments() {
+    const container = document.getElementById('experiments-grid');
+    if (container) container.innerHTML = ui.skeletonCards(2);
     try {
       const token = await state.getAccessToken();
       const data = await window.CORPUS_API.listExperiments(token);
-      state.setExperiments(data.experiments || data || []);
+      const list = Array.isArray(data) ? data : (data && Array.isArray(data.experiments) ? data.experiments : []);
+      state.setExperiments(list);
+      renderExperiments(list);
     } catch (err) {
       state.setExperiments([]);
+      if (container) {
+        container.innerHTML = ui.emptyState({
+          icon: 'fa-plug-circle-xmark',
+          title: 'Experiments unavailable',
+          text: err.message || 'The backend did not return an experiment list.',
+          actionLabel: 'Retry',
+          actionOnclick: 'experiments.loadExperiments()',
+          actionIcon: 'fa-rotate',
+        });
+      }
       ui.toast('Backend unavailable — no experiments listed', 'warning');
     }
-    renderExperiments();
   }
 
-  function renderExperiments() {
+  function renderExperiments(list) {
     const container = document.getElementById('experiments-grid');
-    const exps = state.getExperiments() || [];
-    if (exps.length === 0) {
-      container.innerHTML = '<div class="empty-state"><i class="fas fa-flask"></i><h3>No experiments</h3><p>Run a training job to create an experiment record.</p></div>';
+    if (!container) return;
+    const exps = list || state.getExperiments() || [];
+    if (!exps.length) {
+      container.innerHTML = ui.emptyState({
+        icon: 'fa-flask',
+        title: 'No experiments recorded',
+        text: 'Every training job already stores its configuration. Experiment records appear here once the backend creates them.',
+        actionLabel: 'Open training center',
+        actionOnclick: "router.navigate('training')",
+        actionIcon: 'fa-play',
+      });
       return;
     }
-    container.innerHTML = exps.map(e => `
-      <div class="experiment-card" data-aos="fade-up">
-        <h4>${escapeHtml(e.name || 'Unnamed Experiment')}</h4>
+    container.innerHTML = exps.map(exp => `
+      <article class="experiment-card" data-aos="fade-up">
+        <h4>${esc(exp.name || 'Unnamed experiment')}</h4>
         <div class="experiment-meta">
-          <span><i class="fas fa-calendar"></i> ${CORPUS_UTILS.formatDate(e.created_at)}</span>
-          <span><i class="fas fa-tag"></i> ${escapeHtml(e.status || '—')}</span>
+          <span><i class="fas fa-calendar"></i> ${esc(CORPUS_UTILS.formatDate(exp.created_at))}</span>
+          <span><i class="fas fa-tag"></i> ${esc(exp.status || '—')}</span>
         </div>
-        <p style="font-size:var(--text-body-small); color:var(--color-text-variant); margin-top:var(--space-2);">${escapeHtml(e.description || 'No description')}</p>
-      </div>
+        <p class="field-hint" style="margin:0;">${esc(exp.description || 'No description recorded.')}</p>
+      </article>
     `).join('');
   }
 

@@ -55,8 +55,6 @@ window.aiInfo = (function () {
 
     const config = activeModel.config || {};
     const params = CORPUS_UTILS.calculateParameters(config);
-    const trainableParams = params; // All parameters are trainable by default in custom engine
-    const nonTrainableParams = 0;
 
     container.innerHTML = `
       <div class="ai-info-header">
@@ -97,41 +95,42 @@ window.aiInfo = (function () {
         <!-- Parameters -->
         <div class="ai-info-card">
           <h3><i class="fas fa-hashtag"></i> Parameters</h3>
-          <div class="info-row"><span class="info-label">Total Parameters</span><span class="info-value">${formatNumber(params)}</span></div>
-          <div class="info-row"><span class="info-label">Trainable Parameters</span><span class="info-value">${formatNumber(trainableParams)}</span></div>
-          <div class="info-row"><span class="info-label">Non-trainable Parameters</span><span class="info-value">${formatNumber(nonTrainableParams)}</span></div>
-          <div class="info-row"><span class="info-label">Estimated Size (FP32)</span><span class="info-value">${params > 0 ? ((params * 4) / 1024 / 1024).toFixed(2) + ' MB' : '—'}</span></div>
+          <div class="info-row"><span class="info-label">Total parameters</span><span class="info-value">${params > 0 ? formatNumber(params) + ' (computed)' : '—'}</span></div>
+          <div class="info-row"><span class="info-label">Estimated size (FP32)</span><span class="info-value">${params > 0 ? ((params * 4) / 1024 / 1024).toFixed(2) + ' MB' : '—'}</span></div>
+          <div class="info-row"><span class="info-label">Trainable breakdown</span><span class="info-value">Not reported by the API</span></div>
+          <p class="field-hint" style="margin-top:var(--space-2);">Parameter counts are computed from the stored architecture; the runtime may clamp values for CPU safety.</p>
         </div>
 
         <!-- Training -->
         <div class="ai-info-card">
-          <h3><i class="fas fa-flask"></i> Training Information</h3>
-          <div class="info-row"><span class="info-label">Training Datasets</span><span class="info-value">${activeModel.dataset_ids ? activeModel.dataset_ids.length : 0}</span></div>
-          <div class="info-row"><span class="info-label">Training Sessions</span><span class="info-value">${window.state.getTrainingJobs ? window.state.getTrainingJobs().length : 0}</span></div>
-          <div class="info-row"><span class="info-label">Last Training</span><span class="info-value">${formatDate(activeModel.updated_at || activeModel.created_at)}</span></div>
-          <div class="info-row"><span class="info-label">Engine</span><span class="info-value">PyTorch / Custom Numerical</span></div>
+          <h3><i class="fas fa-flask"></i> Training information</h3>
+          <div class="info-row"><span class="info-label">Linked datasets</span><span class="info-value">${Array.isArray(activeModel.dataset_ids) ? activeModel.dataset_ids.length : 'not recorded'}</span></div>
+          <div class="info-row"><span class="info-label">Record updated</span><span class="info-value">${formatDate(activeModel.updated_at || activeModel.created_at)}</span></div>
+          <div class="info-row"><span class="info-label">Engine</span><span class="info-value">Selected per training job</span></div>
+          <p class="field-hint" style="margin-top:var(--space-2);">Job history, loss and throughput live on the Statistics and Training pages.</p>
         </div>
 
         <!-- Capabilities -->
         <div class="ai-info-card">
-          <h3><i class="fas fa-star"></i> Verified Capabilities</h3>
+          <h3><i class="fas fa-star"></i> Capabilities in this deployment</h3>
           <ul class="capability-list">
-            <li>Next-token prediction from trained weights</li>
-            <li>Temperature, Top-K, Top-P sampling</li>
-            <li>Autoregressive text generation</li>
-            <li>Checkpoint save and resume</li>
-            <li>Model export and import</li>
+            <li>Next-token prediction through the inference API</li>
+            <li>Temperature, top-K and top-P sampling controls</li>
+            <li>Autoregressive generation in AI Chat</li>
+            <li>Checkpoints written by finished training jobs</li>
+            <li>Private dataset uploads with text extraction</li>
           </ul>
         </div>
 
         <!-- Limitations -->
-        <div class="ai-info-card">
+        <div class="ai-info-card limitations">
           <h3><i class="fas fa-triangle-exclamation"></i> Known Limitations</h3>
           <ul class="capability-list">
             <li>Small default configuration — not production-scale</li>
-            <li>CPU training only unless GPU is available</li>
-            <li>No external API routing — all inference is local</li>
-            <li>Custom tokenizer — vocabulary may differ from HF models</li>
+            <li>Training runs on the backend CPU worker unless a GPU worker is registered</li>
+            <li>Inference happens inside this deployment; no external API routing</li>
+            <li>Custom tokenizer — vocabulary differs from Hugging Face models</li>
+            <li>No attention or embedding introspection endpoint</li>
           </ul>
         </div>
 

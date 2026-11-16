@@ -65,7 +65,7 @@ window.CORPUS_CONFIG = {
   },
 
   // Supported dataset formats
-  SUPPORTED_DATASET_FORMATS: ['txt', 'pdf', 'csv', 'json', 'jsonl'],
+  SUPPORTED_DATASET_FORMATS: ['txt', 'md', 'csv', 'json', 'jsonl', 'pdf'],
 
   // Max file sizes (bytes)
   MAX_FILE_SIZE: 100 * 1024 * 1024, // 100 MB

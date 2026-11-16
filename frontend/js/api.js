@@ -315,6 +315,65 @@ window.CORPUS_API = (function () {
     return data;
   }
 
+  // Upload a dataset file with real progress reporting (XHR upload events).
+  // Resolves with the parsed response body, rejects with an Error carrying
+  // `status` just like the fetch-based helpers above.
+  function uploadDatasetFileWithProgress(datasetId, file, token, onProgress) {
+    return (async () => {
+      const resolvedToken = token || (await state.getAccessToken());
+      const url = BASE + '/api/v1/datasets/' + encodeURIComponent(datasetId) + '/upload';
+      return new Promise((resolve, reject) => {
+        if (typeof XMLHttpRequest === 'undefined') {
+          // Fall back to the fetch upload (no progress events available).
+          uploadDatasetFile(datasetId, file, resolvedToken).then(resolve).catch(reject);
+          return;
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        if (resolvedToken) xhr.setRequestHeader('Authorization', 'Bearer ' + resolvedToken);
+        xhr.upload.onprogress = (event) => {
+          if (!onProgress) return;
+          if (event.lengthComputable && event.total > 0) {
+            onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+          } else {
+            onProgress(null);
+          }
+        };
+        xhr.onload = () => {
+          let data = null;
+          const ct = xhr.getResponseHeader('content-type') || '';
+          try {
+            data = ct.indexOf('application/json') !== -1 ? JSON.parse(xhr.responseText) : xhr.responseText;
+          } catch (e) {
+            data = xhr.responseText;
+          }
+          if (xhr.status >= 200 && xhr.status < 300) {
+            if (onProgress) onProgress(100);
+            resolve(data);
+            return;
+          }
+          const detail = data && typeof data === 'object' ? (data.message || data.detail) : data;
+          const err = new Error(typeof detail === 'string' && detail ? detail : 'Upload failed (HTTP ' + xhr.status + ')');
+          err.status = xhr.status;
+          reject(err);
+        };
+        xhr.onerror = () => {
+          const err = new Error('Upload failed — the network connection was interrupted.');
+          err.networkError = true;
+          reject(err);
+        };
+        xhr.ontimeout = () => {
+          const err = new Error('Upload timed out. Try again on a stronger connection.');
+          err.code = 'TIMEOUT';
+          reject(err);
+        };
+        const formData = new FormData();
+        formData.append('file', file);
+        xhr.send(formData);
+      });
+    })();
+  }
+
   async function previewDataset(datasetId, token, maxChars = 2000) {
     return request('/api/v1/datasets/' + encodeURIComponent(datasetId) + '/preview?max_chars=' + encodeURIComponent(maxChars), { token });
   }
@@ -362,6 +421,11 @@ window.CORPUS_API = (function () {
 
   async function listCheckpoints(modelId, token) {
     return request('/api/v1/training/checkpoints?model_id=' + encodeURIComponent(modelId), { token });
+  }
+
+  // Every checkpoint owned by the caller (no model filter).
+  async function listAllCheckpoints(token) {
+    return request('/api/v1/training/checkpoints', { token });
   }
 
   async function saveCheckpoint(modelId, config, token) {
@@ -591,10 +655,11 @@ window.CORPUS_API = (function () {
     listModels, getModel, createModel, updateModel, deleteModel, cloneModel,
     validateConfig, listModelVersions, exportModel,
     listDatasets, getDataset, createDataset, updateDataset, deleteDataset,
-    uploadDatasetFile, previewDataset, preprocessDataset, splitDataset, asDatasetList,
+    uploadDatasetFile, uploadDatasetFileWithProgress, previewDataset, preprocessDataset,
+    splitDataset, asDatasetList,
     listTrainingJobs, createTrainingJob, getTrainingJob, pauseTrainingJob,
     resumeTrainingJob, stopTrainingJob, listTrainingMetrics, listTrainingLogs,
-    listCheckpoints, saveCheckpoint, loadCheckpoint,
+    listCheckpoints, listAllCheckpoints, saveCheckpoint, loadCheckpoint,
     infer, inferStream, tokenize, nextToken,
     listEvaluations, runEvaluation, getEvaluation,
     listExperiments, createExperiment,

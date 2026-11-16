@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="description" content="CORPUS ULTIMATE — Personal LLM development, training, and monitoring platform">
+  <meta name="theme-color" content="#16151a">
+  <meta name="color-scheme" content="dark light">
   <title>CORPUS ULTIMATE</title>
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -29,8 +31,10 @@
 </head>
 <body>
 
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
   <!-- Toast container -->
-  <div id="toast-container" class="toast-container"></div>
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
 
   <!-- Auth modal -->
   <div id="auth-modal" class="modal hidden">
@@ -66,7 +70,7 @@
   </div>
 
   <!-- Top app bar (mobile) -->
-  <header class="app-bar">
+  <header class="app-bar" role="banner">
     <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
       <i class="fas fa-bars"></i>
     </button>
@@ -89,7 +93,7 @@
   </header>
 
   <!-- Desktop sidebar -->
-  <aside class="sidebar hidden" id="sidebar">
+  <aside class="sidebar hidden" id="sidebar" aria-label="Main navigation">
     <div class="sidebar-header">
       <div class="app-logo">
         <i class="fas fa-brain"></i>
@@ -121,7 +125,7 @@
   <div class="sidebar-overlay hidden" id="sidebar-overlay" onclick="router.closeSidebar()"></div>
 
   <!-- Main content -->
-  <main class="main-content" id="main-content">
+  <main class="main-content" id="main-content" tabindex="-1">
     <!-- Page container -->
     <div class="page-container" id="page-container">
       <!-- Pages injected by router.js -->
@@ -129,20 +133,20 @@
   </main>
 
   <!-- Mobile bottom navigation -->
-  <nav class="bottom-nav" id="bottom-nav">
-    <a href="#/dashboard" class="nav-link active" data-route="dashboard">
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Primary">
+    <a href="#/dashboard" class="nav-link active" data-route="dashboard" aria-label="Dashboard" aria-current="page">
       <i class="fas fa-home"></i><span>Dashboard</span>
     </a>
-    <a href="#/models" class="nav-link" data-route="models">
+    <a href="#/models" class="nav-link" data-route="models" aria-label="Models">
       <i class="fas fa-cube"></i><span>Models</span>
     </a>
-    <a href="#/training" class="nav-link" data-route="training">
+    <a href="#/training" class="nav-link" data-route="training" aria-label="Training">
       <i class="fas fa-flask"></i><span>Training</span>
     </a>
-    <a href="#/chat" class="nav-link" data-route="chat">
+    <a href="#/chat" class="nav-link" data-route="chat" aria-label="Chat">
       <i class="fas fa-comments"></i><span>Chat</span>
     </a>
-    <a href="#/settings" class="nav-link" data-route="settings">
+    <a href="#/settings" class="nav-link" data-route="settings" aria-label="Settings">
       <i class="fas fa-cog"></i><span>Settings</span>
     </a>
   </nav>

@@ -227,6 +227,29 @@ window.CORPUS_BOOTSTRAP = (function () {
       return;
     }
 
+    // Restore the saved theme before the first paint of page content.
+    try {
+      const savedTheme = window.localStorage ? window.localStorage.getItem('corpus_theme') : null;
+      if (savedTheme === 'light' || savedTheme === 'dark') {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      }
+    } catch (e) { /* storage may be blocked */ }
+
+    // AOS is already loaded by index.html — initialise it once, cheaply, and
+    // honour the user's reduced-motion preference.
+    try {
+      if (typeof AOS !== 'undefined' && AOS && typeof AOS.init === 'function') {
+        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        AOS.init({
+          once: true,
+          duration: 420,
+          easing: 'ease-out-cubic',
+          offset: 40,
+          disable: reduceMotion,
+        });
+      }
+    } catch (e) { /* animations are optional */ }
+
     // Mark initialized
     window.CORPUS_APP.markInitialized();
     log('Application bootstrap complete');

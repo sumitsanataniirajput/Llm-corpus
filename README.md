@@ -103,6 +103,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Open the frontend in your browser. Sign up/sign in with Supabase Auth. Create a model, upload a dataset, and start training.
 
+Datasets are read as text with per-format extraction: `.txt`, `.md`, `.csv`,
+`.json`, `.jsonl` and text-layer `.pdf` (no OCR). Binary, empty and scanned files
+are rejected with an explanation instead of being trained on as noise.
+
+## UI documentation
+
+Design tokens, mobile/layout contract, data-honesty rules, dataset formats and
+test commands are documented in [docs/UI_MODERNIZATION.md](docs/UI_MODERNIZATION.md).
+
 ## License
 
 MIT License — see LICENSE file.

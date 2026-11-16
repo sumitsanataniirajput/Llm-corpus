@@ -1,112 +1,197 @@
 /* ========================================
-   CORPUS ULTIMATE — Cloud Storage page
+   CORPUS ULTIMATE — Cloud Storage
+
+   The summary is computed from the objects the backend actually returns.
+   No quota percentage is shown because the API does not report a quota.
    ======================================== */
 
 window.storage = (function () {
+  'use strict';
+
+  let objects = [];
+  let loadError = null;
+
+  function esc(value) {
+    return ui.escapeHtml(value == null ? '' : String(value));
+  }
+
   async function render() {
     const user = state.getUser();
     const container = window.CORPUS_APP.getPageContainer();
     if (!container) return;
     if (!user) {
-      container.innerHTML = '<div class="empty-state"><i class="fas fa-user-circle"></i><h3>Sign in required</h3><p>Please sign in to access cloud storage.</p></div>';
+      container.innerHTML = ui.emptyState({
+        icon: 'fa-user-circle',
+        title: 'Sign in required',
+        text: 'Please sign in to browse your cloud storage.',
+        actionLabel: 'Sign in',
+        actionOnclick: "auth.openModal('login')",
+        actionIcon: 'fa-sign-in-alt',
+      });
       return;
     }
 
     container.innerHTML = `
-      <div class="storage-header">
-        <div>
+      <div class="page-header">
+        <div class="page-header-copy">
+          <span class="eyebrow"><i class="fas fa-cloud"></i> Private bucket</span>
           <h1 class="section-title">Cloud Storage</h1>
-          <p class="section-subtitle">Manage your models, datasets, checkpoints, and backups in Supabase Storage.</p>
+          <p class="section-subtitle">Objects stored for your account: dataset uploads, checkpoints and tokenizers.</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-outline" type="button" onclick="storage.loadFiles()">
+            <i class="fas fa-rotate"></i> Refresh
+          </button>
         </div>
       </div>
 
       <div class="storage-grid">
-        <div class="storage-usage">
-          <h3 style="margin-bottom:var(--space-4); font-size:var(--text-title-medium); color:var(--color-text);">Storage Usage</h3>
-          <div class="stat-card" style="margin-bottom:var(--space-4);">
-            <div class="stat-value">—</div>
-            <div class="stat-label">Used</div>
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Usage</h2>
+              <p class="card-subtitle">Totals from the listed objects.</p>
+            </div>
           </div>
-          <div class="stat-card">
-            <div class="stat-value">—</div>
-            <div class="stat-label">Available</div>
+          <div id="storage-summary">
+            <div class="skeleton skeleton-line short"></div>
+            <div class="skeleton skeleton-line"></div>
           </div>
-          <div class="progress-container" style="margin-top:var(--space-4);">
-            <div class="progress-bar" style="width:45%; background:var(--color-primary);"></div>
+          <p class="field-hint" style="margin-top:var(--space-3);">The storage API does not report a quota, so no usage percentage is shown.</p>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">Backups</h2>
+              <p class="card-subtitle">Snapshot and restore endpoints are not part of this deployment.</p>
+            </div>
           </div>
-          <div class="progress-text"><span>45%</span><span>of quota</span></div>
-        </div>
-        <div class="file-list">
-          <h3 style="margin-bottom:var(--space-4); font-size:var(--text-title-medium); color:var(--color-text);">Stored Objects</h3>
-          <div class="table-wrapper" style="margin:0;">
-            <table>
-              <thead>
-                <tr><th>Name</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr>
-              </thead>
-              <tbody id="storage-files-body">
-                <tr><td colspan="5" style="text-align:center; color:var(--color-text-variant);">No files yet.</td></tr>
-              </tbody>
-            </table>
+          <div class="info-panel">
+            <i class="fas fa-circle-info"></i>
+            <div>Backups are unavailable because the backend does not expose a backup endpoint yet. Model checkpoints saved by training runs are listed on the right and can be restored from the Training Center.</div>
           </div>
-        </div>
+          <div class="training-actions">
+            <button class="btn btn-outline" type="button" disabled title="Not available in this deployment">
+              <i class="fas fa-save"></i> Create backup
+            </button>
+            <button class="btn btn-outline" type="button" disabled title="Not available in this deployment">
+              <i class="fas fa-upload"></i> Restore
+            </button>
+          </div>
+        </section>
       </div>
 
-      <div class="card" style="margin-top:var(--space-6); padding:var(--space-5);">
-        <h3 style="margin-bottom:var(--space-4); font-size:var(--text-title-medium); color:var(--color-text);">Backups & Restore</h3>
-        <div class="training-actions">
-          <button class="btn btn-outline" onclick="storage.createBackup()"><i class="fas fa-save"></i> Create Backup</button>
-          <button class="btn btn-outline" onclick="storage.restoreBackup()"><i class="fas fa-upload"></i> Restore</button>
+      <section class="card" style="padding:0; overflow:hidden;">
+        <div class="card-head" style="padding:var(--space-4) var(--space-4) 0;">
+          <div>
+            <h2 class="card-title">Stored objects</h2>
+            <p class="card-subtitle">Read directly from the storage endpoint.</p>
+          </div>
+          <span class="chip" id="storage-count">—</span>
         </div>
-        <p style="margin-top:var(--space-3); font-size:var(--text-body-small); color:var(--color-text-variant);">Backups are stored in your private Supabase bucket and can only be accessed by your account.</p>
-      </div>
+        <div class="table-wrapper" style="border:none; border-radius:0;">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Type</th><th>Size</th><th>Updated</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="storage-files-body">
+              <tr><td colspan="5" class="table-empty">Loading objects…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     `;
 
     await loadFiles();
   }
 
-  function escapeHtml(text) {
-    const d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-  }
-
   async function loadFiles() {
+    const body = document.getElementById('storage-files-body');
     try {
       const token = await state.getAccessToken();
       const data = await window.CORPUS_API.listStorageObjects(token);
-      const files = data.objects || data || [];
-      const body = document.getElementById('storage-files-body');
-      if (files.length === 0) {
-        body.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--color-text-variant);">No files yet.</td></tr>';
-        return;
-      }
-      body.innerHTML = files.map(f => `
+      objects = Array.isArray(data) ? data : (data && Array.isArray(data.objects) ? data.objects : []);
+      loadError = null;
+    } catch (err) {
+      objects = [];
+      loadError = err && err.message ? err.message : 'Could not load storage objects';
+    }
+    renderSummary();
+    renderTable();
+  }
+
+  function totalSize() {
+    return objects.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+  }
+
+  function renderSummary() {
+    const container = document.getElementById('storage-summary');
+    if (!container) return;
+    const count = objects.length;
+    const size = totalSize();
+    container.innerHTML = `
+      <div class="stat-card" style="margin-bottom:var(--space-3); box-shadow:none;">
+        <div class="stat-label">Objects</div>
+        <div class="stat-value">${loadError ? '—' : CORPUS_UTILS.formatNumber(count)}</div>
+        <div class="stat-foot">${esc(loadError || 'Files listed for your account')}</div>
+      </div>
+      <div class="stat-card" style="box-shadow:none;">
+        <div class="stat-label">Listed size</div>
+        <div class="stat-value">${loadError ? '—' : (size ? esc(CORPUS_UTILS.formatBytes(size)) : '0 B')}</div>
+        <div class="stat-foot">Sum of the sizes reported by the API</div>
+      </div>
+    `;
+    const chip = document.getElementById('storage-count');
+    if (chip) chip.textContent = loadError ? 'Unavailable' : count + ' object' + (count === 1 ? '' : 's');
+  }
+
+  function renderTable() {
+    const body = document.getElementById('storage-files-body');
+    if (!body) return;
+    if (loadError) {
+      body.innerHTML = '<tr><td colspan="5" class="table-empty">' + esc(loadError) + '</td></tr>';
+      return;
+    }
+    if (!objects.length) {
+      body.innerHTML = '<tr><td colspan="5" class="table-empty">No stored objects yet. Dataset uploads and training checkpoints appear here.</td></tr>';
+      return;
+    }
+    body.innerHTML = objects.map((file, index) => {
+      const name = file.name || file.path || '—';
+      const id = file.id || file.path || name;
+      return `
         <tr>
-          <td>${escapeHtml(f.name || f.path || '—')}</td>
-          <td>${escapeHtml(f.type || '—')}</td>
-          <td>${f.size ? CORPUS_UTILS.formatBytes(f.size) : '—'}</td>
-          <td>${CORPUS_UTILS.formatDate(f.created_at || f.updated_at)}</td>
-          <td>
-            <button class="btn btn-outline btn-sm" onclick="storage.downloadFile('${escapeHtml(f.id || f.path)}')"><i class="fas fa-download"></i></button>
+          <td style="max-width:320px;">
+            <div style="font-weight:500; overflow-wrap:anywhere;">${esc(name)}</div>
+            ${file.path && file.name ? '<div class="field-hint" style="margin:0; overflow-wrap:anywhere;">' + esc(file.path) + '</div>' : ''}
+          </td>
+          <td>${esc(file.type || (file.content_type || '—'))}</td>
+          <td>${file.size ? esc(CORPUS_UTILS.formatBytes(file.size)) : '—'}</td>
+          <td>${esc(CORPUS_UTILS.formatDate(file.updated_at || file.created_at))}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-outline btn-sm" type="button" onclick="storage.downloadFile('${esc(id)}')" title="Download object">
+              <i class="fas fa-download"></i>
+            </button>
           </td>
         </tr>
-      `).join('');
+      `;
+    }).join('');
+  }
+
+  async function downloadFile(id) {
+    try {
+      const token = await state.getAccessToken();
+      const data = await window.CORPUS_API.downloadStorageObject(id, token);
+      if (data && data.url) {
+        window.open(data.url, '_blank', 'noopener');
+        return;
+      }
+      ui.toast('The backend did not return a download URL for this object.', 'warning');
     } catch (err) {
-      ui.toast('Could not load storage objects', 'error');
+      ui.toast(err.message || 'Download unavailable for this object', 'error');
     }
   }
 
-  function downloadFile(id) {
-    ui.toast('Download requires backend storage endpoint', 'info');
-  }
-
-  function createBackup() {
-    ui.toast('Backup — creates a snapshot of your models and datasets.', 'info');
-  }
-
-  function restoreBackup() {
-    ui.toast('Restore — select a backup to restore from.', 'info');
-  }
-
-  return { render, loadFiles, downloadFile, createBackup, restoreBackup };
+  return { render, loadFiles, downloadFile };
 })();

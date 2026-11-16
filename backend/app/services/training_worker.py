@@ -19,6 +19,7 @@ from supabase import create_client
 
 from app.config import settings
 from app.core.database import get_session_factory
+from app.services.text_extraction import DatasetTextError, extract_text
 from app.core.models import Dataset, Model, TrainingJob
 from corpus_engine.tokenizer.tokenizer import CorpusTokenizer
 from corpus_engine.pytorch_engine.pytorch_trainer import PyTorchTrainer
@@ -154,7 +155,7 @@ async def run_training_job(job_id: str, owner_id: str):
             ), {"dataset_id": dataset_id})
             file_row = file_result.mappings().first()
             if not file_row:
-                raise ValueError("This dataset has no stored file. Re-upload a .txt dataset before training.")
+                raise ValueError("This dataset has no stored file. Re-upload the dataset before training.")
             expected_checksum = file_row["checksum"]
             client = _storage()
             bucket = settings.STORAGE_BUCKET
@@ -172,7 +173,10 @@ async def run_training_job(job_id: str, owner_id: str):
                         "The stored dataset file does not match the checksum recorded at upload time. "
                         "Re-upload the dataset before training."
                     )
-            text_data = raw.decode("utf-8-sig", errors="replace")
+            try:
+                text_data = extract_text(raw, file_row["file_name"])
+            except DatasetTextError as exc:
+                raise ValueError(str(exc)) from exc
             if not text_data.strip():
                 raise ValueError("The uploaded dataset contains no readable text.")
             model_config = dict(model.config or {})

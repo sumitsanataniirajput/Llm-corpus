@@ -22,6 +22,38 @@ window.router = (function () {
   let ignoreHashChange = false;
   let isNavigating = false;
   let initialized = false;
+  let currentRoute = null;
+
+  // Route → page module. Modules may expose dispose() to release sockets/timers.
+  const PAGE_MODULES = {
+    dashboard: 'dashboard',
+    models: 'models',
+    training: 'training',
+    statistics: 'statistics',
+    'ai-information': 'aiInfo',
+    chat: 'chat',
+    'prediction-lab': 'prediction',
+    'neural-lab': 'neuralLab',
+    datasets: 'datasets',
+    evaluation: 'evaluation',
+    compute: 'compute',
+    'cloud-storage': 'storage',
+    experiments: 'experiments',
+    settings: 'settings',
+  };
+
+  function disposePage(route) {
+    if (!route) return;
+    const name = PAGE_MODULES[route];
+    const page = name ? window[name] : null;
+    if (page && typeof page.dispose === 'function') {
+      try {
+        page.dispose();
+      } catch (err) {
+        window.CORPUS_APP.recordError('router.dispose.' + route, err.message, err);
+      }
+    }
+  }
 
   const routes = {
     dashboard: renderDashboard,
@@ -145,6 +177,9 @@ window.router = (function () {
         window.location.hash = expectedHash;
       }
 
+      if (currentRoute && currentRoute !== route) disposePage(currentRoute);
+      currentRoute = route;
+
       setActiveNav(route);
       closeSidebar();
 
@@ -169,6 +204,10 @@ window.router = (function () {
         window.state.setRoute(route);
       } catch (e) {}
 
+      try {
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      } catch (e) { /* older browsers */ }
+
       if (typeof AOS !== 'undefined' && AOS) {
         try { AOS.refresh(); } catch (e) {}
       }
@@ -180,16 +219,16 @@ window.router = (function () {
 
   function renderErrorPanel(route, error) {
     const msg = error && error.message ? error.message : String(error || 'Unknown error');
-    const escapedRoute = escapeHtml(route);
-    const escapedMsg = escapeHtml(msg);
     return `
-      <div class="error-panel" style="text-align:center; padding:var(--space-8); background:var(--color-surface); border:1px solid var(--color-outline-variant); border-radius:var(--radius-lg); margin:var(--space-6) auto; max-width:560px;">
-        <div style="font-size:3rem; color:var(--color-error); margin-bottom:var(--space-3);">&#9888;</div>
-        <h3 style="color:var(--color-text); margin:0 0 var(--space-2) 0; font-size:var(--text-title-medium);">Page failed to load</h3>
-        <p style="color:var(--color-text-variant); margin:0 0 var(--space-2) 0; font-size:var(--text-body-small);"><strong>Route:</strong> <span style="font-family:monospace;">${escapedRoute}</span></p>
-        <p style="color:var(--color-text-variant); margin:0 0 var(--space-4) 0; font-size:var(--text-body-small);">${escapedMsg}</p>
-        <button class="btn btn-primary" onclick="router.navigate('${escapedRoute}')">Retry</button>
-        <button class="btn btn-outline" onclick="router.navigate('dashboard')" style="margin-left:var(--space-2);">Go to Dashboard</button>
+      <div class="error-panel" style="text-align:center; max-width:560px; margin:var(--space-6) auto;">
+        <i class="fas fa-triangle-exclamation" style="font-size:1.6rem; color:var(--color-error);"></i>
+        <h3 style="margin-top:var(--space-2);">Page failed to load</h3>
+        <p><strong>Route:</strong> <span class="mono">${escapeHtml(route)}</span></p>
+        <p>${escapeHtml(msg)}</p>
+        <div class="form-actions" style="justify-content:center;">
+          <button class="btn btn-outline" type="button" onclick="router.navigate('dashboard')">Go to dashboard</button>
+          <button class="btn btn-primary" type="button" onclick="router.navigate('${escapeHtml(route)}')">Retry</button>
+        </div>
       </div>
     `;
   }
@@ -204,7 +243,13 @@ window.router = (function () {
   function setActiveNav(route) {
     try {
       getNavLinks().forEach(link => {
-        link.classList.toggle('active', link.dataset.route === route);
+        const isActive = link.dataset.route === route;
+        link.classList.toggle('active', isActive);
+        if (isActive) {
+          link.setAttribute('aria-current', 'page');
+        } else {
+          link.removeAttribute('aria-current');
+        }
       });
       const sidebarNav = getSidebarNav();
       if (!sidebarNav) return;

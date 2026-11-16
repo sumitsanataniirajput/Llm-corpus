@@ -1,186 +1,183 @@
 /* ========================================
    CORPUS ULTIMATE — Responsive
+   Breakpoints: 360 / 430 / 768 / 1024+
+   Android-first: no horizontal scroll, no overlapping labels,
+   safe-area aware chrome.
    ======================================== */
 
+/* ---------- Below desktop (sidebar becomes drawer) ---------- */
 @media (max-width: 1023px) {
   .sidebar {
-    transform: translateX(-100%);
+    transform: translateX(-102%);
+    z-index: 210;
   }
+
+  .sidebar.hidden { transform: translateX(-102%); }
 
   .main-content {
     margin-left: 0;
-    padding-bottom: var(--bottom-nav-height);
+    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-4));
   }
 
-  .page-container {
-    padding: var(--space-4);
-  }
+  .app-bar { display: flex; }
 
-  .app-bar {
-    display: flex;
-  }
+  .bottom-nav { display: flex; }
+}
 
-  .bottom-nav {
-    display: flex;
-  }
+/* ---------- Tablet and below ---------- */
+@media (max-width: 900px) {
+  .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
 
-  .chat-container {
-    height: 85vh;
-    width: 100%;
-    border-radius: 0;
-    margin: 0;
-  }
+  .chat-container { height: clamp(460px, calc(100dvh - 210px), 720px); }
 
   .chat-sidebar {
-    display: none;
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(78vw, 280px);
+    z-index: 5;
+    transform: translateX(-102%);
+    transition: transform var(--transition-base);
+    box-shadow: var(--elevation-4);
   }
 
-  .chat-message {
-    max-width: 85%;
-  }
+  .chat-container { position: relative; }
 
-  .training-charts {
-    grid-template-columns: 1fr;
-  }
+  .chat-sidebar.is-open { transform: translateX(0); }
 
-  .stats-chart-row {
-    grid-template-columns: 1fr;
-  }
-
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .model-actions {
-    flex-direction: column;
-  }
-
-  .training-actions {
-    flex-direction: column;
-  }
-
-  .training-actions .btn {
-    min-width: auto;
-  }
-
-  .dataset-selection-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .job-row-meta {
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .training-panel-header {
-    flex-wrap: wrap;
-  }
+  .chat-message { max-width: 88%; }
 }
 
-@media (max-width: 480px) {
-  .app-bar-title {
-    max-width: 160px;
-  }
+/* ---------- Phones (768 and below) ---------- */
+@media (max-width: 768px) {
+  .page-container { padding: var(--space-4) var(--space-3) var(--space-8); }
 
-  .app-bar-subtitle {
-    display: none;
-  }
+  .section-subtitle { font-size: var(--text-body-small); }
 
-  .stat-card {
-    padding: var(--space-3);
-  }
+  .page-header { margin-bottom: var(--space-4); }
 
-  .stat-value {
-    font-size: 1.5rem;
-  }
+  .page-header-actions { width: 100%; }
+  .page-header-actions .btn { flex: 1 1 auto; }
 
-  .modal-content {
-    margin: var(--space-2);
-    max-height: 95vh;
-  }
+  .upload-form-grid { grid-template-columns: minmax(0, 1fr); }
 
-  .auth-card {
-    padding: var(--space-4);
-  }
+  .training-charts { grid-template-columns: minmax(0, 1fr); }
 
-  .page-container {
-    padding: var(--space-3);
-  }
+  .stats-chart-row { grid-template-columns: minmax(0, 1fr); }
 
-  .chart-container {
-    height: 240px;
-    padding: var(--space-3);
-  }
+  .model-actions .btn,
+  .dataset-actions .btn { flex: 1 1 calc(50% - var(--space-2)); }
 
-  .config-grid {
-    grid-template-columns: 1fr;
-  }
+  .training-actions .btn { flex: 1 1 calc(50% - var(--space-2)); }
 
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
+  .chart-container { height: 230px; }
 
-  .worker-specs {
-    grid-template-columns: 1fr;
-  }
+  .modal { padding: var(--space-3); align-items: flex-end; }
+  .modal-content { max-height: 86vh; border-radius: var(--radius-lg); }
+  .auth-card { padding: var(--space-5) var(--space-4); }
 
-  .chat-message {
-    max-width: 90%;
-  }
+  .setting-item { align-items: flex-start; }
+  .setting-item > .btn,
+  .setting-item > div { flex-shrink: 0; }
 
-  .prediction-card {
-    padding: var(--space-3);
-  }
+  .table-wrapper { border-radius: var(--radius-md); }
+  th, td { padding: var(--space-2) var(--space-3); }
 
-  .layer-node {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .arrow {
-    align-self: flex-start;
-    margin-left: var(--space-3);
-  }
+  .toast-container { bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-2)); }
 }
 
-/* Landscape mobile */
-@media (max-height: 500px) and (orientation: landscape) {
-  .bottom-nav {
-    height: 56px;
-  }
+/* ---------- Large phones / small tablets (430–768) ---------- */
+@media (min-width: 430px) and (max-width: 768px) {
+  .dashboard-grid,
+  .stats-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-  .nav-link i {
-    font-size: 1.25rem;
-  }
-
-  .nav-link span {
-    font-size: var(--text-label-small);
-  }
-
-  .main-content {
-    padding-bottom: 56px;
-  }
-
-  .chat-container {
-    height: 70vh;
-  }
-
-  .chart-container {
-    height: 200px;
-  }
+  .model-library,
+  .dataset-library { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* Tablet */
-@media (min-width: 768px) and (max-width: 1023px) {
-  .page-container {
-    max-width: 900px;
+/* ---------- Phones (below 430) ---------- */
+@media (max-width: 429px) {
+  .dashboard-grid,
+  .stats-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+
+  .stat-card { padding: var(--space-3); }
+  .stat-icon { width: 1.9rem; height: 1.9rem; font-size: 0.8rem; }
+  .stat-value { font-size: 1.35rem; }
+  .stat-label { font-size: 0.625rem; }
+
+  .model-actions .btn,
+  .dataset-actions .btn,
+  .training-actions .btn { flex: 1 1 100%; }
+
+  .config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .app-bar-subtitle { display: none; }
+
+  .chat-message { max-width: 94%; }
+
+  .chat-input-area { padding: var(--space-2) var(--space-3); }
+
+  .chat-settings { grid-template-columns: minmax(0, 1fr); }
+
+  .layer-node { align-items: flex-start; }
+
+  .modal { padding: var(--space-2); }
+}
+
+/* ---------- Small phones (360) ---------- */
+@media (max-width: 379px) {
+  .page-container { padding-left: var(--space-3); padding-right: var(--space-3); }
+  .dashboard-grid,
+  .stats-overview { grid-template-columns: minmax(0, 1fr); }
+  .stat-card { padding: var(--space-3); }
+  .quick-actions { grid-template-columns: minmax(0, 1fr); }
+  .btn { padding: 0 var(--space-3); font-size: var(--text-label-medium); }
+  .btn-sm { padding: 0 var(--space-2); }
+  .chip { font-size: 0.6rem; }
+  .nav-link { font-size: 0.55rem; }
+  .nav-link i { font-size: 1rem; }
+  .app-logo { font-size: 0.95rem; }
+}
+
+/* ---------- Landscape phones ---------- */
+@media (max-height: 520px) and (orientation: landscape) {
+  :root {
+    --bottom-nav-height: 52px;
+    --top-bar-height: 52px;
   }
 
-  .chat-container {
-    max-width: 700px;
-  }
+  .nav-link i { font-size: 0.95rem; }
+  .nav-link span { font-size: 0.55rem; }
 
-  .dashboard-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .chat-container { height: calc(100dvh - 170px); }
+
+  .chart-container { height: 190px; }
+}
+
+/* ---------- Wide desktop refinements ---------- */
+@media (min-width: 1280px) {
+  .dashboard-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .page-container { padding-top: var(--space-8); }
+}
+
+/* ---------- Touch devices ---------- */
+@media (hover: none) {
+  .stat-card:hover,
+  .model-card:hover,
+  .dataset-card:hover { transform: none; }
+
+  .btn { min-height: 2.75rem; }
+  .btn-sm { min-height: 2.25rem; }
+  .icon-btn,
+  .menu-toggle { min-width: 2.75rem; min-height: 2.75rem; }
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .page-container,
+  .modal-content,
+  .toast,
+  .profile-menu,
+  .accordion-body { animation: none !important; }
+
+  .status-badge i.fa-circle { animation: none !important; }
 }

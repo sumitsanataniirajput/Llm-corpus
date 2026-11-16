@@ -57,18 +57,18 @@ window.ui = (function () {
   function setConnection(status) {
     const indicator = document.getElementById('connection-indicator');
     const text = document.getElementById('connection-text');
+    if (!indicator || !text) return;
     const dot = indicator.querySelector('i');
-    if (!indicator) return;
     indicator.classList.remove('hidden');
     if (status === 'connected') {
-      dot.className = 'fas fa-circle text-success';
+      if (dot) dot.className = 'fas fa-circle text-success';
       text.textContent = 'Connected';
     } else if (status === 'disconnected') {
-      dot.className = 'fas fa-circle text-error';
+      if (dot) dot.className = 'fas fa-circle text-error';
       text.textContent = 'Disconnected';
     } else {
-      dot.className = 'fas fa-circle text-warning';
-      text.textContent = 'Connecting...';
+      if (dot) dot.className = 'fas fa-circle text-warning';
+      text.textContent = 'Connecting…';
     }
     state.setConnection(status);
   }
@@ -153,9 +153,126 @@ window.ui = (function () {
     `;
   }
 
+  // Escape untrusted text for safe HTML interpolation
+  function escapeHtml(value) {
+    return CORPUS_UTILS.escapeHtml(value == null ? '' : String(value));
+  }
+
+  // Copy text to the clipboard with a safe fallback; updates the button label.
+  async function copyText(text, btn) {
+    const value = String(text == null ? '' : text);
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+        ok = true;
+      }
+    } catch (e) {
+      ok = false;
+    }
+    if (!ok) {
+      try {
+        const area = document.createElement('textarea');
+        area.value = value;
+        area.setAttribute('readonly', '');
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        ok = document.execCommand ? document.execCommand('copy') : false;
+        document.body.removeChild(area);
+      } catch (e) {
+        ok = false;
+      }
+    }
+    if (btn) {
+      const previous = btn.innerHTML;
+      btn.classList.toggle('copied', ok);
+      btn.innerHTML = ok ? '<i class="fas fa-check"></i> Copied' : '<i class="fas fa-times"></i> Copy failed';
+      setTimeout(function () {
+        btn.innerHTML = previous;
+        btn.classList.remove('copied');
+      }, 1600);
+    }
+    toast(ok ? 'Copied to clipboard' : 'Copy failed — select the text manually', ok ? 'success' : 'error', 1800);
+    return ok;
+  }
+
+  // Copy-to-clipboard button markup. `label` may be empty for an icon-only button.
+  function copyButton(text, label) {
+    const encoded = encodeURIComponent(String(text == null ? '' : text));
+    const caption = label ? ' ' + escapeHtml(label) : '';
+    return '<button type="button" class="copy-btn" data-copy="' + encoded + '" ' +
+      'onclick="ui.handleCopy(event, this)" title="Copy to clipboard">' +
+      '<i class="fas fa-copy"></i>' + caption + '</button>';
+  }
+
+  function handleCopy(event, btn) {
+    if (event) event.preventDefault();
+    let text = '';
+    try {
+      text = decodeURIComponent(btn.getAttribute('data-copy') || '');
+    } catch (e) {
+      text = btn.getAttribute('data-copy') || '';
+    }
+    return copyText(text, btn);
+  }
+
+  // Consistent empty-state markup used across pages.
+  function emptyState(options) {
+    const opts = options || {};
+    const icon = opts.icon || 'fa-inbox';
+    const title = escapeHtml(opts.title || 'Nothing here yet');
+    const text = opts.text ? '<p>' + escapeHtml(opts.text) + '</p>' : '';
+    const action = opts.actionLabel
+      ? '<button class="btn ' + (opts.actionClass || 'btn-primary') + '" ' +
+        (opts.actionOnclick ? 'onclick="' + opts.actionOnclick + '"' : '') + '>' +
+        (opts.actionIcon ? '<i class="fas ' + escapeHtml(opts.actionIcon) + '"></i> ' : '') +
+        escapeHtml(opts.actionLabel) + '</button>'
+      : '';
+    return '<div class="empty-state' + (opts.compact ? ' is-compact' : '') + '">' +
+      '<i class="fas ' + escapeHtml(icon) + '"></i>' +
+      '<h3>' + title + '</h3>' + text + action + '</div>';
+  }
+
+  // Skeleton placeholders for list/grid loading states.
+  function skeletonCards(count, className) {
+    const total = Math.max(1, Number(count) || 1);
+    return new Array(total).fill(0).map(function () {
+      return '<div class="skeleton-card ' + (className || '') + '">' +
+        '<div class="skeleton skeleton-line short"></div>' +
+        '<div class="skeleton skeleton-line"></div>' +
+        '<div class="skeleton skeleton-block"></div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // Human friendly relative time (client clock only).
+  function timeAgo(value) {
+    if (!value) return '—';
+    const then = new Date(value).getTime();
+    if (!Number.isFinite(then)) return '—';
+    const diff = Math.max(0, Date.now() - then);
+    const minute = 60000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diff < minute) return 'just now';
+    if (diff < hour) return Math.floor(diff / minute) + 'm ago';
+    if (diff < day) return Math.floor(diff / hour) + 'h ago';
+    if (diff < 7 * day) return Math.floor(diff / day) + 'd ago';
+    return CORPUS_UTILS.formatDate(value);
+  }
+
   return {
     toast,
     confirm,
+    escapeHtml,
+    copyText,
+    copyButton,
+    handleCopy,
+    emptyState,
+    skeletonCards,
+    timeAgo,
     closeConfirm,
     setButtonLoading,
     formatBytes,
