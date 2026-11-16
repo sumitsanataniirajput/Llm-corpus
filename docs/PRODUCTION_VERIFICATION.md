@@ -78,6 +78,45 @@ route only exists from commit that introduced `build_id 2026-11-16.2` onward.
 
 ---
 
+## 2b. Automated check (CI, every push and every 30 minutes)
+
+`scripts/verify-deployment.mjs` performs §2 and §3 automatically and exits
+non-zero when the live services are stale, so a red workflow — not a support
+report — is how a stale deployment becomes visible.
+
+```bash
+npm run verify:deployment        # uses the two Render URLs by default
+EXPECTED_COMMIT=$(git rev-parse HEAD) npm run verify:deployment
+WAIT_SECONDS=900 npm run verify:deployment   # poll while Render builds
+node scripts/verify-deployment.mjs --api http://localhost:8000 --web http://localhost:5500
+```
+
+It checks:
+
+1. `GET <API>/api/v1/version` → `build_id` equals `BUILD_ID` in
+   `backend/app/api/endpoints/version.py`, **every** `FEATURES` marker listed
+   there is reported by the running process, and `commit` equals the expected
+   SHA when one is supplied;
+2. `GET <WEB>/version.json` → `buildId` equals `frontend/version.json`;
+3. `GET <WEB>/js/datasets.js` → contains the mobile file-picker marker
+   (`drop-zone-input`), i.e. the overlay code is actually being served.
+
+Render's free-tier “Application loading” splash is retried, not reported as a
+broken service. Output names the exact stale artefact, e.g.:
+
+```
+RESULT: the live deployment does NOT match this checkout.
+- <api>/api/v1/version -> 404 Not Found. The running API does not expose the version route at all,
+  so it is OLDER than build 2026-11-16.2: redeploy corpus-ultimate-api from main
+```
+
+`.github/workflows/verify-deployment.yml` runs it on every push to `main`
+(waiting up to 15 minutes for Render to build), on demand, and on a 30-minute
+schedule so a service that quietly stops deploying is still caught. Its tests
+live in `scripts/tests/verify-deployment.test.mjs` (`npm run test:deployment`).
+
+---
+
 ## 3. Prove the frontend deployment
 
 ```bash
@@ -199,9 +238,9 @@ phone:
 ## 8. Test commands
 
 ```bash
-# frontend (jsdom)
+# frontend (jsdom) + deployment-verification tooling
 npm install
-node --test frontend/tests/*.test.mjs
+npm test                        # = node --test frontend/tests/*.test.mjs scripts/tests/*.test.mjs
 
 # backend (needs a Python env with backend/requirements.txt installed)
 python -m venv /tmp/venv
