@@ -4,11 +4,13 @@ This first production slice deliberately limits model/data sizes for Render's
 free CPU instance. Jobs run in-process; use a dedicated queue worker for scale.
 """
 import asyncio
+import hashlib
 import io
 import json
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 
 import torch
 from sqlalchemy import text, select
@@ -22,6 +24,13 @@ from corpus_engine.tokenizer.tokenizer import CorpusTokenizer
 from corpus_engine.pytorch_engine.pytorch_trainer import PyTorchTrainer
 
 logger = logging.getLogger("corpus.training")
+
+# Dataset statuses the worker refuses to train on.
+UNUSABLE_DATASET_STATUSES = {"failed", "deleted"}
+
+
+def _now():
+    return datetime.now(timezone.utc)
 
 
 def _storage():
@@ -117,39 +126,76 @@ async def run_training_job(job_id: str, owner_id: str):
             job = result.scalar_one_or_none()
             if not job or str(job.owner_id) != owner_id:
                 return
-            if not job.dataset_id:
+            dataset_id = job.dataset_id
+            model_id = job.model_id
+            if not dataset_id:
                 raise ValueError("Select a dataset before starting training.")
+            if not model_id:
+                raise ValueError("Select a model before starting training.")
+            # The job's dataset must belong to the same account.
             dataset_result = await db.execute(select(Dataset).where(
-                Dataset.id == job.dataset_id, Dataset.owner_id == job.owner_id
+                Dataset.id == dataset_id, Dataset.owner_id == job.owner_id
             ))
             dataset = dataset_result.scalar_one_or_none()
             if not dataset:
                 raise ValueError("The selected dataset was not found or is not owned by this account.")
-            model_result = await db.execute(select(Model).where(Model.id == job.model_id, Model.owner_id == job.owner_id))
+            if dataset.status in UNUSABLE_DATASET_STATUSES:
+                raise ValueError(
+                    f"Dataset '{dataset.name}' is {dataset.status} and cannot be used for training. "
+                    "Upload it again in Dataset Manager."
+                )
+            model_result = await db.execute(select(Model).where(Model.id == model_id, Model.owner_id == job.owner_id))
             model = model_result.scalar_one_or_none()
             if not model:
                 raise ValueError("The selected model was not found or is not owned by this account.")
             file_result = await db.execute(text(
-                "SELECT storage_path, file_name FROM public.dataset_files WHERE dataset_id = :dataset_id ORDER BY uploaded_at DESC LIMIT 1"
-            ), {"dataset_id": job.dataset_id})
+                "SELECT storage_path, file_name, checksum FROM public.dataset_files "
+                "WHERE dataset_id = :dataset_id ORDER BY uploaded_at DESC LIMIT 1"
+            ), {"dataset_id": dataset_id})
             file_row = file_result.mappings().first()
             if not file_row:
                 raise ValueError("This dataset has no stored file. Re-upload a .txt dataset before training.")
+            expected_checksum = file_row["checksum"]
             client = _storage()
             bucket = settings.STORAGE_BUCKET
             raw = client.storage.from_(bucket).download(file_row["storage_path"])
             if isinstance(raw, dict):
                 raw = raw.get("data", b"")
+            if isinstance(raw, str):
+                raw = raw.encode("utf-8", errors="replace")
             if not raw:
                 raise ValueError("The stored dataset file is empty or could not be downloaded.")
+            if expected_checksum:
+                actual_checksum = hashlib.sha256(raw).hexdigest()
+                if actual_checksum != expected_checksum:
+                    raise ValueError(
+                        "The stored dataset file does not match the checksum recorded at upload time. "
+                        "Re-upload the dataset before training."
+                    )
             text_data = raw.decode("utf-8-sig", errors="replace")
             if not text_data.strip():
                 raise ValueError("The uploaded dataset contains no readable text.")
-            job.status = "running"
-            job.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-            await db.commit()
             model_config = dict(model.config or {})
             job_config = dict(job.config or {})
+            dataset_name = dataset.name
+            file_name = file_row["file_name"]
+            logger.info(
+                "Starting training job %s with dataset %s (%s) from storage path %s",
+                job_id, dataset_id, file_name, file_row["storage_path"],
+            )
+            job.status = "running"
+            job.updated_at = _now()
+            await db.execute(text("""
+                INSERT INTO public.training_job_events (job_id, event, data)
+                VALUES (:job_id, 'started', CAST(:data AS jsonb))
+            """), {"job_id": job_id, "data": json.dumps({
+                "dataset_id": dataset_id,
+                "dataset_name": dataset_name,
+                "file_name": file_name,
+                "storage_path": file_row["storage_path"],
+                "model_id": model_id,
+            })})
+            await db.commit()
         cfg, metrics, checkpoint_bytes, tokenizer_bytes, token_count = await asyncio.to_thread(
             _train_sync, text_data, model_config, job_config
         )
@@ -173,18 +219,18 @@ async def run_training_job(job_id: str, owner_id: str):
                 (id, owner_id, model_id, job_id, storage_path, step, loss)
                 VALUES (:id, :owner_id, :model_id, :job_id, :storage_path, :step, :loss)
             """), {
-                "id": checkpoint_id, "owner_id": owner_id, "model_id": job.model_id,
+                "id": checkpoint_id, "owner_id": owner_id, "model_id": model_id,
                 "job_id": job_id, "storage_path": checkpoint_path,
                 "step": metrics[-1]["step"], "loss": metrics[-1]["loss"],
             })
             await db.execute(text("""
                 UPDATE public.models SET config = :config, status = 'trained',
                 updated_at = now() WHERE id = :model_id AND owner_id = :owner_id
-            """), {"config": json.dumps({**model_config, **cfg, "tokenizer_path": tokenizer_path, "checkpoint_path": checkpoint_path}), "model_id": job.model_id, "owner_id": owner_id})
+            """), {"config": json.dumps({**model_config, **cfg, "tokenizer_path": tokenizer_path, "checkpoint_path": checkpoint_path}), "model_id": model_id, "owner_id": owner_id})
             await db.execute(text("""
                 UPDATE public.datasets SET token_count = :token_count, updated_at = now()
                 WHERE id = :dataset_id AND owner_id = :owner_id
-            """), {"token_count": token_count, "dataset_id": job.dataset_id, "owner_id": owner_id})
+            """), {"token_count": token_count, "dataset_id": dataset_id, "owner_id": owner_id})
             await db.execute(text("""
                 UPDATE public.training_jobs SET status = 'completed', completed_at = now(), updated_at = now()
                 WHERE id = :job_id AND owner_id = :owner_id

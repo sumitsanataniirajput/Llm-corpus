@@ -315,6 +315,10 @@ window.CORPUS_API = (function () {
     return data;
   }
 
+  async function previewDataset(datasetId, token, maxChars = 2000) {
+    return request('/api/v1/datasets/' + encodeURIComponent(datasetId) + '/preview?max_chars=' + encodeURIComponent(maxChars), { token });
+  }
+
   async function preprocessDataset(datasetId, config, token) {
     return request('/api/v1/datasets/' + encodeURIComponent(datasetId) + '/preprocess', { method: 'POST', token, body: config });
   }
@@ -521,6 +525,56 @@ window.CORPUS_API = (function () {
     }
   }
 
+  // Normalise dataset payloads: the API returns a bare array today, but keep
+  // this tolerant so callers never end up iterating over an object.
+  function asDatasetList(data) {
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.datasets)) return data.datasets;
+    return [];
+  }
+
+  // Dedicated realtime socket for one training job.
+  // Streams real status/metric events produced by the backend from the database.
+  async function connectTrainingWS(jobId, handlers = {}) {
+    const token = await state.getAccessToken();
+    if (!token) {
+      if (handlers.onError) handlers.onError(new Error('Sign in to stream training progress.'));
+      return null;
+    }
+    const wsUrl = BASE.replace(/^http/, 'ws') +
+      '/api/v1/training/ws/' + encodeURIComponent(jobId) +
+      '?token=' + encodeURIComponent(token);
+    let socket;
+    try {
+      socket = new WebSocket(wsUrl);
+    } catch (err) {
+      if (handlers.onError) handlers.onError(err);
+      return null;
+    }
+    socket.onmessage = (ev) => {
+      let msg;
+      try {
+        msg = JSON.parse(ev.data);
+      } catch (e) {
+        return;
+      }
+      const event = msg.event;
+      const data = msg.data;
+      if (event === 'status' && handlers.onStatus) handlers.onStatus(data);
+      else if (event === 'metric' && handlers.onMetric) handlers.onMetric(data);
+      else if (event === 'log' && handlers.onLog) handlers.onLog(data);
+      else if (event === 'complete' && handlers.onComplete) handlers.onComplete(data);
+      else if (event === 'error' && handlers.onError) handlers.onError(data || msg);
+    };
+    socket.onerror = () => {
+      if (handlers.onError) handlers.onError(new Error('Live training stream unavailable.'));
+    };
+    socket.onclose = (ev) => {
+      if (handlers.onClose) handlers.onClose(ev);
+    };
+    return socket;
+  }
+
   function subscribeTraining(jobId, handlers) {
     onWSMessage('training.' + jobId, (msg) => {
       if (msg.event === 'metric' && handlers.onMetric) handlers.onMetric(msg.data);
@@ -537,7 +591,7 @@ window.CORPUS_API = (function () {
     listModels, getModel, createModel, updateModel, deleteModel, cloneModel,
     validateConfig, listModelVersions, exportModel,
     listDatasets, getDataset, createDataset, updateDataset, deleteDataset,
-    uploadDatasetFile, preprocessDataset, splitDataset,
+    uploadDatasetFile, previewDataset, preprocessDataset, splitDataset, asDatasetList,
     listTrainingJobs, createTrainingJob, getTrainingJob, pauseTrainingJob,
     resumeTrainingJob, stopTrainingJob, listTrainingMetrics, listTrainingLogs,
     listCheckpoints, saveCheckpoint, loadCheckpoint,
@@ -549,7 +603,7 @@ window.CORPUS_API = (function () {
     getSettings, updateSettings,
     listApiKeys, createApiKey, revokeApiKey,
     health,
-    connectWS, disconnectWS, onWSMessage, sendWS, subscribeTraining,
+    connectWS, disconnectWS, onWSMessage, sendWS, subscribeTraining, connectTrainingWS,
   };
 })();
 

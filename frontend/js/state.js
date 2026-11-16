@@ -7,6 +7,7 @@ window.state = (function () {
   let currentRoute = 'dashboard';
   let models = [];
   let datasets = [];
+  let pendingDatasetId = null;  // dataset chosen on the Datasets page, consumed by Training
   let trainingJobs = [];
   let activeModel = null;
   let activeJob = null;
@@ -140,7 +141,11 @@ window.state = (function () {
   function setDatasets(list) { datasets = list || []; }
   function getDatasets() { return datasets; }
   function addDataset(d) { datasets.push(d); }
+  function removeDataset(id) { datasets = datasets.filter(d => d.id !== id); }
   function getDataset(id) { return datasets.find(d => d.id === id) || null; }
+  function setPendingDatasetId(id) { pendingDatasetId = id || null; }
+  function getPendingDatasetId() { return pendingDatasetId; }
+  function clearPendingDatasetId() { pendingDatasetId = null; }
 
   // ========================================
   // Training jobs
@@ -225,7 +230,8 @@ window.state = (function () {
     setRoute, getRoute,
     setModels, getModels, addModel, updateModel, removeModel, getModel,
     setActiveModel, getActiveModel,
-    setDatasets, getDatasets, addDataset, getDataset,
+    setDatasets, getDatasets, addDataset, removeDataset, getDataset,
+    setPendingDatasetId, getPendingDatasetId, clearPendingDatasetId,
     setTrainingJobs, getTrainingJobs, addTrainingJob, updateTrainingJob,
     removeTrainingJob, getTrainingJob, setActiveJob, getActiveJob,
     setWorkers, getWorkers, getWorker,
