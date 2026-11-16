@@ -1,0 +1,6 @@
+{
+  "name": "Aria",
+  "description": "Floating AI voice assistant with screen reading and phone task automation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

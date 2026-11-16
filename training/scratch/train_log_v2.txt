@@ -1,0 +1,60 @@
+tokens: 534,576 (train 507,848 / val 26,728)
+model: 2,466,624 params (2.47M)
+step     0/2500 | loss 6.986 | lr 2.00e-05 | 863 ms/step | eta 35.9 min
+step    50/2500 | loss 3.268 | lr 1.02e-03 | 645 ms/step | eta 26.3 min
+step   100/2500 | loss 1.976 | lr 2.02e-03 | 643 ms/step | eta 25.7 min
+step   150/2500 | loss 1.542 | lr 3.00e-03 | 637 ms/step | eta 25.0 min
+step   200/2500 | loss 0.933 | lr 3.00e-03 | 633 ms/step | eta 24.3 min
+step   250/2500 | loss 1.107 | lr 2.99e-03 | 633 ms/step | eta 23.7 min
+step   300/2500 | loss 0.655 | lr 2.97e-03 | 631 ms/step | eta 23.1 min
+step   350/2500 | loss 0.623 | lr 2.95e-03 | 631 ms/step | eta 22.6 min
+step   400/2500 | loss 0.458 | lr 2.93e-03 | 633 ms/step | eta 22.1 min
+step   450/2500 | loss 0.439 | lr 2.89e-03 | 635 ms/step | eta 21.7 min
+  >> eval @ 500: train 0.385 | val 0.454 | perplexity 1.6
+step   500/2500 | loss 0.415 | lr 2.85e-03 | 647 ms/step | eta 21.6 min
+step   550/2500 | loss 0.359 | lr 2.81e-03 | 646 ms/step | eta 21.0 min
+step   600/2500 | loss 0.544 | lr 2.76e-03 | 644 ms/step | eta 20.4 min
+step   650/2500 | loss 0.368 | lr 2.71e-03 | 644 ms/step | eta 19.8 min
+step   700/2500 | loss 0.348 | lr 2.65e-03 | 643 ms/step | eta 19.3 min
+step   750/2500 | loss 0.316 | lr 2.59e-03 | 642 ms/step | eta 18.7 min
+step   800/2500 | loss 0.350 | lr 2.52e-03 | 642 ms/step | eta 18.2 min
+step   850/2500 | loss 0.322 | lr 2.45e-03 | 642 ms/step | eta 17.6 min
+step   900/2500 | loss 0.289 | lr 2.38e-03 | 641 ms/step | eta 17.1 min
+step   950/2500 | loss 0.287 | lr 2.30e-03 | 640 ms/step | eta 16.5 min
+  >> eval @ 1000: train 0.264 | val 0.310 | perplexity 1.4
+step  1000/2500 | loss 0.303 | lr 2.22e-03 | 645 ms/step | eta 16.1 min
+step  1050/2500 | loss 0.281 | lr 2.14e-03 | 645 ms/step | eta 15.6 min
+step  1100/2500 | loss 0.316 | lr 2.05e-03 | 644 ms/step | eta 15.0 min
+step  1150/2500 | loss 0.293 | lr 1.96e-03 | 643 ms/step | eta 14.5 min
+step  1200/2500 | loss 0.258 | lr 1.87e-03 | 644 ms/step | eta 14.0 min
+step  1250/2500 | loss 0.254 | lr 1.79e-03 | 645 ms/step | eta 13.4 min
+step  1300/2500 | loss 0.260 | lr 1.70e-03 | 644 ms/step | eta 12.9 min
+step  1350/2500 | loss 0.244 | lr 1.60e-03 | 644 ms/step | eta 12.3 min
+step  1400/2500 | loss 0.248 | lr 1.51e-03 | 645 ms/step | eta 11.8 min
+step  1450/2500 | loss 0.269 | lr 1.43e-03 | 645 ms/step | eta 11.3 min
+  >> eval @ 1500: train 0.232 | val 0.283 | perplexity 1.3
+step  1500/2500 | loss 0.243 | lr 1.34e-03 | 650 ms/step | eta 10.8 min
+step  1550/2500 | loss 0.261 | lr 1.25e-03 | 650 ms/step | eta 10.3 min
+step  1600/2500 | loss 0.256 | lr 1.16e-03 | 651 ms/step | eta 9.7 min
+step  1650/2500 | loss 0.220 | lr 1.08e-03 | 651 ms/step | eta 9.2 min
+step  1700/2500 | loss 0.224 | lr 1.00e-03 | 651 ms/step | eta 8.7 min
+step  1750/2500 | loss 0.237 | lr 9.24e-04 | 651 ms/step | eta 8.1 min
+step  1800/2500 | loss 0.238 | lr 8.49e-04 | 651 ms/step | eta 7.6 min
+step  1850/2500 | loss 0.222 | lr 7.78e-04 | 652 ms/step | eta 7.1 min
+step  1900/2500 | loss 0.228 | lr 7.11e-04 | 652 ms/step | eta 6.5 min
+step  1950/2500 | loss 0.216 | lr 6.49e-04 | 652 ms/step | eta 6.0 min
+  >> eval @ 2000: train 0.204 | val 0.238 | perplexity 1.3
+step  2000/2500 | loss 0.234 | lr 5.91e-04 | 654 ms/step | eta 5.4 min
+step  2050/2500 | loss 0.225 | lr 5.37e-04 | 654 ms/step | eta 4.9 min
+step  2100/2500 | loss 0.208 | lr 4.88e-04 | 654 ms/step | eta 4.3 min
+step  2150/2500 | loss 0.210 | lr 4.45e-04 | 653 ms/step | eta 3.8 min
+step  2200/2500 | loss 0.215 | lr 4.07e-04 | 653 ms/step | eta 3.3 min
+step  2250/2500 | loss 0.210 | lr 3.75e-04 | 652 ms/step | eta 2.7 min
+step  2300/2500 | loss 0.216 | lr 3.48e-04 | 652 ms/step | eta 2.2 min
+step  2350/2500 | loss 0.227 | lr 3.27e-04 | 651 ms/step | eta 1.6 min
+step  2400/2500 | loss 0.215 | lr 3.12e-04 | 651 ms/step | eta 1.1 min
+step  2450/2500 | loss 0.227 | lr 3.03e-04 | 650 ms/step | eta 0.5 min
+  >> eval @ 2500: train 0.192 | val 0.223 | perplexity 1.3
+
+done in 27.1 min | best val loss 0.223 | perplexity 1.3
+checkpoint: /home/user/Llm-corpus/training/scratch/checkpoints/aria_gpt.pt
