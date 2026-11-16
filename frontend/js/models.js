@@ -117,19 +117,19 @@ window.models = (function () {
 
   function renderModelList() {
     const container = document.getElementById('model-library');
-    const models = state.getModels() || [];
-    if (models.length === 0) {
+    const modelList = state.getModels() || [];
+    if (modelList.length === 0) {
       container.innerHTML = '<div class="empty-state"><i class="fas fa-cube"></i><h3>No models yet</h3><p>Create your first CORPUS model to get started.</p></div>';
       return;
     }
-    container.innerHTML = models.map(m => `
+    container.innerHTML = modelList.map(m => `
       <div class="model-card" data-aos="fade-up">
         <div class="model-header">
           <div class="model-info">
             <h3>${escapeHtml(m.name || 'Unnamed')}</h3>
             <div class="model-id">${escapeHtml(m.id)}</div>
           </div>
-          ${models.statusBadge(m.status || 'idle')}
+          ${window.models.statusBadge(m.status || 'idle')}
         </div>
         <div class="model-meta">
           <span class="model-meta-item"><i class="fas fa-layer-group"></i> ${m.config?.n_layers || '—'} layers</span>
