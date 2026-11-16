@@ -13,6 +13,147 @@ window.datasets = (function () {
   let queue = [];
   let uploading = false;
   let searchTerm = '';
+  let queueDbPromise = null;
+
+  const QUEUE_DB_NAME = 'corpus-ultimate-upload-queue';
+  const QUEUE_STORE_NAME = 'pending-files';
+
+  function queueOwnerKey() {
+    const user = state.getUser() || {};
+    return user.id || user.user_id || null;
+  }
+
+  function openQueueDatabase() {
+    if (!window.indexedDB) return Promise.resolve(null);
+    if (queueDbPromise) return queueDbPromise;
+
+    queueDbPromise = new Promise((resolve, reject) => {
+      let request;
+      try {
+        request = window.indexedDB.open(QUEUE_DB_NAME, 1);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(QUEUE_STORE_NAME)) {
+          db.createObjectStore(QUEUE_STORE_NAME, { keyPath: 'ownerId' });
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => {
+          db.close();
+          queueDbPromise = null;
+        };
+        resolve(db);
+      };
+      request.onerror = () => reject(request.error || new Error('Could not open local upload storage.'));
+      request.onblocked = () => reject(new Error('Local upload storage is busy in another tab.'));
+    }).catch(err => {
+      queueDbPromise = null;
+      throw err;
+    });
+
+    return queueDbPromise;
+  }
+
+  async function persistPendingQueue(datasetNameOverride) {
+    const ownerId = queueOwnerKey();
+    if (!ownerId) return false;
+
+    let db;
+    try {
+      db = await openQueueDatabase();
+      if (!db) return false;
+
+      const record = {
+        ownerId: String(ownerId),
+        datasetName: datasetNameOverride != null
+          ? String(datasetNameOverride)
+          : String((document.getElementById('datasets-name') || {}).value || ''),
+        savedAt: Date.now(),
+        items: queue.filter(item => item.file).map(item => ({
+          file: item.file,
+          name: item.name,
+          size: item.size,
+          datasetId: item.datasetId || null,
+          state: item.state === 'done' ? 'done' : 'ready',
+          message: item.state === 'done' ? 'Already uploaded.' : 'Restored from this device. Ready to upload.',
+        })),
+      };
+
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(QUEUE_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(QUEUE_STORE_NAME);
+        if (record.items.length) store.put(record);
+        else store.delete(String(ownerId));
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('Could not save pending files.'));
+        tx.onabort = () => reject(tx.error || new Error('Saving pending files was interrupted.'));
+      });
+      return true;
+    } catch (err) {
+      // Upload must still work in memory when private browser storage is full
+      // or blocked. Do not silently pretend persistence succeeded.
+      console.warn('[CORPUS] Could not persist pending dataset files:', err);
+      return false;
+    }
+  }
+
+  async function restorePendingQueue() {
+    if (queue.length) return;
+    const ownerId = queueOwnerKey();
+    if (!ownerId) return;
+
+    let db;
+    try {
+      db = await openQueueDatabase();
+      if (!db) return;
+      const record = await new Promise((resolve, reject) => {
+        const tx = db.transaction(QUEUE_STORE_NAME, 'readonly');
+        const request = tx.objectStore(QUEUE_STORE_NAME).get(String(ownerId));
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error || new Error('Could not restore pending files.'));
+      });
+      if (!record || !Array.isArray(record.items) || !record.items.length) return;
+
+      queue = record.items.map(item => {
+        let file = item.file;
+        const isFile = !!(file && typeof window.File === 'function' && file instanceof window.File);
+        const isBlob = !!(file && typeof window.Blob === 'function' && file instanceof window.Blob);
+        if (isBlob && !isFile && typeof window.File === 'function') {
+          file = new window.File([file], item.name || 'dataset-file', {
+            type: file.type || 'application/octet-stream',
+            lastModified: Date.now(),
+          });
+        }
+        if (!file) return null;
+        const done = item.state === 'done';
+        return {
+          file,
+          name: item.name || file.name,
+          size: Number(item.size || file.size || 0),
+          datasetId: item.datasetId || null,
+          state: done ? 'done' : 'ready',
+          progress: done ? 100 : 0,
+          message: done ? 'Already uploaded.' : 'Restored from this device. Ready to upload.',
+        };
+      }).filter(Boolean);
+
+      if (!queue.length) return;
+      const area = document.getElementById('datasets-upload-area');
+      if (area) area.style.display = 'block';
+      const nameInput = document.getElementById('datasets-name');
+      if (nameInput && record.datasetName) nameInput.value = record.datasetName;
+      renderQueue();
+      ui.toast(queue.length + ' pending file' + (queue.length === 1 ? '' : 's') + ' restored from this device.', 'info');
+    } catch (err) {
+      console.warn('[CORPUS] Could not restore pending dataset files:', err);
+    }
+  }
 
   function esc(value) {
     return ui.escapeHtml(value == null ? '' : String(value));
@@ -159,6 +300,7 @@ window.datasets = (function () {
     `;
 
     bindUploadInputs();
+    await restorePendingQueue();
     await loadDatasets();
   }
 
@@ -200,7 +342,12 @@ window.datasets = (function () {
         // parent form/router handler or trigger a document-level submit path.
         event.stopPropagation();
         const picked = Array.prototype.slice.call(input.files || []);
-        if (picked.length) setQueue(picked);
+        if (picked.length) {
+          setQueue(picked);
+          // Persist the File blobs immediately. Android may suspend/recreate
+          // the page after returning from the system document picker.
+          await persistPendingQueue();
+        }
       });
     }
     if (!drop || drop.dataset.bound === '1') return;
@@ -307,6 +454,7 @@ window.datasets = (function () {
   function clearSelection() {
     if (uploading) return;
     queue = [];
+    void persistPendingQueue();
     renderQueue();
     const input = document.getElementById('datasets-file');
     if (input) input.value = '';
@@ -498,6 +646,7 @@ window.datasets = (function () {
     }
 
     uploading = true;
+    await persistPendingQueue(baseName);
     const uploadBtn = document.getElementById('datasets-upload-btn');
     ui.setButtonLoading(uploadBtn, true);
     let successCount = 0;
@@ -533,6 +682,9 @@ window.datasets = (function () {
           datasetId = (created && created.dataset && created.dataset.id) || (created && created.id);
           if (!datasetId) throw new Error('The backend did not return a dataset id.');
           queue[index].datasetId = datasetId;
+          // Keep the created record id so an interrupted mobile upload can
+          // retry against the same dataset instead of creating duplicates.
+          await persistPendingQueue(baseName);
         }
 
         queue[index].message = 'Uploading bytes…';
@@ -548,12 +700,14 @@ window.datasets = (function () {
         queue[index].progress = 100;
         queue[index].message = 'Stored and registered.';
         updateProgress(index);
+        await persistPendingQueue(baseName);
         successCount += 1;
         lastDatasetId = datasetId;
       } catch (err) {
         queue[index].state = 'failed';
         queue[index].message = err && err.message ? err.message : 'Upload failed';
         updateProgress(index);
+        await persistPendingQueue(baseName);
         failedCount += 1;
       }
     }
@@ -569,11 +723,13 @@ window.datasets = (function () {
       if (input) input.value = '';
       if (nameInput) nameInput.value = '';
       queue = [];
+      await persistPendingQueue('');
       renderQueue();
       const progress = document.getElementById('datasets-progress');
       if (progress) progress.innerHTML = '';
     } else if (successCount > 0) {
       queue = queue.filter(item => item.state !== 'done');
+      await persistPendingQueue(baseName);
       renderQueue();
       renderProgress();
       ui.toast(successCount + ' uploaded, ' + failedCount + ' failed — fix or retry below.', 'warning');

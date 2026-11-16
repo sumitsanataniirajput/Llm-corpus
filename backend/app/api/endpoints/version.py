@@ -23,7 +23,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 # Bump when a shipped fix must be verified in production.
-BUILD_ID = "2026-11-16.3"
+BUILD_ID = "2026-11-16.4"
 
 # Behaviour markers that must be present in a healthy production deployment.
 FEATURES = [
@@ -35,6 +35,7 @@ FEATURES = [
     "version-endpoint-present",      # this route exists at all on the deployed API
     "checkpoint-model-ownership",    # checkpoints inherit access from their parent model
     "production-web-cors-origin",    # deployed frontend origin is accepted by CORS
+    "android-upload-queue-persistence", # frontend IndexedDB preserves selected files across Android reloads
 ]
 
 _STARTED_AT = datetime.datetime.now(datetime.timezone.utc).isoformat()
