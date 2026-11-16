@@ -50,3 +50,19 @@ supabase/config.toml
 # Misc
 *.tmp
 *.bak
+
+# Android / Aria app (AI Studio export)
+*.iml
+.gradle
+.kotlin
+local.properties
+/captures
+.externalNativeBuild
+.cxx
+debug.keystore
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml

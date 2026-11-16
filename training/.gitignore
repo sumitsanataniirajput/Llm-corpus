@@ -1,0 +1,12 @@
+# Generated dataset -- regenerate deterministically with generate_dataset.py
+aria/data/*.jsonl
+
+# Training outputs
+*-lora/
+*.zip
+results/
+checkpoints/
+
+__pycache__/
+*.pyc
+.pytest_cache/
