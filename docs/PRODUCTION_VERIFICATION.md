@@ -48,7 +48,7 @@ Expected:
 ```json
 {
   "service": "corpus-ultimate-api",
-  "build_id": "2026-11-16.2",
+  "build_id": "2026-11-17.1",
   "commit": "<sha of the newest commit on main>",
   "branch": "main",
   "features": [
@@ -56,7 +56,8 @@ Expected:
     "owner-column-type-agnostic",
     "owner-delete-authorized",
     "model-delete-cleanup",
-    "ownership-diagnostics"
+    "ownership-diagnostics",
+    "version-endpoint-present"
   ]
 }
 ```
@@ -74,7 +75,7 @@ service is running an old build:
    re-check *Settings → Repository* and the URL you curl.
 
 A missing `/api/v1/version` route (404) is itself proof of an old build: the
-route only exists from commit that introduced `build_id 2026-11-16.2` onward.
+route only exists from commit that introduced `build_id 2026-11-17.1` onward.
 
 ---
 
@@ -98,8 +99,16 @@ It checks:
    there is reported by the running process, and `commit` equals the expected
    SHA when one is supplied;
 2. `GET <WEB>/version.json` → `buildId` equals `frontend/version.json`;
-3. `GET <WEB>/js/datasets.js` → contains the mobile file-picker marker
-   (`drop-zone-input`), i.e. the overlay code is actually being served.
+3. Served assets contain the shipped markers, i.e. the real code is live and
+   not just a matching build id:
+   * `GET <WEB>/js/datasets.js` → `drop-zone-input` (transparent overlay input)
+     and `datasets-drop` (tap-to-open zone with the click fallback),
+   * `GET <WEB>/css/responsive.css` → `min-aspect-ratio: 21/9` (large-display /
+     TV scaling breakpoints),
+   * `GET <WEB>/index.html` → `width=device-width` (responsive viewport).
+
+   `index.html` also requests every local stylesheet/script with
+   `?v=<buildId>`, so a stale browser cache can no longer hide a shipped fix.
 
 Render's free-tier “Application loading” splash is retried, not reported as a
 broken service. Output names the exact stale artefact, e.g.:
@@ -107,7 +116,7 @@ broken service. Output names the exact stale artefact, e.g.:
 ```
 RESULT: the live deployment does NOT match this checkout.
 - <api>/api/v1/version -> 404 Not Found. The running API does not expose the version route at all,
-  so it is OLDER than build 2026-11-16.2: redeploy corpus-ultimate-api from main
+  so it is OLDER than build 2026-11-17.1: redeploy corpus-ultimate-api from main
 ```
 
 `.github/workflows/verify-deployment.yml` runs it on every push to `main`
@@ -221,8 +230,14 @@ phone:
 2. Sign in → **Datasets** → **Upload dataset**.
 3. Tap the middle of the drop zone (the icon/text area) → the native **Files**
    picker must open. Cancel, then tap again → it must open again (repeat 3×).
-4. Tap directly on the "Tap to choose files" pill → picker opens **once**
-   (no second dialog after selecting).
+4. Tap each part of the zone in turn — the icon, the "Drop files here, or tap to
+   browse" text, the format/size line, the "Tap to choose files" pill, and the
+   empty gap between them. Every tap must open the picker, and **exactly one**
+   dialog each time (the zone is a plain container plus a transparent overlay
+   input, so there is no label/JS double activation).
+4b. Hard-refresh (Chrome ⋮ → Reload) and repeat: local assets are requested as
+   `css/…?v=<buildId>`, so the old stylesheet must not be reused. In DevTools
+   remote debugging the network panel must show `?v=2026-11-17.1`.
 5. Select one `.txt` file → it appears once in the upload queue → **Upload** →
    progress reaches 100% and the dataset shows `uploaded`.
 6. Select a `.pdf` file → same flow.
@@ -230,8 +245,31 @@ phone:
    files appear in the queue and each gets its own dataset record.
 8. Rotate to landscape and repeat step 3.
 
+---
+
+## 7b. Display-scaling check (phone → desktop → TV)
+
+Sizing is driven by the root font size (16px phone, 17px ≥1440px, 19px ≥1920px,
+22px ≥2560px) and `--page-max` (1280 → 1360 → 1680 → 2080px), so the same
+layout scales instead of stretching. Check, at each size, that:
+
+1. nothing overflows horizontally (no sideways scroll, no clipped card);
+2. text lines stay readable — the ultra-wide (`min-aspect-ratio: 21/9`) rule
+   caps body copy with `max-width: <n>ch` and centres a `min(2100px, 78vw)`
+   column;
+3. stat cards add **columns** (5 at ≥1280px, 6 at ≥1920px, 8 at ≥2560px),
+   they do not grow into billboards;
+4. charts stay capped (`max-height: … vh`) and the chat panel is not full-width
+   on a TV;
+5. keyboard/remote focus draws a 3px ring (`@media (min-width: 1600px)` and
+   `(hover: none)`), so DPad navigation is visible from the sofa;
+6. print preview (Ctrl+P) hides the sidebar, app bar and bottom nav.
+
+`frontend/tests/responsive-layout.test.mjs` pins all of the above to the
+stylesheet; it runs in `npm test`.
+
 `GET https://corpus-ultimate-web.onrender.com/version.json` must already show
-`buildId 2026-11-16.2` before you test — otherwise you are testing the old CSS.
+`buildId 2026-11-17.1` before you test — otherwise you are testing the old CSS.
 
 ---
 
@@ -279,6 +317,6 @@ this one — is invisible to users.
 Both also need to be re-checked after the redeploy:
 
 ```bash
-curl -s https://corpus-ultimate-api.onrender.com/api/v1/version   # build_id 2026-11-16.2 + commit == main
-curl -s https://corpus-ultimate-web.onrender.com/version.json     # buildId 2026-11-16.2
+curl -s https://corpus-ultimate-api.onrender.com/api/v1/version   # build_id 2026-11-17.1 + commit == main
+curl -s https://corpus-ultimate-web.onrender.com/version.json     # buildId 2026-11-17.1
 ```

@@ -7,27 +7,37 @@
   <meta name="theme-color" content="#16151a">
   <meta name="color-scheme" content="dark light">
   <title>CORPUS ULTIMATE</title>
+  <!-- Warm the connections used on first paint: the API (Render free tier has a
+       cold start) and the font/CSS hosts. Cheap, and it removes a full TLS
+       handshake from the critical path on mobile and on TV browsers. -->
+  <link rel="preconnect" href="https://corpus-ultimate-api.onrender.com" crossorigin>
+  <link rel="dns-prefetch" href="https://corpus-ultimate-api.onrender.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+  <link rel="dns-prefetch" href="https://unpkg.com">
   <!-- Font Awesome -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Google Fonts: Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- Chart.js -->
+  <!-- Chart.js / SweetAlert2 / Supabase expose globals (window.Chart,
+       Swal, supabase) that the app modules below read while they load, so they
+       must stay classic, ordered scripts. They are cached aggressively by the
+       CDN; `display=swap` on the font link keeps text visible regardless. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <!-- Supabase JS client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- AOS animations -->
   <link href="https://unpkg.com/aos@2.3.4/dist/aos.css" rel="stylesheet">
   <script src="https://unpkg.com/aos@2.3.4/dist/aos.js"></script>
-  <!-- Application styles -->
-  <link rel="stylesheet" href="css/variables.css">
-  <link rel="stylesheet" href="css/layout.css">
-  <link rel="stylesheet" href="css/components.css">
-  <link rel="stylesheet" href="css/pages.css">
-  <link rel="stylesheet" href="css/responsive.css">
+  <!-- Application styles and scripts are versioned with ?v=<buildId> so a
+       cached stylesheet can never hide a shipped fix (mobile file picker). -->
+  <link rel="stylesheet" href="css/variables.css?v=2026-11-17.1">
+  <link rel="stylesheet" href="css/layout.css?v=2026-11-17.1">
+  <link rel="stylesheet" href="css/components.css?v=2026-11-17.1">
+  <link rel="stylesheet" href="css/pages.css?v=2026-11-17.1">
+  <link rel="stylesheet" href="css/responsive.css?v=2026-11-17.1">
 </head>
 <body>
 
@@ -168,30 +178,30 @@
   </div>
 
   <!-- Application JavaScript -->
-  <script src="js/config.js"></script>
-  <script src="js/utils.js"></script>
-  <script src="js/supabase-client.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/auth.js"></script>
-  <script src="js/state.js"></script>
-  <script src="js/components.js"></script>
-  <script src="js/charts.js"></script>
-  <script src="js/app-context.js"></script>
-  <script src="js/router.js"></script>
-  <script src="js/dashboard.js"></script>
-  <script src="js/models.js"></script>
-  <script src="js/training.js"></script>
-  <script src="js/statistics.js"></script>
-  <script src="js/chat.js"></script>
-  <script src="js/prediction.js"></script>
-  <script src="js/neural-lab.js"></script>
-  <script src="js/ai-information.js"></script>
-  <script src="js/datasets.js"></script>
-  <script src="js/evaluation.js"></script>
-  <script src="js/compute.js"></script>
-  <script src="js/storage.js"></script>
-  <script src="js/experiments.js"></script>
-  <script src="js/settings.js"></script>
-  <script src="js/app-bootstrap.js"></script>
+  <script src="js/config.js?v=2026-11-17.1"></script>
+  <script src="js/utils.js?v=2026-11-17.1"></script>
+  <script src="js/supabase-client.js?v=2026-11-17.1"></script>
+  <script src="js/api.js?v=2026-11-17.1"></script>
+  <script src="js/auth.js?v=2026-11-17.1"></script>
+  <script src="js/state.js?v=2026-11-17.1"></script>
+  <script src="js/components.js?v=2026-11-17.1"></script>
+  <script src="js/charts.js?v=2026-11-17.1"></script>
+  <script src="js/app-context.js?v=2026-11-17.1"></script>
+  <script src="js/router.js?v=2026-11-17.1"></script>
+  <script src="js/dashboard.js?v=2026-11-17.1"></script>
+  <script src="js/models.js?v=2026-11-17.1"></script>
+  <script src="js/training.js?v=2026-11-17.1"></script>
+  <script src="js/statistics.js?v=2026-11-17.1"></script>
+  <script src="js/chat.js?v=2026-11-17.1"></script>
+  <script src="js/prediction.js?v=2026-11-17.1"></script>
+  <script src="js/neural-lab.js?v=2026-11-17.1"></script>
+  <script src="js/ai-information.js?v=2026-11-17.1"></script>
+  <script src="js/datasets.js?v=2026-11-17.1"></script>
+  <script src="js/evaluation.js?v=2026-11-17.1"></script>
+  <script src="js/compute.js?v=2026-11-17.1"></script>
+  <script src="js/storage.js?v=2026-11-17.1"></script>
+  <script src="js/experiments.js?v=2026-11-17.1"></script>
+  <script src="js/settings.js?v=2026-11-17.1"></script>
+  <script src="js/app-bootstrap.js?v=2026-11-17.1"></script>
 </body>
 </html>

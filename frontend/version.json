@@ -1,11 +1,13 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-16.2",
+  "buildId": "2026-11-17.1",
   "sourceRef": "main",
   "notes": [
-    "Android file picker: the real <input type=file> is a transparent full-size overlay over the dataset drop zone (frontend/css/components.css, frontend/js/datasets.js).",
-    "Model deletion: owner ids are normalized before comparison and the models list filter is uuid/text agnostic (backend)."
+    "Dataset upload on mobile: the drop zone is a plain container with a transparent full-size <input type=file> overlay, plus a click fallback that opens the native picker exactly once — tapping the zone, the icon, the copy or the 'Tap to choose files' pill all open the phone's file manager (frontend/js/datasets.js, frontend/css/components.css).",
+    "The file input keeps its native rendering (no appearance:none) because stripping it can stop Android Chrome from opening the picker.",
+    "Fluid scaling for every aspect ratio: root font-size steps at 1440/1920/2560px, --page-max grows to 1680px/2080px, extra grid columns instead of stretched cards, ultra-wide (21:9, 32:9) keeps a measured reading column, portrait tablets keep a narrow column, TV/remote focus rings are 3px, and print hides chrome (frontend/css/responsive.css).",
+    "Local CSS/JS are requested with ?v=<buildId> so a cached stylesheet can never hide a shipped fix again (frontend/index.html)."
   ],
   "howToVerify": "GET <frontend-url>/version.json — the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }

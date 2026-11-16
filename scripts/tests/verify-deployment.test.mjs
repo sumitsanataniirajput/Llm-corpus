@@ -65,6 +65,27 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+// Exactly the markers scripts/verify-deployment.mjs demands from the served
+// assets, so a "current" mock site really does look like a current deployment.
+const SHIPPED_ASSETS = {
+  '/js/datasets.js': 'const overlay = "drop-zone-input"; const zone = "datasets-drop";',
+  '/css/responsive.css': '@media (min-aspect-ratio: 21/9) and (min-width: 1600px) { :root { --page-max: min(2100px, 78vw); } }',
+  '/index.html': '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">',
+};
+
+function serveShippedAssets(req, res) {
+  const body = SHIPPED_ASSETS[req.url];
+  if (body === undefined) {
+    res.writeHead(404);
+    return res.end();
+  }
+  const type = req.url.endsWith('.css')
+    ? 'text/css'
+    : req.url.endsWith('.js') ? 'application/javascript' : 'text/html';
+  res.writeHead(200, { 'content-type': type });
+  return res.end(body);
+}
+
 test('a deployment that matches this checkout passes', async () => {
   const builds = expectedBuilds();
   const site = await startSite((req, res) => {
@@ -77,11 +98,7 @@ test('a deployment that matches this checkout passes', async () => {
       });
     }
     if (req.url === '/version.json') return json(res, 200, { buildId: builds.frontend });
-    if (req.url === '/js/datasets.js') {
-      res.writeHead(200, { 'content-type': 'application/javascript' });
-      return res.end('const overlay = "drop-zone-input";');
-    }
-    res.writeHead(404); res.end();
+    return serveShippedAssets(req, res);
   });
 
   try {
@@ -111,7 +128,9 @@ test('a stale deployment fails with an actionable message', async () => {
     assert.match(result.stdout, /does NOT match this checkout/);
     assert.match(result.stdout, /does not expose the version route/);
     assert.match(result.stdout, /does not serve version.json/);
-    assert.match(result.stdout, /predates the\s+mobile file-picker overlay/);
+    assert.match(result.stdout, /predate the\s+mobile file-picker overlay/);
+    assert.match(result.stdout, /predate the\s+large-display \/ TV scaling breakpoints/);
+    assert.match(result.stdout, /picker overlay served\s+no/);
   } finally {
     await site.close();
   }
@@ -129,8 +148,7 @@ test('an old frontend buildId fails even when the API is current', async () => {
       });
     }
     if (req.url === '/version.json') return json(res, 200, { buildId: '2026-01-01.0' });
-    res.writeHead(200, { 'content-type': 'application/javascript' });
-    return res.end('drop-zone-input');
+    return serveShippedAssets(req, res);
   });
 
   try {
@@ -162,8 +180,7 @@ test("Render's cold-start splash is retried, not reported as broken", async () =
       });
     }
     if (req.url === '/version.json') return json(res, 200, { buildId: builds.frontend });
-    res.writeHead(200, { 'content-type': 'application/javascript' });
-    return res.end('drop-zone-input');
+    return serveShippedAssets(req, res);
   });
 
   try {
@@ -182,8 +199,7 @@ test('missing feature markers fail (proves the deployed build predates the fix)'
       return json(res, 200, { service: 'corpus-ultimate-api', build_id: builds.backend, commit: null, features: [] });
     }
     if (req.url === '/version.json') return json(res, 200, { buildId: builds.frontend });
-    res.writeHead(200, { 'content-type': 'application/javascript' });
-    return res.end('drop-zone-input');
+    return serveShippedAssets(req, res);
   });
 
   try {

@@ -13,8 +13,10 @@
  *      must be reported by the running process, and (when known) commit must
  *      equal --expected-commit / EXPECTED_COMMIT.
  *   2. GET <WEB>/version.json    -> buildId must equal frontend/version.json.
- *   3. GET <WEB>/js/datasets.js  -> must contain the mobile file-picker marker,
- *      i.e. the drop-zone overlay code is actually being served.
+ *   3. GET <WEB>/js/datasets.js, /css/responsive.css and /index.html -> must
+ *      contain the shipped markers (mobile file-picker overlay, tap-to-open
+ *      zone, large-display/TV breakpoints, responsive viewport), i.e. the
+ *      actual code is being served and not just a matching build id.
  *
  * Exits 0 only when everything matches. Exits 1 with actionable output
  * otherwise, so CI fails instead of silently shipping a stale build.
@@ -43,7 +45,35 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const MARKER_IN_DATASETS_JS = 'drop-zone-input';
+// Markers that must be present in the *served* assets. Build ids alone cannot
+// catch a static host that is serving cached/old files, so the exact code paths
+// that mobile and large-screen users depend on are checked byte-for-byte.
+const ASSET_MARKERS = [
+  {
+    path: '/js/datasets.js',
+    marker: 'drop-zone-input',
+    label: 'mobile file-picker overlay',
+    detail: 'datasetAssetHasPickerOverlay',
+  },
+  {
+    path: '/js/datasets.js',
+    marker: 'datasets-drop',
+    label: 'tap-to-open dataset picker zone',
+    detail: 'datasetAssetHasTapZone',
+  },
+  {
+    path: '/css/responsive.css',
+    marker: 'min-aspect-ratio: 21/9',
+    label: 'large-display / TV scaling breakpoints',
+    detail: 'cssHasLargeDisplayBreakpoints',
+  },
+  {
+    path: '/index.html',
+    marker: 'width=device-width',
+    label: 'responsive viewport meta tag',
+    detail: 'htmlHasViewportMeta',
+  },
+];
 
 function parseArgs(argv) {
   const args = { api: null, web: null, expectedCommit: null };
@@ -301,24 +331,29 @@ async function checkFrontend(expectedBuildId) {
   }
 
   if (!SKIP_ASSET_MARKERS) {
-    const assetUrl = `${WEB}/js/datasets.js`;
-    try {
-      const asset = await httpGet(assetUrl);
-      const served = asset.status === 200 ? asset.body : '';
-      result.details.datasetAssetHasPickerOverlay = served.includes(MARKER_IN_DATASETS_JS);
-      if (asset.status !== 200) {
+    const fetched = new Map();
+    for (const { path: assetPath, marker, label, detail } of ASSET_MARKERS) {
+      const assetUrl = `${WEB}${assetPath}`;
+      try {
+        if (!fetched.has(assetUrl)) fetched.set(assetUrl, await httpGet(assetUrl));
+        const asset = fetched.get(assetUrl);
+        const served = asset.status === 200 ? asset.body : '';
+        const found = served.includes(marker);
+        result.details[detail] = found;
+        if (asset.status !== 200) {
+          result.ok = false;
+          result.problems.push(`${assetUrl} -> ${asset.status} (expected 200).`);
+        } else if (!found) {
+          result.ok = false;
+          result.problems.push(
+            `${assetUrl} does not contain "${marker}", so the served files predate the ${label}. ` +
+              `Hard-reload/redeploy corpus-ultimate-web.`
+          );
+        }
+      } catch (err) {
         result.ok = false;
-        result.problems.push(`${assetUrl} -> ${asset.status} (expected 200).`);
-      } else if (!served.includes(MARKER_IN_DATASETS_JS)) {
-        result.ok = false;
-        result.problems.push(
-          `${assetUrl} does not contain "${MARKER_IN_DATASETS_JS}", i.e. the served JS predates the ` +
-            `mobile file-picker overlay. Hard-reload/redeploy corpus-ultimate-web.`
-        );
+        result.problems.push(`could not reach ${assetUrl} (${describeFetchError(err)}).`);
       }
-    } catch (err) {
-      result.ok = false;
-      result.problems.push(`could not reach ${assetUrl} (${describeFetchError(err)}).`);
     }
   }
 
@@ -341,6 +376,9 @@ function printReport(backend, frontend, expected) {
   line('frontend buildId', frontend.details.webBuild || '(unreachable)');
   if (!SKIP_ASSET_MARKERS) {
     line('picker overlay served', frontend.details.datasetAssetHasPickerOverlay === true ? 'yes' : 'no');
+    line('tap-to-open zone served', frontend.details.datasetAssetHasTapZone === true ? 'yes' : 'no');
+    line('large-display CSS served', frontend.details.cssHasLargeDisplayBreakpoints === true ? 'yes' : 'no');
+    line('viewport meta served', frontend.details.htmlHasViewportMeta === true ? 'yes' : 'no');
   }
   console.log('');
 
