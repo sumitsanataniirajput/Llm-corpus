@@ -131,6 +131,13 @@ async def test_worker_trains_with_the_job_dataset_from_storage(http, storage, mo
     assert started["file_name"] == "worker.txt"
     assert started["storage_path"] == dataset["storage_path"]
     assert len(checkpoints) == 1
+
+    # Checkpoint listing now authorizes through the related model (the live
+    # checkpoints table intentionally has no owner_id column).
+    checkpoint_response = await http.get(f"/api/v1/training/checkpoints?model_id={model['id']}")
+    assert checkpoint_response.status_code == 200, checkpoint_response.text
+    assert [row["storage_path"] for row in checkpoint_response.json()] == [checkpoints[0]["storage_path"]]
+
     assert dataset_row["token_count"] > 0
     assert model_row["status"] == "trained"
 
