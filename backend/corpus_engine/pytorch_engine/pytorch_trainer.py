@@ -34,14 +34,16 @@ class PyTorchTrainer:
         total_loss = 0.0
         n_batches = 0
         self.optimizer.zero_grad()
+        total_batches = len(dataloader)
         for i, (input_ids, target_ids) in enumerate(dataloader):
             input_ids = input_ids.to(self.device)
             target_ids = target_ids.to(self.device)
             logits = self.model(input_ids)
-            loss = self.criterion(logits.view(-1, logits.size(-1)), target_ids.view(-1))
+            loss = self.criterion(logits.reshape(-1, logits.size(-1)), target_ids.reshape(-1))
             loss = loss / accum_steps
             loss.backward()
-            if (i + 1) % accum_steps == 0:
+            should_step = ((i + 1) % accum_steps == 0) or (i + 1 == total_batches)
+            if should_step:
                 if clip_grad > 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
                 self.optimizer.step()
@@ -99,8 +101,8 @@ class PyTorchTrainer:
             for _ in range(max_tokens):
                 context = generated[:, -self.config["context_length"]:]
                 logits = self.model(context)
-                next_logits = logits[0, -1, :] / temperature
-                if top_k > 0:
+                next_logits = logits[0, -1, :] / max(float(temperature), 1e-5)
+                if top_k > 0 and top_k < next_logits.numel():
                     vals, idx = torch.topk(next_logits, top_k)
                     next_logits = torch.full_like(next_logits, float("-inf"))
                     next_logits[idx] = vals
