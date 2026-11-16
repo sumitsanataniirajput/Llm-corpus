@@ -212,3 +212,34 @@ python -m venv /tmp/venv
 The backend suite starts a throw-away PostgreSQL server via `pgserver`, so it
 exercises the real SQLAlchemy models, real migrations-style DDL and real
 endpoints. Run it from the repository root or from `backend/` — both work.
+
+---
+
+## Appendix — observed live state on 2026-11-16 (UTC)
+
+Recorded right after merging the fix into `main`
+(`8e6fe661465fa45b04b1e91d61d07306d4ad2978`), by fetching the deployed
+services directly:
+
+| Check | Result | What it proves |
+|---|---|---|
+| `GET https://corpus-ultimate-api.onrender.com/api/v1/version` | `{"detail":"Not Found"}` | the running API does not contain the version route, i.e. it is **older than the merged commit** |
+| `GET https://corpus-ultimate-web.onrender.com/version.json` | `Not Found` | the deployed static site does not contain the file from `main` |
+| `GET https://corpus-ultimate-web.onrender.com/js/datasets.js` | pre-modernisation file: single `fileInput.files[0]` upload, `SUPPORTED_DATASET_FORMATS: ['txt','pdf','csv','json','jsonl']`, no upload queue, no `drop-zone-input` | the deployed frontend predates the dataset/UI work merged earlier on `main` |
+| `GET https://corpus-ultimate-web.onrender.com/js/models.js` | no `deletingIds` guard, no `409`/`stop_active` handling | same conclusion for the model-delete flow |
+| `GET https://api.github.com/repos/sumitsanataniirajput/Llm-corpus/deployments` | `[]` | GitHub records **no** Render deployments for this repository |
+| commit statuses on `main` | `total_count: 0` | Render reports no build status back to GitHub |
+| `GET https://corpus-ultimate-api.onrender.com/api/v1/health` | Render “Application loading” splash first, JSON after ~60 s | free-tier instance sleeps; first request after idle is slow (not an error) |
+
+Interpretation: both Render services are serving builds that are **several
+merges behind `main`**, and nothing on GitHub shows a deployment at all. Until
+the services are pointed at `sumitsanataniirajput/Llm-corpus` → branch `main`
+(with auto-deploy on) and redeployed, every fix merged into `main` — including
+this one — is invisible to users.
+
+Both also need to be re-checked after the redeploy:
+
+```bash
+curl -s https://corpus-ultimate-api.onrender.com/api/v1/version   # build_id 2026-11-16.2 + commit == main
+curl -s https://corpus-ultimate-web.onrender.com/version.json     # buildId 2026-11-16.2
+```
