@@ -1,0 +1,205 @@
+"""Small, real CPU training worker for CORPUS ULTIMATE.
+
+This first production slice deliberately limits model/data sizes for Render's
+free CPU instance. Jobs run in-process; use a dedicated queue worker for scale.
+"""
+import asyncio
+import io
+import json
+import logging
+import time
+import uuid
+
+import torch
+from sqlalchemy import text, select
+from torch.utils.data import DataLoader, TensorDataset
+from supabase import create_client
+
+from app.config import settings
+from app.core.database import get_session_factory
+from app.core.models import Model, TrainingJob
+from corpus_engine.tokenizer.tokenizer import CorpusTokenizer
+from corpus_engine.pytorch_engine.pytorch_trainer import PyTorchTrainer
+
+logger = logging.getLogger("corpus.training")
+
+
+def _storage():
+    if not settings.SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError("Training storage is not configured: add SUPABASE_SERVICE_ROLE_KEY to the Render backend environment.")
+    if not settings.SUPABASE_URL:
+        raise RuntimeError("SUPABASE_URL is not configured.")
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+
+
+def _upload_bytes(client, bucket, path, data, content_type):
+    client.storage.from_(bucket).upload(
+        path, data,
+        file_options={"content-type": content_type, "upsert": "true"},
+    )
+
+
+def _train_sync(text_data, model_config, job_config):
+    torch.manual_seed(int(job_config.get("seed", 42)))
+    # Safe limits for the Render free CPU service.
+    context = max(8, min(int(model_config.get("context_length", 64)), 64))
+    d_model = max(16, min(int(model_config.get("d_model", 64)), 64))
+    heads = max(1, min(int(model_config.get("n_heads", 4)), 4))
+    while d_model % heads:
+        heads -= 1
+    cfg = {
+        "vocab_size": min(max(int(model_config.get("vocab_size", 512)), 16), 2048),
+        "context_length": context,
+        "d_model": d_model,
+        "n_layers": max(1, min(int(model_config.get("n_layers", 2)), 2)),
+        "n_heads": heads,
+        "d_ff": max(32, min(int(model_config.get("d_ff", 128)), 128)),
+        "dropout": min(max(float(model_config.get("dropout", 0.1)), 0.0), 0.3),
+        "learning_rate": min(max(float(job_config.get("learning_rate", 0.001)), 1e-5), 0.01),
+        "epochs": max(1, min(int(job_config.get("epochs", 1)), 3)),
+    }
+    tokenizer = CorpusTokenizer(vocab_size=cfg["vocab_size"])
+    tokenizer.train([text_data])
+    ids = tokenizer.encode(text_data, add_special=False)
+    cfg["vocab_size"] = max(tokenizer.get_vocab_size(), 4)
+    if len(ids) <= context:
+        raise ValueError("Dataset is too short. Upload more text so it contains at least context_length + 1 tokens.")
+    xs, ys = [], []
+    stride = max(1, context // 2)
+    for start in range(0, len(ids) - context, stride):
+        chunk = ids[start:start + context + 1]
+        if len(chunk) == context + 1:
+            xs.append(chunk[:-1])
+            ys.append(chunk[1:])
+    if not xs:
+        raise ValueError("Could not create training sequences from this dataset.")
+    x = torch.tensor(xs, dtype=torch.long)
+    y = torch.tensor(ys, dtype=torch.long)
+    loader = DataLoader(TensorDataset(x, y), batch_size=max(1, min(int(job_config.get("batch_size", 2)), 4)), shuffle=True)
+    trainer = PyTorchTrainer(cfg, device="cpu")
+    metrics = []
+    started = time.monotonic()
+    for epoch in range(cfg["epochs"]):
+        loss = trainer.train_epoch(
+            loader,
+            clip_grad=float(job_config.get("gradient_clip", 1.0)),
+            accum_steps=max(1, min(int(job_config.get("gradient_accumulation_steps", 1)), 4)),
+        )
+        elapsed = max(time.monotonic() - started, 0.001)
+        metrics.append({
+            "step": epoch + 1,
+            "loss": float(loss),
+            "learning_rate": cfg["learning_rate"],
+            "tokens_per_second": float(len(ids) * (epoch + 1) / elapsed),
+        })
+    buffer = io.BytesIO()
+    torch.save({
+        "model_state": trainer.model.state_dict(),
+        "config": cfg,
+        "epoch": trainer.epoch,
+        "global_step": trainer.global_step,
+        "tokenizer": tokenizer.token_to_id,
+        "special_tokens": tokenizer.special_tokens,
+    }, buffer)
+    tokenizer_json = json.dumps({
+        "vocab_size": tokenizer.vocab_size,
+        "special_tokens": tokenizer.special_tokens,
+        "token_to_id": tokenizer.token_to_id,
+    }, ensure_ascii=False).encode("utf-8")
+    return cfg, metrics, buffer.getvalue(), tokenizer_json, len(ids)
+
+
+async def run_training_job(job_id: str, owner_id: str):
+    factory = get_session_factory()
+    try:
+        async with factory() as db:
+            result = await db.execute(select(TrainingJob).where(TrainingJob.id == job_id))
+            job = result.scalar_one_or_none()
+            if not job or str(job.owner_id) != owner_id:
+                return
+            if not job.dataset_id:
+                raise ValueError("Select a dataset before starting training.")
+            model_result = await db.execute(select(Model).where(Model.id == job.model_id, Model.owner_id == job.owner_id))
+            model = model_result.scalar_one_or_none()
+            if not model:
+                raise ValueError("The selected model was not found or is not owned by this account.")
+            file_result = await db.execute(text(
+                "SELECT storage_path, file_name FROM public.dataset_files WHERE dataset_id = :dataset_id ORDER BY uploaded_at DESC LIMIT 1"
+            ), {"dataset_id": job.dataset_id})
+            file_row = file_result.mappings().first()
+            if not file_row:
+                raise ValueError("This dataset has no stored file. Re-upload a .txt dataset before training.")
+            client = _storage()
+            bucket = settings.STORAGE_BUCKET
+            raw = client.storage.from_(bucket).download(file_row["storage_path"])
+            if isinstance(raw, dict):
+                raw = raw.get("data", b"")
+            if not raw:
+                raise ValueError("The stored dataset file is empty or could not be downloaded.")
+            text_data = raw.decode("utf-8-sig", errors="replace")
+            if not text_data.strip():
+                raise ValueError("The uploaded dataset contains no readable text.")
+            job.status = "running"
+            job.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+            await db.commit()
+            model_config = dict(model.config or {})
+            job_config = dict(job.config or {})
+        cfg, metrics, checkpoint_bytes, tokenizer_bytes, token_count = await asyncio.to_thread(
+            _train_sync, text_data, model_config, job_config
+        )
+        client = _storage()
+        bucket = settings.STORAGE_BUCKET
+        base = f"{owner_id}/{job_id}"
+        checkpoint_path = f"checkpoints/{base}/model.pt"
+        tokenizer_path = f"tokenizers/{base}/tokenizer.json"
+        _upload_bytes(client, bucket, checkpoint_path, checkpoint_bytes, "application/octet-stream")
+        _upload_bytes(client, bucket, tokenizer_path, tokenizer_bytes, "application/json")
+        async with factory() as db:
+            for metric in metrics:
+                await db.execute(text("""
+                    INSERT INTO public.training_metrics
+                    (job_id, step, loss, learning_rate, tokens_per_second)
+                    VALUES (:job_id, :step, :loss, :learning_rate, :tokens_per_second)
+                """), {"job_id": job_id, **metric})
+            checkpoint_id = "ckpt_" + uuid.uuid4().hex[:8]
+            await db.execute(text("""
+                INSERT INTO public.checkpoints
+                (id, owner_id, model_id, job_id, storage_path, step, loss)
+                VALUES (:id, :owner_id, :model_id, :job_id, :storage_path, :step, :loss)
+            """), {
+                "id": checkpoint_id, "owner_id": owner_id, "model_id": job.model_id,
+                "job_id": job_id, "storage_path": checkpoint_path,
+                "step": metrics[-1]["step"], "loss": metrics[-1]["loss"],
+            })
+            await db.execute(text("""
+                UPDATE public.models SET config = :config, status = 'trained',
+                updated_at = now() WHERE id = :model_id AND owner_id = :owner_id
+            """), {"config": json.dumps({**model_config, **cfg, "tokenizer_path": tokenizer_path, "checkpoint_path": checkpoint_path}), "model_id": job.model_id, "owner_id": owner_id})
+            await db.execute(text("""
+                UPDATE public.datasets SET token_count = :token_count, updated_at = now()
+                WHERE id = :dataset_id AND owner_id = :owner_id
+            """), {"token_count": token_count, "dataset_id": job.dataset_id, "owner_id": owner_id})
+            await db.execute(text("""
+                UPDATE public.training_jobs SET status = 'completed', completed_at = now(), updated_at = now()
+                WHERE id = :job_id AND owner_id = :owner_id
+            """), {"job_id": job_id, "owner_id": owner_id})
+            await db.execute(text("""
+                INSERT INTO public.training_job_events (job_id, event, data)
+                VALUES (:job_id, 'completed', CAST(:data AS jsonb))
+            """), {"job_id": job_id, "data": json.dumps({"checkpoint_id": checkpoint_id, "tokens": token_count, "final_loss": metrics[-1]["loss"]})})
+            await db.commit()
+    except Exception as exc:
+        logger.exception("Training job %s failed", job_id)
+        try:
+            async with factory() as db:
+                await db.execute(text("""
+                    UPDATE public.training_jobs SET status = 'failed', updated_at = now()
+                    WHERE id = :job_id AND owner_id = :owner_id
+                """), {"job_id": job_id, "owner_id": owner_id})
+                await db.execute(text("""
+                    INSERT INTO public.training_job_events (job_id, event, data)
+                    VALUES (:job_id, 'failed', CAST(:data AS jsonb))
+                """), {"job_id": job_id, "data": json.dumps({"error": str(exc)[:1000]})})
+                await db.commit()
+        except Exception:
+            logger.exception("Could not record training failure for %s", job_id)
