@@ -1,120 +1,139 @@
 /* ========================================
-   CORPUS ULTIMATE — Compute Manager page
+   CORPUS ULTIMATE — Compute Manager
    ======================================== */
 
 window.compute = (function () {
+  'use strict';
+
+  function esc(value) {
+    return ui.escapeHtml(value == null ? '' : String(value));
+  }
+
   async function render() {
     const user = state.getUser();
     const container = window.CORPUS_APP.getPageContainer();
     if (!container) return;
     if (!user) {
-      container.innerHTML = '<div class="empty-state"><i class="fas fa-user-circle"></i><h3>Sign in required</h3><p>Please sign in to manage compute.</p></div>';
+      container.innerHTML = ui.emptyState({
+        icon: 'fa-user-circle',
+        title: 'Sign in required',
+        text: 'Please sign in to view compute resources.',
+        actionLabel: 'Sign in',
+        actionOnclick: "auth.openModal('login')",
+        actionIcon: 'fa-sign-in-alt',
+      });
       return;
     }
 
     container.innerHTML = `
-      <div class="compute-header">
-        <div>
+      <div class="page-header">
+        <div class="page-header-copy">
+          <span class="eyebrow"><i class="fas fa-server"></i> Execution</span>
           <h1 class="section-title">Compute Manager</h1>
-          <p class="section-subtitle">View connected workers, hardware capabilities, and job assignments.</p>
+          <p class="section-subtitle">Workers registered with your account and the capabilities this browser reports.</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-outline" type="button" onclick="compute.loadWorkers()">
+            <i class="fas fa-rotate"></i> Refresh workers
+          </button>
         </div>
       </div>
 
       <div class="worker-grid" id="compute-workers">
-        <!-- worker cards -->
+        ${ui.skeletonCards(2)}
       </div>
 
-      <div class="card" style="margin-top:var(--space-6); padding:var(--space-5);">
-        <h3 style="margin-bottom:var(--space-4); font-size:var(--text-title-medium); color:var(--color-text);">Local Device Info</h3>
-        <div class="form-grid" id="compute-local-info">
-          <!-- local hardware info -->
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">This browser</h2>
+            <p class="card-subtitle">Only values the browser actually exposes are listed.</p>
+          </div>
         </div>
-      </div>
+        <dl class="kv-grid" id="compute-local-info"></dl>
+      </section>
     `;
 
     await loadWorkers();
     renderLocalInfo();
   }
 
-  function escapeHtml(text) {
-    const d = document.createElement('div');
-    d.textContent = text;
-    return d.innerHTML;
-  }
-
   async function loadWorkers() {
+    const container = document.getElementById('compute-workers');
     try {
       const token = await state.getAccessToken();
       const data = await window.CORPUS_API.listWorkers(token);
-      state.setWorkers(data.workers || data || []);
+      const workers = Array.isArray(data) ? data : (data && Array.isArray(data.workers) ? data.workers : []);
+      state.setWorkers(workers);
+      renderWorkers(workers);
     } catch (err) {
       state.setWorkers([]);
+      if (container) {
+        container.innerHTML = ui.emptyState({
+          icon: 'fa-plug-circle-xmark',
+          title: 'Workers unavailable',
+          text: err.message || 'The backend did not return a worker list.',
+          actionLabel: 'Retry',
+          actionOnclick: 'compute.loadWorkers()',
+          actionIcon: 'fa-rotate',
+        });
+      }
       ui.toast('Backend unavailable — no workers listed', 'warning');
     }
-    renderWorkers();
   }
 
-  function renderWorkers() {
+  function renderWorkers(list) {
     const container = document.getElementById('compute-workers');
-    const workers = state.getWorkers() || [];
-    if (workers.length === 0) {
-      container.innerHTML = '<div class="empty-state"><i class="fas fa-server"></i><h3>No workers connected</h3><p>Register a local or cloud worker to train models remotely.</p></div>';
+    if (!container) return;
+    const workers = list || state.getWorkers() || [];
+    if (!workers.length) {
+      container.innerHTML = ui.emptyState({
+        icon: 'fa-server',
+        title: 'No workers registered',
+        text: 'Training runs in-process on the backend CPU worker. Register a remote worker to distribute jobs.',
+        compact: true,
+      });
       return;
     }
-    container.innerHTML = workers.map(w => `
-      <div class="worker-card" data-aos="fade-up">
-        <div class="worker-header">
-          <div class="worker-name">${escapeHtml(w.name || 'Worker')}</div>
-          ${w.status === 'online' ? '<span class="status-badge running"><i class="fas fa-circle"></i> Online</span>' : '<span class="status-badge cancelled"><i class="fas fa-circle"></i> Offline</span>'}
-        </div>
-        <div class="worker-specs">
-          <div class="worker-spec">
-            <div class="spec-label">OS</div>
-            <div class="spec-value">${escapeHtml(w.os || '—')}</div>
+    container.innerHTML = workers.map(worker => {
+      const online = worker.status === 'online';
+      return `
+        <article class="worker-card">
+          <div class="worker-header">
+            <div class="worker-name">${esc(worker.name || 'Worker')}</div>
+            <span class="status-badge ${online ? 'running' : 'cancelled'}">
+              <i class="fas fa-circle"></i> ${online ? 'Online' : 'Offline'}
+            </span>
           </div>
-          <div class="worker-spec">
-            <div class="spec-label">CPU</div>
-            <div class="spec-value">${escapeHtml(w.cpu || '—')}</div>
+          <div class="worker-specs">
+            <div class="worker-spec"><div class="spec-label">OS</div><div class="spec-value">${esc(worker.os || '—')}</div></div>
+            <div class="worker-spec"><div class="spec-label">CPU</div><div class="spec-value">${esc(worker.cpu || '—')}</div></div>
+            <div class="worker-spec"><div class="spec-label">RAM</div><div class="spec-value">${worker.ram ? esc(CORPUS_UTILS.formatBytes(worker.ram)) : '—'}</div></div>
+            <div class="worker-spec"><div class="spec-label">GPU</div><div class="spec-value">${esc(worker.gpu || 'None reported')}</div></div>
+            <div class="worker-spec"><div class="spec-label">VRAM</div><div class="spec-value">${worker.vram ? esc(CORPUS_UTILS.formatBytes(worker.vram)) : '—'}</div></div>
+            <div class="worker-spec"><div class="spec-label">Backend</div><div class="spec-value">${esc(worker.backend || '—')}</div></div>
           </div>
-          <div class="worker-spec">
-            <div class="spec-label">RAM</div>
-            <div class="spec-value">${w.ram ? CORPUS_UTILS.formatBytes(w.ram) : '—'}</div>
-          </div>
-          <div class="worker-spec">
-            <div class="spec-label">GPU</div>
-            <div class="spec-value">${escapeHtml(w.gpu || 'None')}</div>
-          </div>
-          <div class="worker-spec">
-            <div class="spec-label">VRAM</div>
-            <div class="spec-value">${w.vram ? CORPUS_UTILS.formatBytes(w.vram) : '—'}</div>
-          </div>
-          <div class="worker-spec">
-            <div class="spec-label">Backend</div>
-            <div class="spec-value">${escapeHtml(w.backend || '—')}</div>
-          </div>
-        </div>
-      </div>
-    `).join('');
+        </article>
+      `;
+    }).join('');
   }
 
   function renderLocalInfo() {
     const container = document.getElementById('compute-local-info');
-    const nav = navigator;
+    if (!container) return;
+    const nav = typeof navigator !== 'undefined' ? navigator : {};
     const info = [
-      { label: 'Platform', value: navigator.platform || '—' },
-      { label: 'User Agent', value: navigator.userAgent.split(' ')[0] + '...' },
-      { label: 'Online', value: navigator.onLine ? 'Yes' : 'No' },
-      { label: 'Cookies', value: navigator.cookieEnabled ? 'Yes' : 'No' },
-      { label: 'Language', value: navigator.language || '—' },
-      { label: 'Concurrency', value: navigator.hardwareConcurrency || '—' },
-      { label: 'Memory', value: (navigator.deviceMemory ? navigator.deviceMemory + ' GB' : '—') },
+      { label: 'Platform', value: nav.platform || 'not reported' },
+      { label: 'Online', value: nav.onLine ? 'Yes' : 'No' },
+      { label: 'Language', value: nav.language || 'not reported' },
+      { label: 'CPU threads', value: nav.hardwareConcurrency || 'not reported' },
+      { label: 'Device memory', value: nav.deviceMemory ? nav.deviceMemory + ' GB' : 'not reported' },
+      { label: 'User agent', value: nav.userAgent ? nav.userAgent.split(' ')[0] : 'not reported' },
     ];
-    container.innerHTML = info.map(i => `
-      <div class="setting-item">
-        <div class="setting-info">
-          <h4>${escapeHtml(i.label)}</h4>
-          <p>${escapeHtml(i.value)}</p>
-        </div>
+    container.innerHTML = info.map(item => `
+      <div>
+        <dt>${esc(item.label)}</dt>
+        <dd>${esc(item.value)}</dd>
       </div>
     `).join('');
   }

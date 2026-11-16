@@ -20,6 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, text
 
 from app.dependencies import require_user, get_db_session
+from app.services.text_extraction import (
+    SUPPORTED_LABEL,
+    DatasetTextError,
+    extract_text,
+    is_supported_format,
+)
 from app.core.models import Dataset
 from app.config import settings
 
@@ -281,8 +287,16 @@ async def upload_dataset_file(
         raise HTTPException(status_code=400, detail="Uploaded dataset file is empty.")
     if len(contents) > settings.MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail="Dataset exceeds the configured upload limit.")
+    safe_name = os.path.basename(file.filename or "").replace("\\", "_")
+    if not is_supported_format(safe_name):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported dataset file '{safe_name or 'unnamed'}'. "
+                f"Supported formats: {SUPPORTED_LABEL}."
+            ),
+        )
     storage = _storage_client()
-    safe_name = os.path.basename(file.filename or "dataset.txt").replace("\\", "_")
     object_path = f"{owner_id}/datasets/{dataset_id}/{uuid.uuid4().hex}_{safe_name}"
     try:
         storage.storage.from_(settings.STORAGE_BUCKET).upload(
@@ -359,7 +373,10 @@ async def preview_dataset(
     if not raw:
         raise HTTPException(status_code=400, detail="The stored dataset file is empty or could not be downloaded.")
 
-    text_data = raw.decode("utf-8-sig", errors="replace")
+    try:
+        text_data = extract_text(raw, file_row["file_name"])
+    except DatasetTextError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     preview = text_data[:max_chars]
     return {
         "dataset_id": dataset_id,

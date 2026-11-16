@@ -128,3 +128,57 @@ async def test_delete_removes_row_and_stored_object(http, storage):
     assert resp.json()["removed_files"] == 1
     assert (await http.get("/api/v1/datasets/")).json() == []
     assert storage.paths(settings.STORAGE_BUCKET) == []
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_unsupported_extension(http):
+    ds = await _create_dataset(http)
+    files = {"file": ("archive.zip", b"PK\x03\x04binary", "application/zip")}
+    resp = await http.post(f"/api/v1/datasets/{ds['id']}/upload", files=files)
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "Unsupported dataset file" in detail
+    assert "PDF" in detail
+
+
+@pytest.mark.asyncio
+async def test_preview_extracts_real_pdf_text(http):
+    from tests.test_text_extraction import make_pdf
+
+    ds = await _create_dataset(http, name="Paper", fmt="pdf")
+    pdf = make_pdf("Extracted from a genuine PDF")
+    files = {"file": ("paper.pdf", pdf, "application/pdf")}
+    up = await http.post(f"/api/v1/datasets/{ds['id']}/upload", files=files)
+    assert up.status_code == 200, up.text
+
+    resp = await http.get(f"/api/v1/datasets/{ds['id']}/preview")
+    assert resp.status_code == 200, resp.text
+    preview = resp.json()
+    assert "Extracted from a genuine PDF" in preview["preview"]
+    assert "%PDF" not in preview["preview"]
+    assert preview["file_name"] == "paper.pdf"
+
+
+@pytest.mark.asyncio
+async def test_preview_extracts_csv_cells(http):
+    ds = await _create_dataset(http, name="Pairs", fmt="csv")
+    csv_body = b"question,answer\nWhat,That\n"
+    files = {"file": ("pairs.csv", csv_body, "text/csv")}
+    up = await http.post(f"/api/v1/datasets/{ds['id']}/upload", files=files)
+    assert up.status_code == 200, up.text
+
+    resp = await http.get(f"/api/v1/datasets/{ds['id']}/preview")
+    assert resp.status_code == 200, resp.text
+    assert "question answer" in resp.json()["preview"]
+
+
+@pytest.mark.asyncio
+async def test_preview_reports_broken_pdf_clearly(http):
+    ds = await _create_dataset(http, name="Broken", fmt="pdf")
+    files = {"file": ("broken.pdf", b"not really a pdf", "application/pdf")}
+    up = await http.post(f"/api/v1/datasets/{ds['id']}/upload", files=files)
+    assert up.status_code == 200, up.text
+
+    resp = await http.get(f"/api/v1/datasets/{ds['id']}/preview")
+    assert resp.status_code == 400
+    assert "%PDF" in resp.json()["detail"]

@@ -147,6 +147,13 @@ window.CORPUS_UTILS = (function () {
     return { valid: errors.length === 0, errors, parameters: params };
   }
 
+  // Parse a date value safely (returns null when unparseable).
+  function asDate(value) {
+    if (!value) return null;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
   return {
     formatBytes,
     formatNumber,
@@ -154,6 +161,7 @@ window.CORPUS_UTILS = (function () {
     formatDate,
     toast,
     escapeHtml,
+    asDate,
     debounce,
     throttle,
     clone,

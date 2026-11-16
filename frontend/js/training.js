@@ -1,8 +1,15 @@
 /* ========================================
-   CORPUS ULTIMATE — Training page
+   CORPUS ULTIMATE — Training Center
+
+   Structure: A) model & dataset, B) training configuration (advanced
+   settings collapsible), C) resource estimate, D) training controls,
+   E) live monitor. All progress/metric values come from the backend; when
+   nothing has been reported the UI says so instead of drawing fake curves.
    ======================================== */
 
 window.training = (function () {
+  'use strict';
+
   let chartInstances = {};
   let wsJobId = null;
   let activeSocket = null;
@@ -16,151 +23,262 @@ window.training = (function () {
   let modelsCache = [];
   let datasetsError = null;
   let listRefreshBound = false;
+  let startInFlight = false;
+  let checkpointsCache = [];
+  let checkpointsModelId = null;
 
   const DATASET_UNUSABLE_STATUSES = ['failed', 'deleted'];
+  const ACTIVE_STATUSES = ['queued', 'running', 'pausing', 'paused', 'stopping'];
 
   async function render() {
     const user = state.getUser();
     const container = window.CORPUS_APP.getPageContainer();
     if (!container) return;
     if (!user) {
-      container.innerHTML = '<div class="empty-state"><i class="fas fa-user-circle"></i><h3>Sign in required</h3><p>Please sign in to start training.</p></div>';
+      container.innerHTML = ui.emptyState({
+        icon: 'fa-user-circle',
+        title: 'Sign in required',
+        text: 'Please sign in to configure and run training jobs.',
+        actionLabel: 'Sign in',
+        actionOnclick: "auth.openModal('login')",
+        actionIcon: 'fa-sign-in-alt',
+      });
       return;
     }
 
     // Reset any stream/series state from a previous visit to this page.
-    disconnectJobStream();
-    stopPolling();
+    dispose();
     wsJobId = null;
     metricSeries = { steps: [], loss: [], throughput: [] };
     seenSteps = new Set();
+    checkpointsCache = [];
+    checkpointsModelId = null;
 
-    const activeModel = state.getActiveModel();
     container.innerHTML = `
-      <div class="training-header">
-        <div>
-          <h1 class="section-title">Training Center</h1>
-          <p class="section-subtitle">Configure and run genuine training jobs for your CORPUS models.</p>
+      <div class="page-header">
+        <div class="page-header-copy">
+          <span class="eyebrow"><i class="fas fa-flask"></i> Training center</span>
+          <h1 class="section-title">Train a model</h1>
+          <p class="section-subtitle">Pick a model and one of your uploaded datasets, tune the configuration, then start a real backend job.</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="btn btn-outline" type="button" onclick="training.loadJobs()">
+            <i class="fas fa-rotate"></i> Refresh jobs
+          </button>
         </div>
       </div>
 
       <div class="training-controls">
-        <div class="training-panel">
+        <!-- A. Model & dataset -->
+        <section class="training-panel" aria-labelledby="t-panel-a">
           <div class="training-panel-header">
-            <h3>1. Model &amp; Dataset</h3>
-            <button class="btn btn-outline btn-sm" id="t-refresh-datasets" type="button" onclick="training.refreshDatasets()" title="Reload your datasets from the backend">
+            <div class="training-panel-title">
+              <span class="step-badge">A</span>
+              <h3 id="t-panel-a">Model &amp; dataset</h3>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="t-refresh-datasets" type="button" onclick="training.refreshDatasets()" title="Reload your datasets from the backend">
               <i class="fas fa-rotate"></i> Refresh
             </button>
           </div>
+
           <div class="input-field">
             <label for="t-model">Model</label>
             <select id="t-model" onchange="training.onModelChange()">
               <option value="">Loading models…</option>
             </select>
+            <span class="field-hint">Only models owned by your account are listed.</span>
           </div>
+
           <div class="input-field">
             <label for="t-dataset">Dataset</label>
             <select id="t-dataset" disabled>
               <option value="">Loading datasets…</option>
             </select>
-            <p class="field-hint" id="t-dataset-hint">Fetching your uploaded datasets…</p>
+            <span class="field-hint" id="t-dataset-hint">Fetching your uploaded datasets…</span>
           </div>
+
           <div id="t-dataset-info" class="dataset-selection"></div>
+
           <p class="dataset-manage-link">
             <a href="#/datasets" onclick="training.openDatasetManager(event)"><i class="fas fa-database"></i> Manage datasets &amp; uploads</a>
           </p>
-          <div class="input-field">
-            <label for="t-engine">Engine</label>
-            <select id="t-engine">
-              <option value="pytorch">PyTorch Engine (real torch.nn)</option>
-              <option value="numerical">Custom Numerical Engine (educational)</option>
-            </select>
-          </div>
-          <div class="input-field">
-            <label for="t-compute">Compute</label>
-            <select id="t-compute">
-              <option value="local">Local (this device)</option>
-              <option value="cloud">Cloud (remote worker)</option>
-            </select>
-          </div>
-        </div>
+        </section>
 
-        <div class="training-panel">
-          <h3>2. Hyperparameters</h3>
+        <!-- B. Training configuration -->
+        <section class="training-panel" aria-labelledby="t-panel-b">
+          <div class="training-panel-header">
+            <div class="training-panel-title">
+              <span class="step-badge">B</span>
+              <h3 id="t-panel-b">Training configuration</h3>
+            </div>
+          </div>
+
           <div class="form-grid">
             <div class="input-field">
-              <input type="number" id="t-batch" value="16" min="1">
+              <label for="t-engine">Engine</label>
+              <select id="t-engine" onchange="training.updateEstimate()">
+                <option value="pytorch">PyTorch (torch.nn)</option>
+                <option value="numerical">Custom numerical</option>
+              </select>
+            </div>
+            <div class="input-field">
+              <label for="t-compute">Compute</label>
+              <select id="t-compute" onchange="training.updateEstimate()">
+                <option value="local">Local (this device)</option>
+                <option value="cloud">Cloud worker</option>
+              </select>
+            </div>
+            <div class="input-field">
               <label for="t-batch">Batch size</label>
+              <input type="number" id="t-batch" value="16" min="1" step="1" inputmode="numeric">
             </div>
             <div class="input-field">
-              <input type="number" id="t-lr" value="0.001" step="0.0001" min="0">
               <label for="t-lr">Learning rate</label>
+              <input type="number" id="t-lr" value="0.001" step="0.0001" min="0" inputmode="decimal">
             </div>
             <div class="input-field">
-              <input type="number" id="t-epochs" value="10" min="1">
               <label for="t-epochs">Epochs</label>
-            </div>
-            <div class="input-field">
-              <input type="number" id="t-accum" value="1" min="1">
-              <label for="t-accum">Gradient accumulation</label>
-            </div>
-            <div class="input-field">
-              <input type="number" id="t-clip" value="1.0" step="0.1" min="0">
-              <label for="t-clip">Gradient clipping</label>
-            </div>
-            <div class="input-field">
-              <input type="number" id="t-seed" value="42" min="0">
-              <label for="t-seed">Random seed</label>
+              <input type="number" id="t-epochs" value="10" min="1" step="1" inputmode="numeric">
             </div>
           </div>
-        </div>
 
-        <div class="training-panel">
-          <h3>3. Resource Estimate</h3>
-          <div id="t-estimate" class="card" style="padding:var(--space-4);">
-            <p id="t-estimate-text">Configure a model and dataset to see the estimate.</p>
+          <details class="accordion" style="margin-top:var(--space-3);">
+            <summary>Advanced settings</summary>
+            <div class="accordion-body">
+              <div class="form-grid">
+                <div class="input-field">
+                  <label for="t-accum">Gradient accumulation</label>
+                  <input type="number" id="t-accum" value="1" min="1" step="1" inputmode="numeric">
+                  <span class="field-hint">Micro-batches per optimiser step.</span>
+                </div>
+                <div class="input-field">
+                  <label for="t-clip">Gradient clipping</label>
+                  <input type="number" id="t-clip" value="1.0" step="0.1" min="0" inputmode="decimal">
+                  <span class="field-hint">Max gradient norm.</span>
+                </div>
+                <div class="input-field">
+                  <label for="t-seed">Random seed</label>
+                  <input type="number" id="t-seed" value="42" min="0" step="1" inputmode="numeric">
+                  <span class="field-hint">Reproducibility seed.</span>
+                </div>
+              </div>
+              <p class="field-hint">The backend may clamp large values so jobs stay within CPU limits.</p>
+            </div>
+          </details>
+
+          <p class="field-hint">Defaults come from your CORPUS configuration. Only values supported by the backend API are sent.</p>
+        </section>
+
+        <!-- C. Resource estimate -->
+        <section class="training-panel" aria-labelledby="t-panel-c">
+          <div class="training-panel-header">
+            <div class="training-panel-title">
+              <span class="step-badge">C</span>
+              <h3 id="t-panel-c">Resource estimate</h3>
+            </div>
           </div>
-          <div id="t-form-error" class="form-alert error hidden" role="alert"></div>
-          <div class="training-actions">
-            <button class="btn btn-primary" id="t-start" onclick="training.startTraining()" disabled><i class="fas fa-play"></i> Start Training</button>
-            <button class="btn btn-outline" id="t-pause" onclick="training.pauseTraining()" disabled><i class="fas fa-pause"></i> Pause</button>
-            <button class="btn btn-outline" id="t-resume" onclick="training.resumeTraining()" disabled><i class="fas fa-play"></i> Resume</button>
-            <button class="btn btn-danger" id="t-stop" onclick="training.stopTraining()" disabled><i class="fas fa-stop"></i> Stop</button>
+          <div id="t-estimate">
+            <p class="field-hint" id="t-estimate-text">Select a model and a dataset to see the estimate.</p>
           </div>
-        </div>
+        </section>
       </div>
 
-      <div class="training-charts" id="training-charts">
-        <!-- live charts -->
-      </div>
-
-      <div class="training-logs">
+      <!-- D. Training controls -->
+      <section class="training-panel" aria-labelledby="t-panel-d" style="margin-bottom:var(--space-4);">
         <div class="training-panel-header">
-          <h3 style="margin-bottom:var(--space-3); font-size:var(--text-title-medium); color:var(--color-text);">Recent Training Jobs</h3>
+          <div class="training-panel-title">
+            <span class="step-badge">D</span>
+            <h3 id="t-panel-d">Training controls</h3>
+          </div>
+          <span class="field-hint">Start is disabled until a model and a dataset with an uploaded file are selected.</span>
         </div>
-        <div id="t-jobs" class="training-jobs">
-          <p class="field-hint">Loading recent jobs…</p>
-        </div>
-      </div>
 
-      <div class="training-logs">
-        <h3 style="margin-bottom:var(--space-3); font-size:var(--text-title-medium); color:var(--color-text);">Training Logs</h3>
-        <div class="log-panel" id="t-logs">
-          <div class="log-entry info"><span class="log-time">[system]</span> Ready to train.</div>
+        <div id="t-form-error" class="form-alert error hidden" role="alert"></div>
+
+        <div class="training-actions">
+          <button class="btn btn-primary" id="t-start" type="button" onclick="training.startTraining()" disabled>
+            <i class="fas fa-play"></i> Start training
+          </button>
+          <button class="btn btn-outline" id="t-pause" type="button" onclick="training.pauseTraining()" disabled>
+            <i class="fas fa-pause"></i> Pause
+          </button>
+          <button class="btn btn-outline" id="t-resume" type="button" onclick="training.resumeTraining()" disabled>
+            <i class="fas fa-play"></i> Resume
+          </button>
+          <button class="btn btn-danger" id="t-stop" type="button" onclick="training.stopTraining()" disabled>
+            <i class="fas fa-stop"></i> Stop
+          </button>
         </div>
-      </div>
+      </section>
+
+      <!-- E. Live monitor -->
+      <section class="training-panel" aria-labelledby="t-panel-e">
+        <div class="training-panel-header">
+          <div class="training-panel-title">
+            <span class="step-badge">E</span>
+            <h3 id="t-panel-e">Live monitor</h3>
+          </div>
+          <span class="field-hint">Streams real status and metrics from the training WebSocket.</span>
+        </div>
+
+        <div class="monitor-status" id="t-monitor-status">
+          <span class="status-badge cancelled"><i class="fas fa-circle"></i> Idle</span>
+          <span class="field-hint" style="margin:0;">No job running. Start a job to stream progress here.</span>
+        </div>
+
+        <div class="metric-strip" id="t-metrics">
+          <div class="metric-tile"><div class="metric-value" id="t-metric-step">—</div><div class="metric-label">Latest step</div></div>
+          <div class="metric-tile"><div class="metric-value" id="t-metric-loss">—</div><div class="metric-label">Loss</div></div>
+          <div class="metric-tile"><div class="metric-value" id="t-metric-tps">—</div><div class="metric-label">Tokens / sec</div></div>
+          <div class="metric-tile"><div class="metric-value" id="t-metric-progress">—</div><div class="metric-label">Epoch progress</div></div>
+        </div>
+
+        <div class="training-charts" id="training-charts">
+          <!-- live charts -->
+        </div>
+
+        <div class="training-logs">
+          <div class="training-panel-header" style="margin-bottom:var(--space-2);">
+            <h3 style="margin:0; font-size:var(--text-body-medium); color:var(--color-text);">Training log</h3>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="training.clearLog()">
+              <i class="fas fa-eraser"></i> Clear
+            </button>
+          </div>
+          <div class="log-panel" id="t-logs" aria-live="polite">
+            <div class="log-entry info"><span class="log-time">[system]</span> Ready to train.</div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:var(--space-4);">
+          <div>
+            <h3 style="font-size:var(--text-body-medium); margin-bottom:var(--space-2);">Recent training jobs</h3>
+            <div id="t-jobs" class="training-jobs">
+              <div class="skeleton skeleton-block"></div>
+            </div>
+          </div>
+          <div>
+            <h3 style="font-size:var(--text-body-medium); margin-bottom:var(--space-2);">Checkpoints</h3>
+            <div id="t-checkpoints">
+              <p class="field-hint" style="margin:0;">Checkpoints appear after a training run saves one.</p>
+            </div>
+          </div>
+        </div>
+      </section>
     `;
 
     // Live-refresh the dataset selector whenever a dataset is uploaded/deleted.
     bindDatasetRefreshListener();
 
-    document.getElementById('t-dataset').addEventListener('change', onDatasetChange);
+    const datasetSelect = document.getElementById('t-dataset');
+    if (datasetSelect) datasetSelect.addEventListener('change', onDatasetChange);
+
     renderCharts();
     await Promise.all([loadModels(), refreshDatasets()]);
 
     const pendingId = state.getPendingDatasetId ? state.getPendingDatasetId() : null;
     if (pendingId) applySelectedDataset(pendingId);
 
+    const activeModel = state.getActiveModel();
     if (activeModel) {
       const modelSelect = document.getElementById('t-model');
       if (modelSelect && modelsCache.some(m => m.id === activeModel.id)) {
@@ -170,23 +288,28 @@ window.training = (function () {
     }
 
     await loadJobs();
+    updateEstimate();
   }
 
   function escapeHtml(text) {
-    const d = document.createElement('div');
-    d.textContent = text == null ? '' : String(text);
-    return d.innerHTML;
+    return ui.escapeHtml(text == null ? '' : String(text));
   }
 
-  function log(message, type = 'info') {
+  function log(message, type) {
     const panel = document.getElementById('t-logs');
     if (!panel) return;
     const time = new Date().toLocaleTimeString();
     const entry = document.createElement('div');
-    entry.className = 'log-entry ' + type;
-    entry.innerHTML = '<span class="log-time">[' + time + ']</span> ' + escapeHtml(message);
+    entry.className = 'log-entry ' + (type || 'info');
+    entry.innerHTML = '<span class="log-time">[' + time + ']</span><span>' + escapeHtml(message) + '</span>';
     panel.appendChild(entry);
     panel.scrollTop = panel.scrollHeight;
+  }
+
+  function clearLog() {
+    const panel = document.getElementById('t-logs');
+    if (!panel) return;
+    panel.innerHTML = '<div class="log-entry info"><span class="log-time">[system]</span><span>Log cleared.</span></div>';
   }
 
   /* ---------------- Datasets ---------------- */
@@ -262,9 +385,11 @@ window.training = (function () {
       datasetsError = err && err.message ? err.message : 'Could not load datasets';
       log('Could not load datasets: ' + datasetsError, 'error');
     }
-    populateDatasetSelect();
-    if (hint && datasetsCache.length === 0 && !datasetsError) {
-      hint.textContent = 'No datasets yet. Upload one in Dataset Manager to enable training.';
+    if (select) populateDatasetSelect();
+    if (hint && !select) {
+      hint.textContent = datasetsCache.length === 0 && !datasetsError
+        ? 'No datasets yet. Upload one in Dataset Manager to enable training.'
+        : hint.textContent;
     }
   }
 
@@ -371,9 +496,9 @@ window.training = (function () {
     if (!btn) return;
     const modelId = document.getElementById('t-model') ? document.getElementById('t-model').value : '';
     const dataset = selectedDataset();
-    const jobActive = wsJobId && state.getTrainingJob(wsJobId) &&
-      ['queued', 'running', 'pausing', 'stopping', 'paused'].indexOf(state.getTrainingJob(wsJobId).status) !== -1;
-    btn.disabled = !modelId || !dataset || !isDatasetUsable(dataset) || !!jobActive;
+    const activeJob = wsJobId ? state.getTrainingJob(wsJobId) : null;
+    const jobActive = !!(activeJob && ACTIVE_STATUSES.indexOf(activeJob.status) !== -1);
+    btn.disabled = startInFlight || !modelId || !dataset || !isDatasetUsable(dataset) || jobActive;
   }
 
   function validateSelection() {
@@ -403,7 +528,7 @@ window.training = (function () {
   function showFormError(message) {
     const box = document.getElementById('t-form-error');
     if (!box) return;
-    box.textContent = message;
+    box.innerHTML = '<i class="fas fa-triangle-exclamation"></i><span>' + escapeHtml(message) + '</span>';
     box.classList.remove('hidden');
   }
 
@@ -433,42 +558,87 @@ window.training = (function () {
   /* ---------------- Models ---------------- */
 
   async function onModelChange() {
-    const id = document.getElementById('t-model').value;
-    const m = modelsCache.find(model => model.id === id) || state.getModel(id);
-    if (m) {
-      state.setActiveModel(m);
-    }
+    const select = document.getElementById('t-model');
+    const id = select ? select.value : '';
+    const model = modelsCache.find(item => item.id === id) || state.getModel(id);
+    if (model) state.setActiveModel(model);
     updateEstimate();
     clearFormError();
     updateStartButtonState();
+    if (id) {
+      await loadCheckpoints(id);
+    } else {
+      checkpointsCache = [];
+      checkpointsModelId = null;
+      renderCheckpoints();
+    }
   }
 
   function updateEstimate() {
-    const text = document.getElementById('t-estimate-text');
-    if (!text) return;
-    const modelId = document.getElementById('t-model') ? document.getElementById('t-model').value : '';
-    const m = modelsCache.find(model => model.id === modelId);
+    const container = document.getElementById('t-estimate');
+    if (!container) return;
+    const modelSelect = document.getElementById('t-model');
+    const modelId = modelSelect ? modelSelect.value : '';
+    const model = modelsCache.find(item => item.id === modelId);
     const dataset = selectedDataset();
-    if (!m) {
-      text.textContent = 'Select a model to see the estimate.';
+
+    if (!model) {
+      container.innerHTML = '<p class="field-hint" id="t-estimate-text" style="margin:0;">Select a model and a dataset to see the estimate.</p>';
       return;
     }
-    const params = CORPUS_UTILS.calculateParameters(m.config || {});
-    const lines = [
-      '<strong>Estimated parameters:</strong> ' + CORPUS_UTILS.formatNumber(params),
-      '<strong>Engine:</strong> ' + escapeHtml(document.getElementById('t-engine').value === 'numerical' ? 'Custom Numerical' : 'PyTorch'),
-      '<strong>Memory estimate:</strong> ~' + Math.round((params * 4) / 1024 / 1024) + ' MB (FP32 weights only)',
-    ];
-    if (dataset) {
-      const bytes = dataset.file_size || dataset.size || 0;
-      // Rough character-based estimate; the real tokenizer runs on the backend.
-      const approxTokens = Math.max(0, Math.round(bytes / 4));
-      lines.push('<strong>Dataset:</strong> ' + escapeHtml(dataset.name || '') +
-        (bytes ? ' (~' + CORPUS_UTILS.formatNumber(approxTokens) + ' est. tokens)' : ''));
-    } else {
-      lines.push('<strong>Dataset:</strong> not selected yet');
+
+    const config = model.config || {};
+    const hasArch = ['n_layers', 'n_heads', 'd_model', 'vocab_size', 'context_length', 'd_ff'].some(key => config[key]);
+    const params = hasArch ? CORPUS_UTILS.calculateParameters(config) : null;
+    const bytes = dataset ? (dataset.file_size || dataset.size || 0) : 0;
+    // The real tokenizer runs on the backend; this is a character-based guess.
+    const approxTokens = bytes ? Math.max(0, Math.round(bytes / 4)) : null;
+    const engineSelect = document.getElementById('t-engine');
+    const engine = engineSelect && engineSelect.value === 'numerical' ? 'Custom numerical' : 'PyTorch';
+    const computeSelect = document.getElementById('t-compute');
+    const compute = computeSelect ? computeSelect.value : 'local';
+    const memoryMb = params ? (params * 4) / 1024 / 1024 : null;
+
+    const hardware = [];
+    if (typeof navigator !== 'undefined') {
+      if (navigator.hardwareConcurrency) hardware.push(navigator.hardwareConcurrency + ' CPU threads');
+      if (navigator.deviceMemory) hardware.push(navigator.deviceMemory + ' GB device memory');
     }
-    text.innerHTML = lines.join('<br>');
+
+    container.innerHTML = `
+      <div class="estimate-grid">
+        <div class="estimate-item">
+          <div class="estimate-label">Parameters</div>
+          <div class="estimate-value">${params ? CORPUS_UTILS.formatNumber(params) + ' (computed)' : 'Unknown'}</div>
+        </div>
+        <div class="estimate-item">
+          <div class="estimate-label">Dataset size</div>
+          <div class="estimate-value">${bytes ? escapeHtml(CORPUS_UTILS.formatBytes(bytes)) : 'Not selected'}</div>
+        </div>
+        <div class="estimate-item">
+          <div class="estimate-label">Tokens (estimate)</div>
+          <div class="estimate-value estimate">${approxTokens != null ? '~' + CORPUS_UTILS.formatNumber(approxTokens) : '—'}</div>
+        </div>
+        <div class="estimate-item">
+          <div class="estimate-label">Weights memory (FP32)</div>
+          <div class="estimate-value estimate">${memoryMb != null ? '~' + memoryMb.toFixed(1) + ' MB' : '—'}</div>
+        </div>
+        <div class="estimate-item">
+          <div class="estimate-label">Engine</div>
+          <div class="estimate-value">${escapeHtml(engine)}</div>
+        </div>
+        <div class="estimate-item">
+          <div class="estimate-label">Compute</div>
+          <div class="estimate-value">${escapeHtml(compute === 'cloud' ? 'Cloud worker' : 'Local device')}</div>
+        </div>
+      </div>
+      <p class="estimate-note" id="t-estimate-text" style="margin-bottom:var(--space-2);">
+        Parameter count and memory are computed from the stored architecture (weights only — optimizer state,
+        activations and the tokenizer are not included). Token count is an estimate from file size; the backend
+        tokenizer is authoritative. ${hardware.length ? 'Hardware reported by this browser: ' + escapeHtml(hardware.join(', ')) + '.' : 'This browser does not report hardware details.'}
+      </p>
+      <p class="estimate-note">${dataset ? 'Training on <strong>' + escapeHtml(dataset.name || dataset.id) + '</strong>.' : 'No dataset selected yet.'}</p>
+    `;
   }
 
   /* ---------------- Jobs ---------------- */
@@ -490,7 +660,12 @@ window.training = (function () {
     if (!container) return;
     const jobs = state.getTrainingJobs() || [];
     if (jobs.length === 0) {
-      container.innerHTML = '<p class="field-hint">No training jobs yet.</p>';
+      container.innerHTML = ui.emptyState({
+        icon: 'fa-hourglass-half',
+        title: 'No training jobs yet',
+        text: 'Jobs you start appear here with their real backend status.',
+        compact: true,
+      });
       return;
     }
     container.innerHTML = jobs.slice(0, 8).map(job => {
@@ -499,7 +674,7 @@ window.training = (function () {
       return `
         <div class="job-row">
           <div class="job-row-main">
-            <span class="status-badge ${escapeHtml(job.status || 'queued')}">${escapeHtml(job.status || 'queued')}</span>
+            ${ui.statusBadge(job.status || 'queued')}
             <span class="job-row-id mono">${escapeHtml(job.id)}</span>
           </div>
           <div class="job-row-meta">
@@ -512,7 +687,73 @@ window.training = (function () {
     }).join('');
   }
 
+  async function loadCheckpoints(modelId) {
+    const container = document.getElementById('t-checkpoints');
+    if (!container) return;
+    if (checkpointsModelId === modelId && checkpointsCache.length) {
+      renderCheckpoints();
+      return;
+    }
+    container.innerHTML = '<div class="skeleton skeleton-block"></div>';
+    try {
+      const token = await state.getAccessToken();
+      const data = await window.CORPUS_API.listCheckpoints(modelId, token);
+      checkpointsCache = Array.isArray(data) ? data : (data && Array.isArray(data.checkpoints) ? data.checkpoints : []);
+      checkpointsModelId = modelId;
+    } catch (err) {
+      checkpointsCache = [];
+      checkpointsModelId = modelId;
+    }
+    renderCheckpoints();
+  }
+
+  function renderCheckpoints() {
+    const container = document.getElementById('t-checkpoints');
+    if (!container) return;
+    if (!checkpointsCache.length) {
+      container.innerHTML = '<p class="field-hint" style="margin:0;">No checkpoints stored for this model yet. They are written when a training run finishes.</p>';
+      return;
+    }
+    const sorted = checkpointsCache.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    container.innerHTML = sorted.slice(0, 5).map(ckpt => `
+      <div class="job-row" style="margin-bottom:var(--space-2);">
+        <div class="job-row-main">
+          <span class="chip accent"><i class="fas fa-save"></i> ${escapeHtml(ckpt.id)}</span>
+          ${ckpt.loss != null ? '<span class="mono">loss ' + Number(ckpt.loss).toFixed(4) + '</span>' : ''}
+        </div>
+        <div class="job-row-meta">
+          <span><i class="fas fa-step-forward"></i> step ${escapeHtml(ckpt.step != null ? ckpt.step : '—')}</span>
+          <span><i class="fas fa-clock"></i> ${escapeHtml(CORPUS_UTILS.formatDate(ckpt.created_at))}</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function readConfig() {
+    const intField = (id, fallback, min) => {
+      const el = document.getElementById(id);
+      const value = el ? parseInt(el.value, 10) : NaN;
+      return Number.isFinite(value) && value >= (min == null ? 0 : min) ? value : fallback;
+    };
+    const floatField = (id, fallback, min) => {
+      const el = document.getElementById(id);
+      const value = el ? parseFloat(el.value) : NaN;
+      return Number.isFinite(value) && value >= (min == null ? 0 : min) ? value : fallback;
+    };
+    return {
+      engine: document.getElementById('t-engine') ? document.getElementById('t-engine').value : 'pytorch',
+      compute: document.getElementById('t-compute') ? document.getElementById('t-compute').value : 'local',
+      batch_size: intField('t-batch', 16, 1),
+      learning_rate: floatField('t-lr', 0.001, 0),
+      epochs: intField('t-epochs', 10, 1),
+      gradient_accumulation_steps: intField('t-accum', 1, 1),
+      gradient_clip: floatField('t-clip', 1.0, 0),
+      seed: intField('t-seed', 42, 0),
+    };
+  }
+
   async function startTraining() {
+    if (startInFlight) return;
     const check = validateSelection();
     if (!check.ok) {
       showFormError(check.message);
@@ -523,25 +764,15 @@ window.training = (function () {
     clearFormError();
 
     const dataset = check.dataset;
-    const config = {
-      model_id: check.modelId,
-      dataset_id: dataset.id,
-      engine: document.getElementById('t-engine').value,
-      compute: document.getElementById('t-compute').value,
-      batch_size: parseInt(document.getElementById('t-batch').value) || 16,
-      learning_rate: parseFloat(document.getElementById('t-lr').value) || 0.001,
-      epochs: parseInt(document.getElementById('t-epochs').value) || 10,
-      gradient_accumulation_steps: parseInt(document.getElementById('t-accum').value) || 1,
-      gradient_clip: parseFloat(document.getElementById('t-clip').value) || 1.0,
-      seed: parseInt(document.getElementById('t-seed').value) || 42,
-    };
+    const config = Object.assign({ model_id: check.modelId, dataset_id: dataset.id }, readConfig());
 
     const startBtn = document.getElementById('t-start');
+    startInFlight = true;
     ui.setButtonLoading(startBtn, true);
     try {
       const token = await state.getAccessToken();
       const data = await window.CORPUS_API.createTrainingJob(config, token);
-      const job = data.job || data;
+      const job = data && data.job ? data.job : data;
       if (!job || !job.id) {
         throw new Error('The backend did not return a training job.');
       }
@@ -554,8 +785,8 @@ window.training = (function () {
       log('Job ' + job.id + ' created — status: ' + job.status);
       log('Dataset: ' + (dataset.name || dataset.id) + ' (' + dataset.id + ')');
       updateControls(job);
+      updateMonitorStatus(job);
       await loadJobs();
-      updateStartButtonState();
       connectJobStream(job.id);
     } catch (err) {
       const message = err && err.message ? err.message : 'Failed to start training';
@@ -563,62 +794,91 @@ window.training = (function () {
       ui.toast(message, 'error');
       log('Error: ' + message, 'error');
     } finally {
+      startInFlight = false;
       ui.setButtonLoading(startBtn, false);
+      updateStartButtonState();
+      updateControls(state.getTrainingJob(wsJobId) || null);
     }
   }
 
-  async function pauseTraining() {
+  async function runControl(btnId, action, label) {
     if (!wsJobId) return;
+    const btn = document.getElementById(btnId);
+    ui.setButtonLoading(btn, true);
     try {
       const token = await state.getAccessToken();
-      await window.CORPUS_API.pauseTrainingJob(wsJobId, token);
-      log('Pause requested for job ' + wsJobId);
+      await action(wsJobId, token);
+      log(label + ' requested for job ' + wsJobId);
     } catch (err) {
-      ui.toast(err.message || 'Pause failed', 'error');
+      ui.toast(err.message || (label + ' failed'), 'error');
+    } finally {
+      ui.setButtonLoading(btn, false);
+      updateControls(state.getTrainingJob(wsJobId) || null);
     }
   }
 
-  async function resumeTraining() {
-    if (!wsJobId) return;
-    try {
-      const token = await state.getAccessToken();
-      await window.CORPUS_API.resumeTrainingJob(wsJobId, token);
-      log('Resume requested for job ' + wsJobId);
-    } catch (err) {
-      ui.toast(err.message || 'Resume failed', 'error');
-    }
+  function pauseTraining() {
+    return runControl('t-pause', window.CORPUS_API.pauseTrainingJob, 'Pause');
   }
 
-  async function stopTraining() {
+  function resumeTraining() {
+    return runControl('t-resume', window.CORPUS_API.resumeTrainingJob, 'Resume');
+  }
+
+  function stopTraining() {
     if (!wsJobId) return;
-    ui.confirm('Stop training', 'Stop this training job? Checkpoint will be saved.', async () => {
+    ui.confirm('Stop training', 'Stop this training job? The worker saves a checkpoint before it exits.', async () => {
+      const btn = document.getElementById('t-stop');
+      ui.setButtonLoading(btn, true);
       try {
         const token = await state.getAccessToken();
         await window.CORPUS_API.stopTrainingJob(wsJobId, token);
         log('Stop requested for job ' + wsJobId);
       } catch (err) {
         ui.toast(err.message || 'Stop failed', 'error');
+      } finally {
+        ui.setButtonLoading(btn, false);
+        updateControls(state.getTrainingJob(wsJobId) || null);
       }
     });
   }
 
   function isActiveStatus(status) {
-    return ['queued', 'running', 'pausing', 'paused', 'stopping'].indexOf(status) !== -1;
+    return ACTIVE_STATUSES.indexOf(status) !== -1;
   }
 
   function updateControls(job) {
-    if (!job) return;
-    const status = job.status;
+    const status = job ? job.status : null;
     const startEl = document.getElementById('t-start');
     const pauseEl = document.getElementById('t-pause');
     const resumeEl = document.getElementById('t-resume');
     const stopEl = document.getElementById('t-stop');
     if (!startEl) return;
     const active = isActiveStatus(status);
-    startEl.disabled = active || !validateSelection().ok;
-    pauseEl.disabled = status !== 'running';
-    resumeEl.disabled = status !== 'paused';
-    stopEl.disabled = !(status === 'running' || status === 'paused' || status === 'queued');
+    startEl.disabled = startInFlight || active || !validateSelection().ok;
+    if (pauseEl) pauseEl.disabled = status !== 'running';
+    if (resumeEl) resumeEl.disabled = status !== 'paused';
+    if (stopEl) stopEl.disabled = !(status === 'running' || status === 'paused' || status === 'queued' || status === 'pausing');
+  }
+
+  function updateMonitorStatus(job) {
+    const container = document.getElementById('t-monitor-status');
+    if (!container) return;
+    if (!job) {
+      container.innerHTML = '<span class="status-badge cancelled"><i class="fas fa-circle"></i> Idle</span>' +
+        '<span class="field-hint" style="margin:0;">No job running. Start a job to stream progress here.</span>';
+      return;
+    }
+    const dataset = datasetsCache.find(d => d.id === job.dataset_id);
+    const model = modelsCache.find(m => m.id === job.model_id);
+    container.innerHTML = `
+      ${ui.statusBadge(job.status || 'queued')}
+      <span class="mono">${escapeHtml(job.id)}</span>
+      <span class="field-hint" style="margin:0; min-width:0;">
+        ${escapeHtml(model ? (model.name || model.id) : (job.model_id || 'model'))}
+        ${dataset ? ' · ' + escapeHtml(dataset.name || dataset.id) : ''}
+      </span>
+    `;
   }
 
   function connectJobStream(jobId) {
@@ -628,7 +888,7 @@ window.training = (function () {
       onMetric: (metric) => applyMetric(metric),
       onStatus: (payload) => applyStatus(jobId, payload),
       onComplete: (payload) => {
-        log('Job ' + jobId + ' finished: ' + ((payload && payload.status) || 'completed'));
+        log('Job ' + jobId + ' finished: ' + ((payload && payload.status) || 'completed'), 'success');
         refreshJob(jobId);
       },
       onError: (err) => {
@@ -642,7 +902,7 @@ window.training = (function () {
 
   function disconnectJobStream() {
     if (activeSocket) {
-      try { activeSocket.close(); } catch (e) {}
+      try { activeSocket.close(); } catch (e) { /* ignore */ }
       activeSocket = null;
     }
   }
@@ -657,7 +917,7 @@ window.training = (function () {
     if (loss !== null) {
       metricSeries.steps.push(step);
       metricSeries.loss.push(loss);
-      metricSeries.throughput.push(tps === null ? 0 : tps);
+      metricSeries.throughput.push(tps === null ? null : tps);
       if (metricSeries.steps.length > 200) {
         metricSeries.steps.shift();
         metricSeries.loss.shift();
@@ -666,34 +926,65 @@ window.training = (function () {
       log('Step ' + step + ' — loss: ' + loss.toFixed(4) +
         (tps !== null ? ' — ' + Math.round(tps) + ' tok/s' : ''), 'info');
     }
+    updateMetricTiles();
     updateCharts();
+  }
+
+  function updateMetricTiles() {
+    const last = metricSeries.steps.length - 1;
+    const stepEl = document.getElementById('t-metric-step');
+    const lossEl = document.getElementById('t-metric-loss');
+    const tpsEl = document.getElementById('t-metric-tps');
+    const progressEl = document.getElementById('t-metric-progress');
+    if (!stepEl) return;
+    stepEl.textContent = last >= 0 ? String(metricSeries.steps[last]) : '—';
+    lossEl.textContent = last >= 0 && metricSeries.loss[last] != null ? metricSeries.loss[last].toFixed(4) : '—';
+    tpsEl.textContent = last >= 0 && metricSeries.throughput[last] != null
+      ? Math.round(metricSeries.throughput[last]).toLocaleString()
+      : '—';
+    if (progressEl) {
+      const epochsEl = document.getElementById('t-epochs');
+      const epochs = epochsEl ? parseInt(epochsEl.value, 10) : NaN;
+      if (last >= 0 && Number.isFinite(epochs) && epochs > 0) {
+        const percent = Math.min(100, Math.round((metricSeries.steps[last] / epochs) * 100));
+        progressEl.textContent = percent + '%';
+      } else {
+        progressEl.textContent = '—';
+      }
+    }
   }
 
   function applyStatus(jobId, payload) {
     if (!payload) return;
-    state.updateTrainingJob(jobId, { status: payload.status, dataset_id: payload.dataset_id, model_id: payload.model_id });
+    state.updateTrainingJob(jobId, {
+      status: payload.status,
+      dataset_id: payload.dataset_id,
+      model_id: payload.model_id,
+    });
     const job = state.getTrainingJob(jobId) || { id: jobId, status: payload.status };
     updateControls(job);
+    updateMonitorStatus(job);
     log('Job ' + jobId + ' status: ' + payload.status);
     if (!isActiveStatus(payload.status)) {
       stopPolling();
       disconnectJobStream();
       loadJobs();
+      if (job.model_id) loadCheckpoints(job.model_id);
     }
   }
 
   function startPolling(jobId) {
     stopPolling();
     pollJob = jobId;
-    const tick = async () => {
+    const tickFn = async () => {
       if (pollJob !== jobId) return;
       if (!document.getElementById('t-logs')) { stopPolling(); disconnectJobStream(); return; }
       await refreshJob(jobId, true);
       if (pollJob === jobId) {
-        pollTimer = setTimeout(tick, 5000);
+        pollTimer = setTimeout(tickFn, 5000);
       }
     };
-    pollTimer = setTimeout(tick, 5000);
+    pollTimer = setTimeout(tickFn, 5000);
   }
 
   function stopPolling() {
@@ -702,12 +993,13 @@ window.training = (function () {
     pollJob = null;
   }
 
-  async function refreshJob(jobId, quiet = false) {
+  async function refreshJob(jobId, quiet) {
     try {
       const token = await state.getAccessToken();
       const job = await window.CORPUS_API.getTrainingJob(jobId, token);
       state.updateTrainingJob(jobId, job);
       updateControls(job);
+      updateMonitorStatus(job);
       if (!isActiveStatus(job.status)) {
         stopPolling();
         disconnectJobStream();
@@ -722,46 +1014,71 @@ window.training = (function () {
     }
   }
 
+  /* ---------------- Charts ---------------- */
+
   function renderCharts() {
     const container = document.getElementById('training-charts');
     if (!container) return;
     container.innerHTML = `
       <div class="card">
-        <h3 style="margin-bottom:var(--space-4); font-size:var(--text-title-medium); color:var(--color-text);">Training Loss</h3>
+        <div class="card-head" style="margin-bottom:var(--space-2);">
+          <h3 class="card-title">Training loss</h3>
+          <span class="chip">step → loss</span>
+        </div>
         <div class="chart-container">
           <canvas id="training-loss-chart"></canvas>
+          <div id="training-loss-empty" class="chart-empty">
+            <i class="fas fa-chart-line"></i>
+            <span>No loss values yet. Metrics appear here as soon as the worker reports a step.</span>
+          </div>
         </div>
       </div>
       <div class="card">
-        <h3 style="margin-bottom:var(--space-4); font-size:var(--text-title-medium); color:var(--color-text);">Throughput</h3>
+        <div class="card-head" style="margin-bottom:var(--space-2);">
+          <h3 class="card-title">Throughput</h3>
+          <span class="chip">step → tokens/sec</span>
+        </div>
         <div class="chart-container">
           <canvas id="training-throughput-chart"></canvas>
+          <div id="training-throughput-empty" class="chart-empty">
+            <i class="fas fa-gauge-high"></i>
+            <span>No throughput reported yet.</span>
+          </div>
         </div>
       </div>
     `;
     chartInstances.loss = window.charts.createLineChart('training-loss-chart', [], [
-      { label: 'Loss', data: [], borderColor: '#6750a4', fill: false, tension: 0.4 },
+      { label: 'Loss', data: [], borderColor: '#b9a7ff', backgroundColor: 'rgba(124, 92, 255, 0.14)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 2 },
     ]);
     chartInstances.throughput = window.charts.createLineChart('training-throughput-chart', [], [
-      { label: 'Tokens/sec', data: [], borderColor: '#10b981', fill: false, tension: 0.4 },
+      { label: 'Tokens/sec', data: [], borderColor: '#4ade80', borderWidth: 2, fill: false, tension: 0.3, pointRadius: 2 },
     ]);
     updateCharts();
   }
 
   function updateCharts() {
     if (!chartInstances.loss || !chartInstances.throughput) return;
-    window.charts.updateChart('training-loss-chart', metricSeries.steps.slice(), [
-      { label: 'Loss', data: metricSeries.loss.slice(), borderColor: '#6750a4', fill: false, tension: 0.4 },
-    ]);
-    window.charts.updateChart('training-throughput-chart', metricSeries.steps.slice(), [
-      { label: 'Tokens/sec', data: metricSeries.throughput.slice(), borderColor: '#10b981', fill: false, tension: 0.4 },
-    ]);
+    const hasLoss = metricSeries.loss.length > 0;
+    const hasTps = metricSeries.throughput.some(value => value != null);
+    const lossEmpty = document.getElementById('training-loss-empty');
+    const tpsEmpty = document.getElementById('training-throughput-empty');
+    if (lossEmpty) lossEmpty.classList.toggle('hidden', hasLoss);
+    if (tpsEmpty) tpsEmpty.classList.toggle('hidden', hasTps);
+    window.charts.updateChart('training-loss-chart', metricSeries.steps.slice(), [{
+      label: 'Loss', data: metricSeries.loss.slice(), borderColor: '#b9a7ff',
+      backgroundColor: 'rgba(124, 92, 255, 0.14)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 2,
+    }]);
+    window.charts.updateChart('training-throughput-chart', metricSeries.steps.slice(), [{
+      label: 'Tokens/sec', data: metricSeries.throughput.map(value => value == null ? null : value),
+      borderColor: '#4ade80', borderWidth: 2, fill: false, tension: 0.3, pointRadius: 2,
+    }]);
   }
 
   function dispose() {
     disconnectJobStream();
     stopPolling();
     chartInstances = {};
+    startInFlight = false;
   }
 
   return {
@@ -777,6 +1094,8 @@ window.training = (function () {
     loadJobs,
     renderCharts,
     log,
+    clearLog,
+    updateEstimate,
     dispose,
     // exposed for tests/diagnostics
     validateSelection,
