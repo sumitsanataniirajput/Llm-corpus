@@ -1,0 +1,11 @@
+{
+  "app": "CORPUS ULTIMATE",
+  "kind": "frontend",
+  "buildId": "2026-11-16.2",
+  "sourceRef": "main",
+  "notes": [
+    "Android file picker: the real <input type=file> is a transparent full-size overlay over the dataset drop zone (frontend/css/components.css, frontend/js/datasets.js).",
+    "Model deletion: owner ids are normalized before comparison and the models list filter is uuid/text agnostic (backend)."
+  ],
+  "howToVerify": "GET <frontend-url>/version.json — the deployed buildId must equal the buildId committed in frontend/version.json on main."
+}

@@ -91,12 +91,25 @@ window.datasets = (function () {
           </button>
         </div>
 
-        <label for="datasets-file" class="drop-zone" id="datasets-drop" tabindex="0" role="button" aria-label="Choose dataset files">
-          <i class="fas fa-file-import"></i>
+        <!--
+          Mobile-first file picking.
+
+          The <input type="file"> below is NOT visually hidden with a 1px clip and
+          it is NOT pointer-events:none. It is a transparent, full-size overlay
+          covering the whole drop zone (CSS: .drop-zone > input[type="file"]).
+          A real tap therefore lands directly on the real native control, which
+          is what reliably opens Android Chrome's file manager. No JavaScript
+          click handler and no programmatic input.click() is involved, so the
+          picker can never open twice. The decorative text/icons are
+          pointer-events:none so they never swallow the tap.
+        -->
+        <label for="datasets-file" class="drop-zone" id="datasets-drop" aria-label="Choose dataset files">
+          <i class="fas fa-file-import" aria-hidden="true"></i>
           <strong>Drop files here, or tap to browse</strong>
-          <span>${esc(formatsLabel())} · up to ${esc(CORPUS_UTILS.formatBytes(maxSize()))} per file</span>
-          <span class="drop-zone-cta"><i class="fas fa-folder-open"></i> Tap to choose files</span>
-          <input type="file" id="datasets-file" multiple accept="${esc(acceptAttr())}">
+          <span class="drop-zone-meta">${esc(formatsLabel())} · up to ${esc(CORPUS_UTILS.formatBytes(maxSize()))} per file</span>
+          <span class="drop-zone-cta"><i class="fas fa-folder-open" aria-hidden="true"></i> Tap to choose files</span>
+          <input type="file" id="datasets-file" name="datasets-file" class="drop-zone-input"
+                 multiple accept="${esc(acceptAttr())}" aria-label="Choose dataset files">
         </label>
 
         <div class="file-queue" id="datasets-file-list"></div>
@@ -180,12 +193,9 @@ window.datasets = (function () {
     }
     if (!drop || drop.dataset.bound === '1') return;
     drop.dataset.bound = '1';
-    drop.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        if (input) input.click();
-      }
-    });
+    // No keydown/click handler that calls input.click(): the native file input is
+    // itself the full-size tap target inside the label, so a synthetic click
+    // would open the Android picker a second time.
     ['dragenter', 'dragover'].forEach(type => {
       drop.addEventListener(type, (event) => {
         event.preventDefault();
@@ -195,15 +205,15 @@ window.datasets = (function () {
     ['dragleave', 'dragend', 'drop'].forEach(type => {
       drop.addEventListener(type, () => drop.classList.remove('is-dragover'));
     });
+    // `drop` fires on the transparent overlay input and bubbles up to the label.
+    // preventDefault() stops the browser from also assigning input.files (which
+    // would fire a second `change` event) — the queue is filled exactly once.
     drop.addEventListener('drop', (event) => {
       event.preventDefault();
       const files = event.dataTransfer && event.dataTransfer.files
         ? Array.prototype.slice.call(event.dataTransfer.files)
         : [];
       if (!files.length) return;
-      if (input && event.dataTransfer) {
-        try { input.files = event.dataTransfer.files; } catch (e) { /* read-only in some browsers */ }
-      }
       setQueue(files);
     });
   }

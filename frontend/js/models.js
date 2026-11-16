@@ -472,6 +472,19 @@ window.models = (function () {
           msg + ' Stop active training and delete this model now?',
           () => performDeleteModel(id, { stopActive: true })
         );
+      } else if (err && err.status === 403) {
+        // Deliberately no ownership bypass here: the API is telling us this row
+        // belongs to another account (or the deployed API is too old to
+        // normalize owner ids). Point the user at the diagnostic endpoint so
+        // the two ids can be compared instead of guessing.
+        ui.toast(
+          'Not authorized — the backend says this model belongs to a different account. ' +
+            'Check ' + (window.CORPUS_CONFIG.API_BASE_URL || 'the API') +
+            '/api/v1/models/ownership-diagnostics?model_id=' + encodeURIComponent(id) +
+            ' to compare the owner ids.',
+          'error',
+          9000
+        );
       } else {
         ui.toast((err && err.message) || 'Delete failed', 'error', 6000);
       }

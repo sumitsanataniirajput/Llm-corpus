@@ -81,8 +81,15 @@ class FakeSupabaseClient:
 
 def _install_supabase_stub():
     try:
-        import supabase  # noqa: F401
-        return
+        import supabase
+
+        # NOTE: a bare `import supabase` is not enough. When pytest is invoked
+        # from the repository root, the repository's own `supabase/` folder
+        # (migrations) is importable as a PEP 420 namespace package and wins
+        # over site-packages. That namespace has no `create_client`, so only
+        # treat the import as real when the SDK entry point exists.
+        if hasattr(supabase, "create_client"):
+            return
     except Exception:
         pass
 

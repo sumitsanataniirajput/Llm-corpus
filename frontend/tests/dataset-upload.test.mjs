@@ -7,8 +7,23 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { createApp, datasetFixtures } from './harness.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FRONTEND_DIR = path.resolve(__dirname, '..');
+
+/** Return the declaration block of the first rule whose selector starts with `selector`. */
+function ruleBody(source, selector) {
+  const index = source.indexOf(selector);
+  assert.notEqual(index, -1, `rule ${selector} exists`);
+  const start = source.indexOf('{', index);
+  const end = source.indexOf('}', start);
+  return source.slice(start + 1, end);
+}
 
 function setFiles(app, input, names) {
   const files = names.map((name) => new app.window.File([`content of ${name}`], name, { type: 'text/plain' }));
@@ -140,6 +155,101 @@ test('drop zone is a native label bound to the file input and toggles cleanly wi
   const cta = drop.querySelector('.drop-zone-cta');
   cta.click();
   assert.equal(clickCount, 1, 'tapping drop zone opens file picker exactly once');
+});
+
+test('the real file input is a full-size transparent overlay, not a 1px clipped control', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+  app.window.datasets.showUpload();
+
+  const drop = app.doc.getElementById('datasets-drop');
+  const input = app.doc.getElementById('datasets-file');
+
+  // Structure: one input, a direct child of the drop zone, enabled, multi-file.
+  assert.equal(app.doc.querySelectorAll('#datasets-upload-area input[type="file"]').length, 1);
+  assert.equal(input.parentElement, drop, 'the input is a direct child of the drop zone');
+  assert.equal(input.hasAttribute('disabled'), false, 'the input must stay enabled');
+  assert.equal(input.multiple, true, 'multi-file selection is preserved');
+  assert.equal(drop.querySelectorAll('button').length, 0, 'no nested interactive button inside the label');
+
+  // Tap target: nothing in the zone may have pointer-events:none applied inline
+  // to the input, and no inline handler may open the picker programmatically.
+  assert.equal(input.style.pointerEvents, '', 'no inline pointer-events override on the input');
+  assert.equal(input.getAttribute('onclick'), null, 'no inline click handler on the input');
+  assert.equal(drop.getAttribute('onclick'), null, 'no inline click handler on the drop zone');
+  assert.equal(input.tabIndex >= 0, true, 'the input is keyboard focusable');
+
+  // Every decorative child stays out of the tap path.
+  for (const child of drop.children) {
+    if (child === input) continue;
+    assert.notEqual(child.tagName, 'INPUT');
+  }
+
+  // CSS contract — the fix only works if the stylesheet makes the input a
+  // real overlay that receives real taps.
+  const components = fs.readFileSync(path.join(FRONTEND_DIR, 'css', 'components.css'), 'utf8');
+  const responsive = fs.readFileSync(path.join(FRONTEND_DIR, 'css', 'responsive.css'), 'utf8');
+
+  const zone = ruleBody(components, '.drop-zone');
+  assert.match(zone, /position:\s*relative/, 'the drop zone anchors the overlay');
+
+  const overlay = ruleBody(components, '.drop-zone > input[type="file"]');
+  assert.match(overlay, /position:\s*absolute/, 'overlay is positioned');
+  assert.match(overlay, /inset:\s*0/, 'overlay covers the whole zone');
+  assert.match(overlay, /width:\s*100%/);
+  assert.match(overlay, /height:\s*100%/);
+  assert.match(overlay, /opacity:\s*0/);
+  assert.match(overlay, /pointer-events:\s*auto/, 'the input must receive the tap');
+  assert.match(overlay, /z-index:\s*\d+/, 'the input sits above the decorative content');
+  assert.match(overlay, /cursor:\s*pointer/);
+
+  // Regression guards for the two broken approaches.
+  assert.doesNotMatch(overlay, /pointer-events:\s*none/, 'never disable pointer events on the real input');
+  assert.doesNotMatch(overlay, /clip:\s*rect/, 'the input must not be clipped to 1px');
+  assert.doesNotMatch(overlay, /width:\s*1px/);
+  assert.doesNotMatch(overlay, /display:\s*none/);
+  assert.doesNotMatch(overlay, /visibility:\s*hidden/);
+
+  // Decorative children are inert, and the overlay rule comes after that rule
+  // so it wins the cascade.
+  assert.match(ruleBody(components, '.drop-zone > *'), /pointer-events:\s*none/);
+  assert.ok(
+    components.indexOf('.drop-zone > * {') < components.indexOf('.drop-zone > input[type="file"]'),
+    'the overlay rule must override .drop-zone > *'
+  );
+
+  // The phone breakpoint keeps the overlay covering the taller mobile zone.
+  assert.match(
+    responsive,
+    /\.drop-zone > input\[type="file"\][^{]*\{[^}]*pointer-events:\s*auto/s
+  );
+});
+
+test('the drop zone never opens the picker programmatically (no double-open)', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+  app.window.datasets.showUpload();
+
+  const drop = app.doc.getElementById('datasets-drop');
+  const input = app.doc.getElementById('datasets-file');
+
+  let opens = 0;
+  input.addEventListener('click', () => { opens += 1; });
+
+  // A tap that lands on the transparent overlay itself opens the picker once.
+  input.click();
+  assert.equal(opens, 1, 'the real input opens the picker exactly once per tap');
+
+  // Keyboard Enter/Space on the real control is handled natively — the old
+  // JS keydown handler called input.click() and produced a second dialog.
+  opens = 0;
+  drop.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.equal(opens, 0, 'no JS handler synthesises a click on keydown');
+
+  // Tapping the decorative copy is forwarded by the label exactly once.
+  opens = 0;
+  drop.querySelector('.drop-zone-cta').click();
+  assert.equal(opens, 1);
 });
 
 test('pdf upload works and oversized files are rejected client-side', async () => {

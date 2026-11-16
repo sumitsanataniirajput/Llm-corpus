@@ -7,13 +7,20 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.models import Checkpoint, EvaluationRun, Model, TrainingJob
+from app.core.ownership import (
+    normalize_owner_id as _normalize_owner_id,
+    owner_column_matches,
+    owner_fingerprint,
+    require_user_uuid as _require_user_uuid,
+    same_owner as _same_owner,
+)
 from app.core.security import validate_model_config
 from app.dependencies import require_user, get_db_session
 
@@ -53,34 +60,6 @@ class ModelOut(BaseModel):
     status: str
     created_at: str
     updated_at: str
-
-
-def _require_user_uuid(user: dict) -> uuid.UUID:
-    raw = (user or {}).get("user_id")
-    if not raw:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    try:
-        return uuid.UUID(str(raw).strip())
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=401, detail="Invalid authenticated user identifier")
-
-
-def _normalize_owner_id(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, uuid.UUID):
-        return str(value).lower()
-    raw = str(value).strip()
-    try:
-        return str(uuid.UUID(raw)).lower()
-    except (ValueError, TypeError):
-        return raw.lower()
-
-
-def _same_owner(record_owner_id: Any, user_id: Any) -> bool:
-    left = _normalize_owner_id(record_owner_id)
-    right = _normalize_owner_id(user_id)
-    return bool(left and right and left == right)
 
 
 def _model_to_out(model: Model) -> ModelOut:
@@ -133,13 +112,99 @@ async def _table_exists(db: AsyncSession, table_name: str) -> bool:
 @router.get("", response_model=List[ModelOut], include_in_schema=False)
 @router.get("/", response_model=List[ModelOut], tags=["models"])
 async def list_models(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    """List models owned by the current user."""
+    """List models owned by the current user.
+
+    The filter is type-agnostic (see ``app.core.ownership.owner_column_matches``)
+    so it works whether ``models.owner_id`` is a ``uuid`` or a ``text`` column —
+    a plain ``Model.owner_id == uuid.UUID(...)`` raises
+    ``operator does not exist: text = uuid`` on a text column.
+    """
     owner_uuid = _require_user_uuid(user)
     result = await db.execute(
-        select(Model).where(Model.owner_id == owner_uuid).order_by(Model.created_at.desc())
+        select(Model)
+        .where(owner_column_matches(Model.owner_id, owner_uuid))
+        .order_by(Model.created_at.desc())
     )
     models = result.scalars().all()
     return [_model_to_out(m) for m in models]
+
+
+@router.get("/ownership-diagnostics", tags=["models"])
+async def ownership_diagnostics(
+    model_id: Optional[str] = Query(default=None),
+    x_debug_secret: Optional[str] = Header(default=None, alias="X-Debug-Secret"),
+    user=Depends(require_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Diagnose "403 Not authorized" without weakening authorization.
+
+    Reports, for the authenticated caller only:
+
+    * the user id the backend resolved from the Supabase token,
+    * the live SQL type of ``models.owner_id`` (uuid vs text — the shape that
+      used to make owner comparisons fail),
+    * how many models are owned by the caller,
+    * for a given ``model_id``: whether the caller owns it, and — only when the
+      caller owns it, or when the deployment's ``WORKER_AUTH_SECRET`` is
+      supplied in ``X-Debug-Secret`` — the row's owner id.
+
+    It never mutates anything and never reassigns ownership.
+    """
+    owner_uuid = _require_user_uuid(user)
+    caller = str(owner_uuid)
+
+    column_type = None
+    try:
+        type_row = await db.execute(
+            text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'models' "
+                "AND column_name = 'owner_id'"
+            )
+        )
+        column_type = type_row.scalar_one_or_none()
+    except Exception as exc:  # pragma: no cover - diagnostics must not fail hard
+        logger.warning("Owner column type lookup failed: %s", exc)
+
+    owned = await db.execute(
+        select(Model).where(owner_column_matches(Model.owner_id, owner_uuid))
+    )
+    owned_models = owned.scalars().all()
+
+    trusted = bool(x_debug_secret) and x_debug_secret == settings.WORKER_AUTH_SECRET
+
+    report: Dict[str, Any] = {
+        "caller_user_id": caller,
+        "caller_user_id_normalized": _normalize_owner_id(caller),
+        "models_owner_id_column_type": column_type,
+        "models_owned_by_caller": len(owned_models),
+        "owned_model_ids": [m.id for m in owned_models],
+        "auth_identity_source": "supabase /auth/v1/user -> user.id",
+        "full_owner_ids_exposed": trusted,
+    }
+
+    if model_id:
+        result = await db.execute(select(Model).where(Model.id == model_id))
+        model = result.scalar_one_or_none()
+        if model is None:
+            report["model"] = {"id": model_id, "exists": False}
+        else:
+            matches = _same_owner(model.owner_id, owner_uuid)
+            entry: Dict[str, Any] = {
+                "id": model.id,
+                "name": model.name,
+                "exists": True,
+                "owner_matches_caller": matches,
+                "verdict": "owner" if matches else "different_account",
+                "stored_owner_python_type": type(model.owner_id).__name__,
+                "stored_owner_fingerprint": owner_fingerprint(model.owner_id),
+                "caller_fingerprint": owner_fingerprint(owner_uuid),
+            }
+            if matches or trusted:
+                entry["stored_owner_id"] = _normalize_owner_id(model.owner_id)
+            report["model"] = entry
+
+    return report
 
 
 @router.post("", response_model=ModelOut, include_in_schema=False)
@@ -228,10 +293,17 @@ async def delete_model(
         raise HTTPException(status_code=404, detail="Model not found")
     if not _same_owner(model.owner_id, owner_uuid):
         logger.warning(
-            "Denied delete_model for model=%s: owner=%s caller=%s",
+            "Denied delete_model for model=%s: stored owner=%s (python %s, fp=%s) "
+            "caller=%s (fp=%s). Either the row belongs to another account or the "
+            "API is not running code that normalizes owner ids; check "
+            "GET /api/v1/models/ownership-diagnostics?model_id=%s",
             model_id,
             _normalize_owner_id(model.owner_id),
+            type(model.owner_id).__name__,
+            owner_fingerprint(model.owner_id),
             _normalize_owner_id(owner_uuid),
+            owner_fingerprint(owner_uuid),
+            model_id,
         )
         raise HTTPException(status_code=403, detail="Not authorized")
 

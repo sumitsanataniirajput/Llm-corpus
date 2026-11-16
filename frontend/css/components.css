@@ -816,6 +816,8 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
 
 /* ---------- Drop zone ---------- */
 .drop-zone {
+  /* position: relative is required: the real <input type="file"> is an
+     absolutely positioned overlay anchored to this box. */
   position: relative;
   border: 1.5px dashed var(--color-border-strong);
   border-radius: var(--radius-lg);
@@ -840,11 +842,18 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
 .drop-zone:focus-within,
 .drop-zone:active { border-color: var(--color-accent-border); background: var(--color-surface-high); }
 
+.drop-zone:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .drop-zone.is-dragover {
   border-color: var(--color-brand-soft);
   background: var(--color-accent-soft);
 }
 
+/* Decorative content (icon, copy, "Tap to choose files") never intercepts the
+   tap — the file input overlay below is the only tap target in the zone. */
 .drop-zone > * {
   pointer-events: none;
 }
@@ -881,18 +890,34 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
   font-weight: 600;
 }
 
-.drop-zone input[type="file"] {
+/* The real native file input: a transparent, full-size overlay over the whole
+   drop zone. It stays rendered, sized and hit-testable (opacity 0 is NOT
+   "hidden"): a real tap lands on the real control, which is what opens the
+   Android Chrome file manager. It must never get pointer-events:none, a 1px
+   clip, display:none or visibility:hidden — that is what previously broke
+   mobile selection. Kept last so it wins over .drop-zone > * above. */
+.drop-zone > input[type="file"],
+.drop-zone input.drop-zone-input {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
   border: 0;
   opacity: 0;
-  pointer-events: none;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  color: transparent;
+  font-size: var(--text-body-small);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 5;
 }
 
 /* Selected file rows */
