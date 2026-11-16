@@ -31,6 +31,7 @@ class Model(Base):
     owner_id = Column(UUID(as_uuid=True), nullable=False)
     name = Column(String, nullable=False)
     config = Column(JSONB, nullable=False, default=dict)
+    tokenizer_ref = Column(Text, nullable=True)
     version = Column(String, nullable=False, default="1.0")
     status = Column(String, nullable=False, default="idle")
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())

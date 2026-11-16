@@ -6,7 +6,7 @@ from sqlalchemy import select, text
 
 from app.core.database import get_session_factory
 from app.core.models import Model, TrainingJob
-from tests.conftest import USER_ID, OTHER_USER_ID, db_rows
+from tests.conftest import USER_ID, db_rows
 
 
 async def _create_model(client, name="Delete me"):
@@ -25,10 +25,10 @@ async def _create_model(client, name="Delete me"):
 
 
 @pytest.mark.asyncio
-async def test_delete_model_removes_artifacts_and_preserves_history(http, storage):
+async def test_delete_model_removes_artifacts_and_preserves_history(http, storage, monkeypatch):
     from app.api.endpoints import models as model_endpoints
 
-    model_endpoints.create_client = lambda url, key: storage
+    monkeypatch.setattr(model_endpoints, "create_client", lambda url, key: storage)
     model = await _create_model(http)
     checkpoint_path = f"checkpoints/{model['id']}/model.pt"
     tokenizer_path = f"tokenizers/{model['id']}/tokenizer.json"
