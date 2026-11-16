@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, text
 
 from app.dependencies import require_user, get_db_session
 from app.core.models import TrainingJob
@@ -170,8 +170,11 @@ async def list_metrics(job_id: str, user=Depends(require_user), db: AsyncSession
         raise HTTPException(status_code=404, detail="Job not found")
     if job.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    # Metrics stored separately; return empty for now
-    return []
+    result = await db.execute(text("""
+        SELECT step, loss, learning_rate, tokens_per_second, created_at
+        FROM public.training_metrics WHERE job_id = :job_id ORDER BY step ASC
+    """), {"job_id": job_id})
+    return [dict(row) for row in result.mappings().all()]
 
 
 @router.get("/{job_id}/logs", response_model=List[dict], tags=["training"])
@@ -185,8 +188,12 @@ async def list_logs(job_id: str, user=Depends(require_user), db: AsyncSession = 
         raise HTTPException(status_code=404, detail="Job not found")
     if job.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    # Logs stored separately; return empty for now
-    return []
+    result = await db.execute(text("""
+        SELECT event, data, created_at
+        FROM public.training_job_events WHERE job_id = :job_id
+        ORDER BY created_at ASC
+    """), {"job_id": job_id})
+    return [dict(row) for row in result.mappings().all()]
 
 
 @router.get("/checkpoints", tags=["training"])
