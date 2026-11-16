@@ -286,8 +286,14 @@ async def resume_job(job_id: str, user=Depends(require_user), db: AsyncSession =
 @router.post("/{job_id}/stop", tags=["training"])
 async def stop_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    status = await _set_job_status(db, job_id, owner_id, "stopping")
-    return {"ok": True, "status": status}
+    from app.services import training_worker
+    job = await _get_owned_job(db, job_id, owner_id)
+    signaled = training_worker.request_job_stop(job_id)
+    next_status = "stopping" if (signaled or job.status == "running") else "stopped"
+    job.status = next_status
+    job.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "status": job.status, "signaled": signaled}
 
 
 @router.get("/{job_id}/metrics", response_model=List[dict], tags=["training"])

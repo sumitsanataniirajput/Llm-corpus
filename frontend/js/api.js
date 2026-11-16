@@ -88,10 +88,11 @@ window.CORPUS_API = (function () {
 
     const url = BASE + endpoint;
     const token = await resolveToken(options.token);
+    const mergedHeaders = { ...headers(token), ...(options.headers || {}) };
     const opts = {
-      method: options.method || 'GET',
-      headers: headers(token),
       ...options,
+      method: options.method || 'GET',
+      headers: mergedHeaders,
     };
     if (options.body && typeof options.body !== 'string') {
       opts.body = JSON.stringify(options.body);
@@ -135,14 +136,14 @@ window.CORPUS_API = (function () {
     clearBackendUnavailable();
 
     // Handle 401 — try to refresh the Supabase session once, then retry.
-    // Only retry safe methods (GET). Never auto-retry POST/PUT/DELETE to avoid duplicates.
-    if (res.status === 401 && token && options.method !== 'POST' && options.method !== 'PUT' && options.method !== 'DELETE') {
+    // Only retry idempotent methods (GET, DELETE). Never auto-retry POST/PUT to avoid duplicates.
+    if (res.status === 401 && token && options.method !== 'POST' && options.method !== 'PUT') {
       const refreshed = await refreshSession();
       if (refreshed) {
         const retryOpts = {
-          method: options.method || 'GET',
-          headers: headers(refreshed),
           ...options,
+          method: options.method || 'GET',
+          headers: { ...headers(refreshed), ...(options.headers || {}) },
         };
         if (options.body && typeof options.body !== 'string') {
           retryOpts.body = JSON.stringify(options.body);
@@ -181,7 +182,16 @@ window.CORPUS_API = (function () {
       data = await res.text();
     }
     if (!res.ok) {
-      const err = new Error(data.message || data.detail || 'Request failed (' + res.status + ')');
+      let msg = null;
+      if (data && typeof data === 'object') {
+        if (typeof data.message === 'string' && data.message) msg = data.message;
+        else if (typeof data.detail === 'string' && data.detail) msg = data.detail;
+        else if (Array.isArray(data.detail)) msg = data.detail.map(d => (d && d.msg) || String(d)).join(' ');
+        else if (data.detail && typeof data.detail === 'object') {
+          msg = data.detail.message || (Array.isArray(data.detail.errors) ? data.detail.errors.join(' ') : JSON.stringify(data.detail));
+        }
+      }
+      const err = new Error(msg || 'Request failed (' + res.status + ')');
       err.status = res.status;
       err.data = data;
       err.networkError = false;
@@ -252,8 +262,9 @@ window.CORPUS_API = (function () {
     return request('/api/v1/models/' + encodeURIComponent(modelId), { method: 'PUT', token, body: updates });
   }
 
-  async function deleteModel(modelId, token) {
-    return request('/api/v1/models/' + encodeURIComponent(modelId), { method: 'DELETE', token });
+  async function deleteModel(modelId, token, options = {}) {
+    const qs = options && options.stopActive ? '?stop_active=true' : '';
+    return request('/api/v1/models/' + encodeURIComponent(modelId) + qs, { method: 'DELETE', token });
   }
 
   async function cloneModel(modelId, token) {

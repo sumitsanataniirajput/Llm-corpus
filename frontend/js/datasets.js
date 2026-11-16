@@ -30,6 +30,23 @@ window.datasets = (function () {
     return formats().map(ext => ext.toUpperCase()).join(', ');
   }
 
+  function acceptAttr() {
+    const mimeByExt = {
+      txt: 'text/plain',
+      md: 'text/markdown',
+      csv: 'text/csv',
+      json: 'application/json',
+      jsonl: 'application/x-ndjson',
+      pdf: 'application/pdf',
+    };
+    const tokens = [];
+    formats().forEach(ext => {
+      tokens.push('.' + ext);
+      if (mimeByExt[ext]) tokens.push(mimeByExt[ext]);
+    });
+    return tokens.join(',');
+  }
+
   async function render() {
     const user = state.getUser();
     const container = window.CORPUS_APP.getPageContainer();
@@ -74,12 +91,13 @@ window.datasets = (function () {
           </button>
         </div>
 
-        <div class="drop-zone" id="datasets-drop" tabindex="0" role="button" aria-label="Choose dataset files">
+        <label for="datasets-file" class="drop-zone" id="datasets-drop" tabindex="0" role="button" aria-label="Choose dataset files">
           <i class="fas fa-file-import"></i>
           <strong>Drop files here, or tap to browse</strong>
           <span>${esc(formatsLabel())} · up to ${esc(CORPUS_UTILS.formatBytes(maxSize()))} per file</span>
-          <input type="file" id="datasets-file" multiple accept="${esc(formats().map(ext => '.' + ext).join(','))}">
-        </div>
+          <span class="drop-zone-cta"><i class="fas fa-folder-open"></i> Tap to choose files</span>
+          <input type="file" id="datasets-file" multiple accept="${esc(acceptAttr())}">
+        </label>
 
         <div class="file-queue" id="datasets-file-list"></div>
 
@@ -151,12 +169,17 @@ window.datasets = (function () {
   function bindUploadInputs() {
     const input = document.getElementById('datasets-file');
     const drop = document.getElementById('datasets-drop');
-    if (input) {
+    if (input && input.dataset.bound !== '1') {
+      input.dataset.bound = '1';
       input.addEventListener('change', () => {
-        setQueue(Array.prototype.slice.call(input.files || []));
+        const picked = Array.prototype.slice.call(input.files || []);
+        if (picked.length) setQueue(picked);
+        // Reset input value so re-picking the exact same file after clear/retry still fires change.
+        try { input.value = ''; } catch (e) { /* read-only in mocked inputs */ }
       });
     }
-    if (!drop) return;
+    if (!drop || drop.dataset.bound === '1') return;
+    drop.dataset.bound = '1';
     drop.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
@@ -186,15 +209,23 @@ window.datasets = (function () {
   }
 
   function setQueue(files) {
-    queue = files.map(file => ({
-      file: file,
-      name: file.name,
-      size: file.size,
-      state: 'ready',
-      progress: 0,
-      message: '',
-    }));
+    queue = files.map(file => {
+      const invalid = validateFile(file);
+      return {
+        file: file,
+        name: file.name,
+        size: file.size,
+        datasetId: null,
+        state: invalid ? 'failed' : 'ready',
+        progress: 0,
+        message: invalid || '',
+      };
+    });
     renderQueue();
+    const firstError = queue.find(item => item.state === 'failed');
+    if (firstError && firstError.message) {
+      ui.toast(firstError.message, 'error');
+    }
   }
 
   function renderQueue() {
@@ -423,10 +454,15 @@ window.datasets = (function () {
     const uploadBtn = document.getElementById('datasets-upload-btn');
     ui.setButtonLoading(uploadBtn, true);
     let successCount = 0;
+    let failedCount = 0;
     let lastDatasetId = null;
 
     for (let index = 0; index < queue.length; index += 1) {
       const item = queue[index];
+      if (item.state === 'done') {
+        successCount += 1;
+        continue;
+      }
       const file = item.file;
       const ext = (file.name.split('.').pop() || '').toLowerCase();
       const datasetName = files.length === 1
@@ -435,18 +471,22 @@ window.datasets = (function () {
 
       queue[index].state = 'uploading';
       queue[index].progress = 0;
-      queue[index].message = 'Creating dataset record…';
+      queue[index].message = item.datasetId ? 'Retrying upload…' : 'Creating dataset record…';
       updateProgress(index);
 
       try {
         const token = await state.getAccessToken();
-        const created = await window.CORPUS_API.createDataset({
-          name: datasetName,
-          format: ext,
-          size: file.size,
-        }, token);
-        const datasetId = (created && created.dataset && created.dataset.id) || (created && created.id);
-        if (!datasetId) throw new Error('The backend did not return a dataset id.');
+        let datasetId = item.datasetId;
+        if (!datasetId) {
+          const created = await window.CORPUS_API.createDataset({
+            name: datasetName,
+            format: ext,
+            size: file.size,
+          }, token);
+          datasetId = (created && created.dataset && created.dataset.id) || (created && created.id);
+          if (!datasetId) throw new Error('The backend did not return a dataset id.');
+          queue[index].datasetId = datasetId;
+        }
 
         queue[index].message = 'Uploading bytes…';
         updateProgress(index);
@@ -467,13 +507,14 @@ window.datasets = (function () {
         queue[index].state = 'failed';
         queue[index].message = err && err.message ? err.message : 'Upload failed';
         updateProgress(index);
+        failedCount += 1;
       }
     }
 
     uploading = false;
     ui.setButtonLoading(uploadBtn, false);
 
-    if (successCount) {
+    if (failedCount === 0 && successCount > 0) {
       ui.toast(successCount + ' dataset' + (successCount === 1 ? '' : 's') + ' uploaded', 'success');
       const area = document.getElementById('datasets-upload-area');
       if (area) area.style.display = 'none';
@@ -484,7 +525,13 @@ window.datasets = (function () {
       renderQueue();
       const progress = document.getElementById('datasets-progress');
       if (progress) progress.innerHTML = '';
+    } else if (successCount > 0) {
+      queue = queue.filter(item => item.state !== 'done');
+      renderQueue();
+      renderProgress();
+      ui.toast(successCount + ' uploaded, ' + failedCount + ' failed — fix or retry below.', 'warning');
     } else {
+      renderQueue();
       ui.toast('Upload failed — see the progress list for details.', 'error');
     }
 

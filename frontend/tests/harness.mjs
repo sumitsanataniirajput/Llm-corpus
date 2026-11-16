@@ -25,6 +25,7 @@ const MODULES = [
   'js/components.js',
   'js/charts.js',
   'js/dashboard.js',
+  'js/models.js',
   'js/training.js',
   'js/datasets.js',
 ];
@@ -69,6 +70,12 @@ class XHRStub {
   getResponseHeader(name) { return name.toLowerCase() === 'content-type' ? 'application/json' : null; }
   send(body) {
     this.sent.push(body);
+    if (XHRStub.nextResponder) {
+      const fn = XHRStub.nextResponder;
+      XHRStub.nextResponder = null;
+      fn(this, body);
+      return;
+    }
     const total = body && body.__size ? body.__size : 1000;
     if (this.upload.onprogress) this.upload.onprogress({ lengthComputable: true, loaded: total, total });
     this.status = 200;
@@ -77,6 +84,7 @@ class XHRStub {
   }
 }
 XHRStub.instances = [];
+XHRStub.nextResponder = null;
 
 function jsonResponse(data, status = 200) {
   return {
@@ -110,6 +118,7 @@ function createAppFromFiles(options) {
   });
   const { window } = dom;
   XHRStub.instances = [];
+  XHRStub.nextResponder = null;
 
   window.Chart = ChartStub;
   window.WebSocket = WebSocketStub;
@@ -146,7 +155,13 @@ function createAppFromFiles(options) {
     const parsed = new URL(url);
     // The API client omits trailing slashes on collection routes; normalise.
     const route = parsed.pathname.replace(/\/$/, '') || '/';
-    state.calls.push({ method, route, body: opts.body ? JSON.parse(opts.body) : null, url });
+    state.calls.push({
+      method,
+      route,
+      headers: opts.headers || {},
+      body: opts.body ? JSON.parse(opts.body) : null,
+      url,
+    });
 
     if (route === '/api/v1/datasets' && method === 'GET') {
       return jsonResponse([...state.datasets]);
@@ -181,6 +196,17 @@ function createAppFromFiles(options) {
       };
       state.datasets.push(created);
       return jsonResponse(created);
+    }
+    if (/^\/api\/v1\/models\/[^/]+$/.test(route) && method === 'DELETE') {
+      const id = route.split('/').pop();
+      const stopActive = parsed.searchParams.get('stop_active') === 'true';
+      if (state.deleteModelHandler) {
+        return state.deleteModelHandler({ id, stopActive, state, jsonResponse });
+      }
+      const idx = state.models.findIndex((m) => m.id === id);
+      if (idx === -1) return jsonResponse({ detail: 'Model not found' }, 404);
+      state.models.splice(idx, 1);
+      return jsonResponse({ ok: true, model_id: id, removed_files: 0 });
     }
     if (route === '/api/v1/training' && method === 'POST') {
       const body = JSON.parse(opts.body);

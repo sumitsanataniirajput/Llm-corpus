@@ -118,3 +118,90 @@ test('search filters the dataset library and reports the count', async () => {
   assert.equal(app.doc.querySelectorAll('.dataset-card').length, 0);
   assert.match(app.doc.getElementById('datasets-library').textContent, /No matching datasets/);
 });
+
+test('drop zone is a native label bound to the file input and toggles cleanly without duplicate clicks', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+
+  const drop = app.doc.getElementById('datasets-drop');
+  const input = app.doc.getElementById('datasets-file');
+  assert.equal(drop.tagName, 'LABEL');
+  assert.equal(drop.getAttribute('for'), 'datasets-file');
+  assert.ok(input.getAttribute('accept').includes('.pdf'));
+  assert.ok(input.getAttribute('accept').includes('application/pdf'));
+
+  let clickCount = 0;
+  input.addEventListener('click', () => { clickCount += 1; });
+
+  // Open, close, and re-open the upload panel, then tap the drop-zone CTA.
+  app.window.datasets.showUpload();
+  app.window.datasets.showUpload();
+  app.window.datasets.showUpload();
+  const cta = drop.querySelector('.drop-zone-cta');
+  cta.click();
+  assert.equal(clickCount, 1, 'tapping drop zone opens file picker exactly once');
+});
+
+test('pdf upload works and oversized files are rejected client-side', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+  app.window.datasets.showUpload();
+
+  const input = app.doc.getElementById('datasets-file');
+  app.doc.getElementById('datasets-name').value = 'Paper PDF';
+  const pdfFile = new app.window.File(['%PDF-1.4\nhello'], 'paper.pdf', { type: 'application/pdf' });
+  Object.defineProperty(input, 'files', { value: [pdfFile], configurable: true });
+  input.dispatchEvent(new app.window.Event('change'));
+
+  app.net.calls.length = 0;
+  await app.window.datasets.handleUpload();
+
+  const posts = app.net.calls.filter((c) => c.route === '/api/v1/datasets' && c.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].body.format, 'pdf');
+  assert.equal(app.XHRStub.instances.length, 1);
+
+  // Oversized file (>100 MB) is rejected without any POST/XHR.
+  app.window.datasets.showUpload();
+  const bigFile = new app.window.File(['x'], 'huge.txt', { type: 'text/plain' });
+  Object.defineProperty(bigFile, 'size', { value: 101 * 1024 * 1024 });
+  Object.defineProperty(input, 'files', { value: [bigFile], configurable: true });
+  input.dispatchEvent(new app.window.Event('change'));
+
+  app.net.calls.length = 0;
+  app.XHRStub.instances.length = 0;
+  await app.window.datasets.handleUpload();
+  assert.equal(app.net.calls.filter((c) => c.method === 'POST').length, 0);
+  assert.equal(app.XHRStub.instances.length, 0);
+  assert.match(app.doc.getElementById('toast-container').textContent, /too large/i);
+});
+
+test('failed upload stays visible and retry reuses the created dataset record', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+  app.window.datasets.showUpload();
+
+  app.doc.getElementById('datasets-name').value = 'Flaky corpus';
+  const input = app.doc.getElementById('datasets-file');
+  setFiles(app, input, ['flaky.txt']);
+
+  app.XHRStub.nextResponder = (xhr) => {
+    xhr.status = 502;
+    xhr.responseText = JSON.stringify({ detail: 'Storage upload failed' });
+    if (xhr.onload) xhr.onload();
+  };
+  app.net.calls.length = 0;
+  await app.window.datasets.handleUpload();
+
+  // First attempt created one dataset record and failed upload, keeping queue visible.
+  assert.equal(app.net.calls.filter((c) => c.route === '/api/v1/datasets' && c.method === 'POST').length, 1);
+  assert.equal(app.doc.getElementById('datasets-upload-area').style.display, 'block');
+  assert.match(app.doc.getElementById('datasets-progress').textContent, /Storage upload failed/);
+
+  // Retry succeeds without creating a duplicate dataset record.
+  app.net.calls.length = 0;
+  await app.window.datasets.handleUpload();
+  assert.equal(app.net.calls.filter((c) => c.route === '/api/v1/datasets' && c.method === 'POST').length, 0);
+  assert.equal(app.XHRStub.instances.length, 2);
+  assert.match(app.doc.getElementById('toast-container').textContent, /1 dataset uploaded/i);
+});
