@@ -7,12 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uuid
+import hashlib
+import os
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 
 from app.dependencies import require_user, get_db_session
 from app.core.models import Dataset
+from app.config import settings
+from supabase import create_client
 
 router = APIRouter()
 
@@ -152,11 +156,38 @@ async def upload_dataset_file(
     if ds.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
     contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Uploaded dataset file is empty.")
+    if len(contents) > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="Dataset exceeds the configured upload limit.")
+    if not settings.SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(status_code=503, detail="Dataset storage is not configured. Add SUPABASE_SERVICE_ROLE_KEY to the Render backend environment; never put it in the frontend.")
+    safe_name = os.path.basename(file.filename or "dataset.txt").replace("\\", "_")
+    object_path = f"{owner_id}/datasets/{dataset_id}/{uuid.uuid4().hex}_{safe_name}"
+    try:
+        storage = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+        storage.storage.from_(settings.STORAGE_BUCKET).upload(
+            object_path, contents,
+            file_options={"content-type": file.content_type or "text/plain", "upsert": "false"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not persist dataset to Supabase Storage: {str(exc)[:300]}")
+    checksum = hashlib.sha256(contents).hexdigest()
+    await db.execute(text("""
+        INSERT INTO public.dataset_files
+        (id, dataset_id, storage_path, file_name, file_size, checksum)
+        VALUES (:id, :dataset_id, :storage_path, :file_name, :file_size, :checksum)
+    """), {
+        "id": str(uuid.uuid4()), "dataset_id": dataset_id,
+        "storage_path": object_path, "file_name": safe_name,
+        "file_size": len(contents), "checksum": checksum,
+    })
     ds.size = len(contents)
-    ds.file_name = file.filename  # type: ignore[attr-defined]
+    ds.checksum = checksum
+    ds.status = "uploaded"
     ds.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"ok": True, "dataset_id": dataset_id, "size": len(contents)}
+    return {"ok": True, "dataset_id": dataset_id, "size": len(contents), "storage_path": object_path, "checksum": checksum}
 
 
 @router.post("/{dataset_id}/preprocess", tags=["datasets"])
