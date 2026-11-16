@@ -24,14 +24,18 @@ class CorpusTransformerPT(nn.Module):
         self.pos_embedding = nn.Embedding(self.context_length, self.d_model)
         self.dropout = nn.Dropout(config.get("dropout", 0.1))
 
-        decoder_layer = nn.TransformerDecoderLayer(
+        # A causal TransformerEncoder is used as a decoder-only stack.
+        # TransformerDecoder with the same tensor as target and memory leaks
+        # future tokens through the unmasked memory-attention path.
+        decoder_layer = nn.TransformerEncoderLayer(
             d_model=self.d_model,
             nhead=self.n_heads,
             dim_feedforward=self.d_ff,
             dropout=config.get("dropout", 0.1),
             batch_first=True,
+            norm_first=True,
         )
-        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=self.n_layers)
+        self.decoder = nn.TransformerEncoder(decoder_layer, num_layers=self.n_layers)
         self.final_ln = nn.LayerNorm(self.d_model)
         self.output_projection = nn.Linear(self.d_model, self.vocab_size)
 
@@ -50,7 +54,7 @@ class CorpusTransformerPT(nn.Module):
         x = self.token_embedding(token_ids) + self.pos_embedding(positions)
         x = self.dropout(x)
         mask = self.causal_mask[:seq, :seq]
-        x = self.decoder(x, x, tgt_mask=mask)
+        x = self.decoder(x, mask=mask)
         x = self.final_ln(x)
         logits = self.output_projection(x)
         return logits
