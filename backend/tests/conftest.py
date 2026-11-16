@@ -62,6 +62,7 @@ from app.core.models import Model, TrainingJob  # noqa: E402
 from app.dependencies import get_db_session, require_user  # noqa: E402
 from app.main import app as fastapi_app  # noqa: E402
 from app.api.endpoints import datasets as datasets_endpoints  # noqa: E402
+from app.api.endpoints import models as models_endpoints  # noqa: E402
 from app.core import security as security_module  # noqa: E402
 
 USER_ID = str(uuid.uuid4())
@@ -102,7 +103,12 @@ RAW_SQL_TABLES = [
       created_at timestamptz DEFAULT now()
     )
     """,
-
+    """
+    ALTER TABLE models ADD COLUMN IF NOT EXISTS tokenizer_ref text
+    """,
+    """
+    ALTER TABLE evaluation_runs ALTER COLUMN status SET DEFAULT 'completed'
+    """,
     """
     CREATE TABLE IF NOT EXISTS model_versions (
       id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -199,8 +205,9 @@ def storage():
 
 @pytest.fixture(autouse=True)
 def _patch_storage(storage, monkeypatch):
-    # datasets endpoints use `create_client(...)`
+    # datasets and models endpoints use `create_client(...)`
     monkeypatch.setattr(datasets_endpoints, "create_client", lambda url, key: storage)
+    monkeypatch.setattr(models_endpoints, "create_client", lambda url, key: storage)
     yield
 
 

@@ -11,6 +11,7 @@ window.models = (function () {
 
   let editingModelId = null;
   let paramListenersReady = false;
+  const deletingIds = new Set();
 
   const ARCH_FIELDS = ['m-vocab', 'm-context', 'm-dmodel', 'm-layers', 'm-heads', 'm-dff', 'm-dropout'];
 
@@ -246,13 +247,21 @@ window.models = (function () {
             <button class="btn btn-outline btn-sm" type="button" onclick="models.cloneModel('${esc(model.id)}')">
               <i class="fas fa-copy"></i> Clone
             </button>
-            <button class="btn btn-danger btn-sm" type="button" onclick="models.deleteModel('${esc(model.id)}')" title="Delete model">
-              <i class="fas fa-trash"></i>
+            <button class="btn btn-danger btn-sm" type="button" data-delete-model="${esc(model.id)}" aria-label="Delete ${esc(model.name || model.id)}" title="Delete model">
+              <i class="fas fa-trash"></i> <span>Delete</span>
             </button>
           </div>
         </article>
       `;
     }).join('');
+
+    container.querySelectorAll('[data-delete-model]').forEach(btn => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteModel(btn.getAttribute('data-delete-model'));
+      });
+    });
   }
 
   function openCreateModal() {
@@ -433,23 +442,54 @@ window.models = (function () {
     });
   }
 
+  async function performDeleteModel(id, options = {}) {
+    if (!id || deletingIds.has(id)) return;
+    deletingIds.add(id);
+    const btn = document.querySelector('[data-delete-model="' + id.replace(/"/g, '\\"') + '"]');
+    if (btn) ui.setButtonLoading(btn, true);
+    try {
+      const token = await state.getAccessToken();
+      if (!token) {
+        throw new Error('Authentication required. Please sign in again.');
+      }
+      const result = await window.CORPUS_API.deleteModel(id, token, options);
+      state.removeModel(id);
+      const active = state.getActiveModel ? state.getActiveModel() : null;
+      if (active && active.id === id && state.setActiveModel) {
+        state.setActiveModel(null);
+      }
+      ui.toast('Model deleted', 'success');
+      if (result && result.storage_cleanup_warning) {
+        ui.toast(result.storage_cleanup_warning, 'warning', 7000);
+      }
+      await loadModels();
+    } catch (err) {
+      if (err && err.status === 409 && !options.stopActive) {
+        const msg = err.message || 'This model has an active training job.';
+        ui.toast(msg, 'warning', 6000);
+        ui.confirm(
+          'Active training job',
+          msg + ' Stop active training and delete this model now?',
+          () => performDeleteModel(id, { stopActive: true })
+        );
+      } else {
+        ui.toast((err && err.message) || 'Delete failed', 'error', 6000);
+      }
+    } finally {
+      deletingIds.delete(id);
+      if (btn && btn.isConnected) ui.setButtonLoading(btn, false);
+    }
+  }
+
   async function deleteModel(id) {
+    if (!id || deletingIds.has(id)) return;
     const model = state.getModel(id);
     const label = model ? ('"' + (model.name || model.id) + '"') : 'this model';
-    ui.confirm('Delete model', 'Permanently delete ' + label + ' and its checkpoints? This cannot be undone.', async () => {
-      try {
-        const token = await state.getAccessToken();
-        const result = await window.CORPUS_API.deleteModel(id, token);
-        state.removeModel(id);
-        ui.toast('Model deleted', 'success');
-        if (result && result.storage_cleanup_warning) {
-          ui.toast(result.storage_cleanup_warning, 'warning', 7000);
-        }
-        await loadModels();
-      } catch (err) {
-        ui.toast(err.message || 'Delete failed', 'error');
-      }
-    });
+    ui.confirm(
+      'Delete model',
+      'Permanently delete ' + label + ', its checkpoints, and its tokenizer files? Datasets are preserved. This cannot be undone.',
+      () => performDeleteModel(id, { stopActive: false })
+    );
   }
 
   function initParamListeners() {

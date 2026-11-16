@@ -17,6 +17,7 @@ window.ui = (function () {
     const okBtn = document.getElementById('confirm-ok');
     const backdrop = dialog.querySelector('.modal-backdrop');
     const closeBtn = dialog.querySelector('.modal-close');
+    let handled = false;
 
     function cleanup() {
       dialog.classList.add('hidden');
@@ -25,7 +26,12 @@ window.ui = (function () {
       closeBtn.onclick = null;
     }
 
-    okBtn.onclick = () => { cleanup(); if (onConfirm) onConfirm(); };
+    okBtn.onclick = () => {
+      if (handled) return;
+      handled = true;
+      cleanup();
+      if (onConfirm) onConfirm();
+    };
     backdrop.onclick = cleanup;
     closeBtn.onclick = cleanup;
   }

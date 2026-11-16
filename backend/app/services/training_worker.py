@@ -4,10 +4,12 @@ This first production slice deliberately limits model/data sizes for Render's
 free CPU instance. Jobs run in-process; use a dedicated queue worker for scale.
 """
 import asyncio
+import contextvars
 import hashlib
 import io
 import json
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -28,6 +30,78 @@ logger = logging.getLogger("corpus.training")
 
 # Dataset statuses the worker refuses to train on.
 UNUSABLE_DATASET_STATUSES = {"failed", "deleted"}
+
+_CURRENT_JOB_ID: contextvars.ContextVar[str] = contextvars.ContextVar("_CURRENT_JOB_ID", default="")
+_JOB_CONTROLS_LOCK = threading.Lock()
+_JOB_CONTROLS = {}  # job_id -> {"cancel": threading.Event, "done": asyncio.Event, "loop": AbstractEventLoop}
+
+
+class TrainingStoppedError(Exception):
+    """Raised when an active training job is stopped via the worker lifecycle."""
+
+
+def _register_job_control(job_id: str):
+    loop = asyncio.get_running_loop()
+    ctrl = {
+        "cancel": threading.Event(),
+        "done": asyncio.Event(),
+        "loop": loop,
+    }
+    with _JOB_CONTROLS_LOCK:
+        _JOB_CONTROLS[job_id] = ctrl
+    return ctrl
+
+
+def _unregister_job_control(job_id: str, ctrl: dict):
+    try:
+        ctrl["done"].set()
+    except Exception:
+        pass
+    with _JOB_CONTROLS_LOCK:
+        if _JOB_CONTROLS.get(job_id) is ctrl:
+            _JOB_CONTROLS.pop(job_id, None)
+
+
+def is_job_running(job_id: str) -> bool:
+    with _JOB_CONTROLS_LOCK:
+        return job_id in _JOB_CONTROLS
+
+
+def request_job_stop(job_id: str) -> bool:
+    """Signal an in-process training job to stop cleanly."""
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+        if not ctrl:
+            return False
+        ctrl["cancel"].set()
+        return True
+
+
+async def stop_and_wait_for_job(job_id: str, timeout: float = 5.0) -> bool:
+    """Signal an active in-process training job to stop and wait for exit.
+
+    Returns True if no in-process worker remains active for ``job_id``.
+    """
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+        if not ctrl:
+            return True
+        ctrl["cancel"].set()
+        done_event = ctrl["done"]
+    try:
+        await asyncio.wait_for(done_event.wait(), timeout=timeout)
+        return True
+    except asyncio.TimeoutError:
+        return not is_job_running(job_id)
+
+
+def _check_not_stopped(job_id: str):
+    if not job_id:
+        return
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+        if ctrl and ctrl["cancel"].is_set():
+            raise TrainingStoppedError("Training job was stopped.")
 
 
 def _now():
@@ -89,12 +163,15 @@ def _train_sync(text_data, model_config, job_config):
     trainer = PyTorchTrainer(cfg, device="cpu")
     metrics = []
     started = time.monotonic()
+    current_job_id = _CURRENT_JOB_ID.get("")
     for epoch in range(cfg["epochs"]):
+        _check_not_stopped(current_job_id)
         loss = trainer.train_epoch(
             loader,
             clip_grad=float(job_config.get("gradient_clip", 1.0)),
             accum_steps=max(1, min(int(job_config.get("gradient_accumulation_steps", 1)), 4)),
         )
+        _check_not_stopped(current_job_id)
         elapsed = max(time.monotonic() - started, 0.001)
         metrics.append({
             "step": epoch + 1,
@@ -121,12 +198,16 @@ def _train_sync(text_data, model_config, job_config):
 
 async def run_training_job(job_id: str, owner_id: str):
     factory = get_session_factory()
+    ctrl = _register_job_control(job_id)
+    token = _CURRENT_JOB_ID.set(job_id)
     try:
         async with factory() as db:
             result = await db.execute(select(TrainingJob).where(TrainingJob.id == job_id))
             job = result.scalar_one_or_none()
             if not job or str(job.owner_id) != owner_id:
                 return
+            if job.status in {"stopping", "stopped", "cancelled"} or ctrl["cancel"].is_set():
+                raise TrainingStoppedError("Training job was stopped before starting.")
             dataset_id = job.dataset_id
             model_id = job.model_id
             if not dataset_id:
@@ -203,9 +284,17 @@ async def run_training_job(job_id: str, owner_id: str):
                 "model_id": model_id,
             })})
             await db.commit()
+        _check_not_stopped(job_id)
         cfg, metrics, checkpoint_bytes, tokenizer_bytes, token_count = await asyncio.to_thread(
             _train_sync, text_data, model_config, job_config
         )
+        _check_not_stopped(job_id)
+        async with factory() as db:
+            latest_status = (await db.execute(
+                select(TrainingJob.status).where(TrainingJob.id == job_id)
+            )).scalar_one_or_none()
+            if latest_status in {"stopping", "stopped", "cancelled"}:
+                raise TrainingStoppedError("Training job was stopped before checkpoint upload.")
         client = _storage()
         bucket = settings.STORAGE_BUCKET
         base = f"{owner_id}/{job_id}"
@@ -247,6 +336,21 @@ async def run_training_job(job_id: str, owner_id: str):
                 VALUES (:job_id, 'completed', CAST(:data AS jsonb))
             """), {"job_id": job_id, "data": json.dumps({"checkpoint_id": checkpoint_id, "tokens": token_count, "final_loss": metrics[-1]["loss"]})})
             await db.commit()
+    except TrainingStoppedError:
+        logger.info("Training job %s stopped", job_id)
+        try:
+            async with factory() as db:
+                await db.execute(text("""
+                    UPDATE public.training_jobs SET status = 'stopped', updated_at = now()
+                    WHERE id = :job_id AND owner_id = :owner_id
+                """), {"job_id": job_id, "owner_id": owner_id})
+                await db.execute(text("""
+                    INSERT INTO public.training_job_events (job_id, event, data)
+                    VALUES (:job_id, 'stopped', CAST(:data AS jsonb))
+                """), {"job_id": job_id, "data": json.dumps({"reason": "Stopped by user"})})
+                await db.commit()
+        except Exception:
+            logger.exception("Could not record stopped status for %s", job_id)
     except Exception as exc:
         logger.exception("Training job %s failed", job_id)
         try:
@@ -262,3 +366,6 @@ async def run_training_job(job_id: str, owner_id: str):
                 await db.commit()
         except Exception:
             logger.exception("Could not record training failure for %s", job_id)
+    finally:
+        _CURRENT_JOB_ID.reset(token)
+        _unregister_job_control(job_id, ctrl)

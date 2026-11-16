@@ -306,6 +306,11 @@ async def upload_dataset_file(
             file_options={"content-type": file.content_type or "text/plain", "upsert": "false"},
         )
     except Exception as exc:
+        existing_file = await latest_file_for_dataset(db, dataset_id, owner_id)
+        if not existing_file:
+            ds.status = "failed"
+            ds.updated_at = datetime.now(timezone.utc)
+            await db.commit()
         raise HTTPException(status_code=502, detail=f"Could not persist dataset to Supabase Storage: {str(exc)[:300]}")
     checksum = hashlib.sha256(contents).hexdigest()
     await db.execute(text("""

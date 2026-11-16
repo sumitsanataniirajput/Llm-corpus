@@ -182,3 +182,30 @@ async def test_preview_reports_broken_pdf_clearly(http):
     resp = await http.get(f"/api/v1/datasets/{ds['id']}/preview")
     assert resp.status_code == 400
     assert "%PDF" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_failed_storage_upload_marks_dataset_failed_and_allows_retry(http, storage, monkeypatch):
+    ds = await _create_dataset(http, name="Retry corpus", fmt="txt")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("Storage network glitch")
+
+    orig_from = storage.storage.from_
+    monkeypatch.setattr(storage.storage, "from_", lambda _bucket: type("FailBucket", (), {"upload": boom})())
+
+    files = {"file": ("retry.txt", b"retryable text content\n" * 10, "text/plain")}
+    fail_resp = await http.post(f"/api/v1/datasets/{ds['id']}/upload", files=files)
+    assert fail_resp.status_code == 502
+
+    detail = (await http.get(f"/api/v1/datasets/{ds['id']}")).json()
+    assert detail["status"] == "failed"
+    assert detail["has_file"] is False
+    assert detail["trainable"] is False
+
+    # Retry succeeds once storage recovers.
+    monkeypatch.setattr(storage.storage, "from_", orig_from)
+    ok_resp = await http.post(f"/api/v1/datasets/{ds['id']}/upload", files=files)
+    assert ok_resp.status_code == 200, ok_resp.text
+    assert ok_resp.json()["dataset"]["status"] == "uploaded"
+    assert ok_resp.json()["dataset"]["has_file"] is True
