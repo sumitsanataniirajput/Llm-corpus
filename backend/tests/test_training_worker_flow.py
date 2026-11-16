@@ -85,7 +85,7 @@ def _patch_worker(monkeypatch, storage, metrics=None):
 
 
 @pytest.mark.asyncio
-async def test_worker_trains_with_the_job_dataset_from_storage(http, storage, monkeypatch):
+async def test_worker_trains_with_the_job_dataset_from_storage(http, http_as_other, storage, monkeypatch):
     model = await _create_model(http)
     content = b"the real dataset bytes\n" * 60
     dataset = await _create_dataset_with_file(http, content)
@@ -137,6 +137,11 @@ async def test_worker_trains_with_the_job_dataset_from_storage(http, storage, mo
     checkpoint_response = await http.get(f"/api/v1/training/checkpoints?model_id={model['id']}")
     assert checkpoint_response.status_code == 200, checkpoint_response.text
     assert [row["storage_path"] for row in checkpoint_response.json()] == [checkpoints[0]["storage_path"]]
+
+    # A different authenticated account must never enumerate these checkpoints.
+    foreign_checkpoints = await http_as_other.get(f"/api/v1/training/checkpoints?model_id={model['id']}")
+    assert foreign_checkpoints.status_code == 200, foreign_checkpoints.text
+    assert foreign_checkpoints.json() == []
 
     assert dataset_row["token_count"] > 0
     assert model_row["status"] == "trained"
