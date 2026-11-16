@@ -86,7 +86,6 @@ async def test_other_user_cannot_delete_model(http, http_as_other, storage):
     async with factory() as db:
         db.add(Checkpoint(
             id="ckpt_other1",
-            owner_id=uuid.UUID(USER_ID),
             model_id=model["id"],
             storage_path=ckpt_path,
             step=1,
