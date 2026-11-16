@@ -122,7 +122,9 @@ window.datasets = (function () {
 
       queue = record.items.map(item => {
         let file = item.file;
-        if (file && !(file instanceof window.File) && window.File && file instanceof window.Blob) {
+        const isFile = !!(file && typeof window.File === 'function' && file instanceof window.File);
+        const isBlob = !!(file && typeof window.Blob === 'function' && file instanceof window.Blob);
+        if (isBlob && !isFile && typeof window.File === 'function') {
           file = new window.File([file], item.name || 'dataset-file', {
             type: file.type || 'application/octet-stream',
             lastModified: Date.now(),
