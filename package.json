@@ -2,9 +2,12 @@
   "name": "corpus-ultimate",
   "version": "1.0.0",
   "private": true,
-  "description": "CORPUS ULTIMATE — frontend test tooling (the app itself is dependency-free vanilla JS)",
+  "description": "CORPUS ULTIMATE \u2014 frontend test tooling (the app itself is dependency-free vanilla JS)",
   "scripts": {
-    "test:frontend": "node --test frontend/tests/*.test.mjs"
+    "test": "node --test frontend/tests/*.test.mjs scripts/tests/*.test.mjs",
+    "test:frontend": "node --test frontend/tests/*.test.mjs",
+    "test:deployment": "node --test scripts/tests/*.test.mjs",
+    "verify:deployment": "node scripts/verify-deployment.mjs"
   },
   "devDependencies": {
     "jsdom": "^24.1.3"

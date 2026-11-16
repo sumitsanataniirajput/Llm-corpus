@@ -1,0 +1,68 @@
+# CORPUS ULTIMATE — automated deployment verification
+#
+# Why this exists: two incidents where `main` contained a fix but the live Render
+# services kept serving an old build (no /api/v1/version route, no version.json,
+# pre-modernisation JS). Nothing in the repository noticed.
+#
+# This workflow compares the deployed services with the commit that is live:
+#   * backend  GET /api/v1/version   -> build_id + commit (Render's RENDER_GIT_COMMIT)
+#   * frontend GET /version.json     -> buildId
+#   * frontend GET /js/datasets.js   -> mobile file-picker marker
+#
+# A red run here means "GitHub has the fix, production does not".
+name: Verify deployed build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Catch a service that silently stops deploying even when nobody pushes.
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-deployment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Live services match main
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the commit being verified
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Compare live services with this checkout
+        env:
+          API_BASE_URL: https://corpus-ultimate-api.onrender.com
+          WEB_URL: https://corpus-ultimate-web.onrender.com
+          EXPECTED_COMMIT: ${{ github.sha }}
+          # Right after a push Render still has to build; poll instead of failing
+          # on the first request. Scheduled/dispatch runs expect a settled deploy.
+          WAIT_SECONDS: ${{ github.event_name == 'push' && '900' || '0' }}
+          POLL_INTERVAL_SECONDS: '20'
+        run: node scripts/verify-deployment.mjs
+
+      - name: Summarise for the run page
+        if: always()
+        run: |
+          {
+            echo "### Deployment check"
+            echo ""
+            echo "Commit: \`${GITHUB_SHA}\`"
+            echo ""
+            echo '```'
+            node scripts/verify-deployment.mjs 2>&1 | sed -n '1,60p' || true
+            echo '```'
+            echo ""
+            echo "Playbook: [docs/PRODUCTION_VERIFICATION.md](../blob/main/docs/PRODUCTION_VERIFICATION.md)"
+          } >> "$GITHUB_STEP_SUMMARY"
