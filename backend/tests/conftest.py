@@ -102,6 +102,47 @@ RAW_SQL_TABLES = [
       created_at timestamptz DEFAULT now()
     )
     """,
+
+    """
+    CREATE TABLE IF NOT EXISTS model_versions (
+      id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+      model_id text REFERENCES models(id) ON DELETE CASCADE,
+      version text NOT NULL,
+      config jsonb,
+      storage_ref text,
+      created_at timestamptz DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS model_architectures (
+      id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+      model_id text REFERENCES models(id) ON DELETE CASCADE,
+      architecture jsonb NOT NULL,
+      parameter_count bigint,
+      created_at timestamptz DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS evaluation_runs (
+      id text PRIMARY KEY,
+      owner_id uuid NOT NULL,
+      model_id text REFERENCES models(id),
+      test_type text,
+      score double precision,
+      status text DEFAULT 'completed',
+      created_at timestamptz DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS conversations (
+      id text PRIMARY KEY,
+      owner_id uuid NOT NULL,
+      title text,
+      model_id text REFERENCES models(id),
+      created_at timestamptz DEFAULT now(),
+      updated_at timestamptz DEFAULT now()
+    )
+    """,
 ]
 
 

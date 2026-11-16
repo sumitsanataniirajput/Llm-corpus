@@ -8,12 +8,17 @@ from typing import Optional, List, Dict, Any
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, update, text
 
 from app.dependencies import require_user, get_db_session
-from app.core.database import AsyncSessionLocal
+from app.config import settings
 from app.core.models import Model
 from app.core.security import validate_model_config
+
+try:
+    from supabase import create_client
+except Exception:  # pragma: no cover - SDK is optional for API-only deployments
+    create_client = None
 
 router = APIRouter()
 
@@ -152,16 +157,104 @@ async def update_model(model_id: str, updates: dict, user=Depends(require_user),
 
 @router.delete("/{model_id}", tags=["models"])
 async def delete_model(model_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    """Delete a model."""
+    """Delete an owned model and safely detach its historical references.
+
+    Training history, evaluations and conversations are retained. Model-only
+    records and private checkpoint/tokenizer objects are removed.
+    """
+    owner_id = uuid.UUID(user["user_id"])
     result = await db.execute(select(Model).where(Model.id == model_id))
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.owner_id != uuid.UUID(user["user_id"]):
+    if model.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    await db.execute(delete(Model).where(Model.id == model_id))
-    await db.commit()
-    return {"ok": True}
+
+    active_result = await db.execute(text("""
+        SELECT status FROM public.training_jobs
+        WHERE model_id = :model_id
+    """), {"model_id": model_id})
+    active_statuses = {"queued", "pending", "preparing", "running", "pausing", "paused", "stopping"}
+    active = sorted({
+        str(row["status"]).lower()
+        for row in active_result.mappings().all()
+        if row["status"] and str(row["status"]).lower() in active_statuses
+    })
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail="This model has active training jobs (" + ", ".join(active) +
+                   "). Stop or wait for those jobs before deleting the model.",
+        )
+
+    # Collect private artifact paths before deleting their metadata.
+    path_result = await db.execute(text("""
+        SELECT storage_path FROM public.checkpoints
+        WHERE model_id = :model_id AND storage_path IS NOT NULL
+    """), {"model_id": model_id})
+    storage_paths = {
+        str(row["storage_path"])
+        for row in path_result.mappings().all()
+        if row["storage_path"]
+    }
+    if isinstance(model.config, dict):
+        for key in ("checkpoint_path", "tokenizer_path"):
+            value = model.config.get(key)
+            if isinstance(value, str) and value.strip():
+                storage_paths.add(value.strip())
+
+    tokenizer_result = await db.execute(text("""
+        SELECT tokenizer_ref FROM public.models WHERE id = :model_id
+    """), {"model_id": model_id})
+    tokenizer_row = tokenizer_result.mappings().first()
+    if tokenizer_row and tokenizer_row.get("tokenizer_ref"):
+        storage_paths.add(str(tokenizer_row["tokenizer_ref"]))
+
+    try:
+        # Preserve past jobs/evaluations/chats, but remove their FK to this model.
+        await db.execute(text("""
+            UPDATE public.training_jobs SET model_id = NULL
+            WHERE model_id = :model_id
+        """), {"model_id": model_id})
+        await db.execute(text("""
+            UPDATE public.evaluation_runs SET model_id = NULL
+            WHERE model_id = :model_id
+        """), {"model_id": model_id})
+        await db.execute(text("""
+            UPDATE public.conversations SET model_id = NULL
+            WHERE model_id = :model_id
+        """), {"model_id": model_id})
+
+        await db.execute(text("DELETE FROM public.checkpoints WHERE model_id = :model_id"), {"model_id": model_id})
+        await db.execute(text("DELETE FROM public.model_versions WHERE model_id = :model_id"), {"model_id": model_id})
+        await db.execute(text("DELETE FROM public.model_architectures WHERE model_id = :model_id"), {"model_id": model_id})
+        await db.execute(delete(Model).where(Model.id == model_id, Model.owner_id == owner_id))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    removed_storage_files = 0
+    storage_cleanup_warning = None
+    if storage_paths:
+        if create_client is None or not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+            storage_cleanup_warning = "Model deleted, but private artifacts could not be cleaned up because Supabase Storage is not configured."
+        else:
+            try:
+                storage = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+                storage.storage.from_(settings.STORAGE_BUCKET).remove(sorted(storage_paths))
+                removed_storage_files = len(storage_paths)
+            except Exception as exc:
+                storage_cleanup_warning = (
+                    "Model deleted, but some private artifacts may remain in storage: " + str(exc)[:180]
+                )
+
+    return {
+        "ok": True,
+        "model_id": model_id,
+        "removed_storage_files": removed_storage_files,
+        "storage_cleanup_warning": storage_cleanup_warning,
+    }
 
 
 @router.post("/{model_id}/clone", response_model=ModelOut, tags=["models"])

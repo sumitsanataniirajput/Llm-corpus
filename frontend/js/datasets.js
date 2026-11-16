@@ -74,12 +74,14 @@ window.datasets = (function () {
           </button>
         </div>
 
-        <div class="drop-zone" id="datasets-drop" tabindex="0" role="button" aria-label="Choose dataset files">
+        <div class="drop-zone" id="datasets-drop" tabindex="0" role="button" aria-controls="datasets-file" aria-label="Choose dataset files">
           <i class="fas fa-file-import"></i>
           <strong>Drop files here, or tap to browse</strong>
           <span>${esc(formatsLabel())} · up to ${esc(CORPUS_UTILS.formatBytes(maxSize()))} per file</span>
-          <input type="file" id="datasets-file" multiple accept="${esc(formats().map(ext => '.' + ext).join(','))}">
         </div>
+        <input type="file" id="datasets-file" class="file-picker-input" multiple
+               accept="${esc(formats().map(ext => '.' + ext).join(','))}"
+               aria-label="Select training dataset files">
 
         <div class="file-queue" id="datasets-file-list"></div>
 
@@ -157,10 +159,17 @@ window.datasets = (function () {
       });
     }
     if (!drop) return;
+    // The file input is visually hidden and no longer covers the drop zone.
+    // Open it from a real click/keyboard event so Android browsers launch the
+    // native file chooser reliably.
+    drop.addEventListener('click', (event) => {
+      if (event.defaultPrevented) return;
+      browseFiles();
+    });
     drop.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
-        if (input) input.click();
+        browseFiles();
       }
     });
     ['dragenter', 'dragover'].forEach(type => {
@@ -183,6 +192,18 @@ window.datasets = (function () {
       }
       setQueue(files);
     });
+  }
+
+  function browseFiles() {
+    if (uploading) return;
+    const input = document.getElementById('datasets-file');
+    if (!input) {
+      ui.toast('File picker is unavailable. Refresh the page and try again.', 'error');
+      return;
+    }
+    // Clear the previous value so selecting the same file again still fires change.
+    input.value = '';
+    input.click();
   }
 
   function setQueue(files) {
@@ -598,6 +619,7 @@ window.datasets = (function () {
   return {
     render,
     showUpload,
+    browseFiles,
     handleUpload,
     uploadFileFor,
     previewDataset,

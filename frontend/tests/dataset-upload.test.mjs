@@ -118,3 +118,17 @@ test('search filters the dataset library and reports the count', async () => {
   assert.equal(app.doc.querySelectorAll('.dataset-card').length, 0);
   assert.match(app.doc.getElementById('datasets-library').textContent, /No matching datasets/);
 });
+
+test('tapping the upload drop zone opens the native file picker', async () => {
+  const app = createApp(datasetFixtures());
+  await app.window.datasets.render();
+  app.window.datasets.showUpload();
+
+  const input = app.doc.getElementById('datasets-file');
+  const drop = app.doc.getElementById('datasets-drop');
+  let opened = 0;
+  input.click = () => { opened += 1; };
+
+  drop.dispatchEvent(new app.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  assert.equal(opened, 1, 'a tap on the drop zone should open the Android/browser file chooser');
+});
