@@ -1,10 +1,12 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-16.3",
+  "buildId": "2026-11-16.4",
   "sourceRef": "main",
   "notes": [
     "Dataset upload on mobile: the drop zone is a plain container with a transparent full-size <input type=file> overlay, plus a click fallback that opens the native picker exactly once — tapping the zone, the icon, the copy or the 'Tap to choose files' pill all open the phone's file manager (frontend/js/datasets.js, frontend/css/components.css).",
+    "Pending selected files are persisted in IndexedDB per signed-in account and restored, with the chosen dataset name, if Android recreates the app after returning from the system file picker.",
+    "The upload queue removes its local saved copy after successful upload or explicit Clear; a failed/interrupted upload keeps the file and dataset record id for retry.",
     "Android file input now clears the previous value before the chooser opens (not during change), and selection events stop bubbling into unrelated page handlers.",
     "The last route is held in session storage so returning from Android's system file chooser does not unexpectedly reset the SPA to Dashboard.",
     "Training chart empty states are absolutely contained inside their fixed-height chart box, preventing the dashed placeholder from covering the Training log.",
