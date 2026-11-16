@@ -33,7 +33,7 @@ window.CORPUS_CONFIG = {
   //
   // Do NOT use localhost on Android — it refers to the phone itself.
   // ========================================
-  API_BASE_URL: 'http://localhost:8000',
+  API_BASE_URL: 'https://corpus-ultimate-api.onrender.com',
 
   // App settings
   APP_NAME: 'CORPUS ULTIMATE',
