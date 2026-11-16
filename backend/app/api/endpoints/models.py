@@ -47,7 +47,7 @@ class ModelOut(BaseModel):
 async def list_models(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     """List models owned by the current user."""
     result = await db.execute(
-        select(Model).where(Model.owner_id == user["user_id"]).order_by(Model.created_at.desc())
+        select(Model).where(Model.owner_id == uuid.UUID(user["user_id"])).order_by(Model.created_at.desc())
     )
     models = result.scalars().all()
     return [
@@ -76,7 +76,7 @@ async def create_model(config: ModelConfig, user=Depends(require_user), db: Asyn
     now = datetime.now(timezone.utc)
     model = Model(
         id=model_id,
-        owner_id=user["user_id"],
+        owner_id=uuid.UUID(user["user_id"]),
         name=config.name,
         config=config.model_dump(),
         version="1.0",
@@ -106,7 +106,7 @@ async def get_model(model_id: str, user=Depends(require_user), db: AsyncSession 
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.owner_id != user["user_id"]:
+    if model.owner_id != uuid.UUID(user["user_id"]):
         raise HTTPException(status_code=403, detail="Not authorized")
     return ModelOut(
         id=model.id,
@@ -127,7 +127,7 @@ async def update_model(model_id: str, updates: dict, user=Depends(require_user),
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.owner_id != user["user_id"]:
+    if model.owner_id != uuid.UUID(user["user_id"]):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     for key, value in updates.items():
@@ -155,7 +155,7 @@ async def delete_model(model_id: str, user=Depends(require_user), db: AsyncSessi
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.owner_id != user["user_id"]:
+    if model.owner_id != uuid.UUID(user["user_id"]):
         raise HTTPException(status_code=403, detail="Not authorized")
     await db.execute(delete(Model).where(Model.id == model_id))
     await db.commit()
@@ -169,7 +169,7 @@ async def clone_model(model_id: str, user=Depends(require_user), db: AsyncSessio
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.owner_id != user["user_id"]:
+    if model.owner_id != uuid.UUID(user["user_id"]):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     new_id = "model_" + uuid.uuid4().hex[:12]
@@ -212,7 +212,7 @@ async def list_model_versions(model_id: str, user=Depends(require_user), db: Asy
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.owner_id != user["user_id"]:
+    if model.owner_id != uuid.UUID(user["user_id"]):
         raise HTTPException(status_code=403, detail="Not authorized")
     return [{"version": model.version, "created_at": model.created_at.isoformat()}]
 
@@ -224,7 +224,7 @@ async def export_model(model_id: str, version: str = "1.0", user=Depends(require
     model = result.scalar_one_or_none()
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
-    if model.owner_id != user["user_id"]:
+    if model.owner_id != uuid.UUID(user["user_id"]):
         raise HTTPException(status_code=403, detail="Not authorized")
     return {
         "model_id": model_id,

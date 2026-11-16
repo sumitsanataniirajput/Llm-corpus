@@ -177,6 +177,149 @@
   color: var(--color-text);
 }
 
+.training-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.training-panel-header h3 {
+  margin-bottom: 0;
+}
+
+.field-hint {
+  font-size: var(--text-label-small);
+  color: var(--color-text-variant);
+  margin-top: var(--space-2);
+  line-height: 1.4;
+}
+
+.field-hint a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.dataset-manage-link {
+  margin: var(--space-3) 0 var(--space-4) 0;
+  font-size: var(--text-label-medium);
+}
+
+.dataset-manage-link a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.dataset-manage-link a:hover {
+  text-decoration: underline;
+}
+
+/* Selected dataset summary on the Training page */
+.dataset-selection {
+  margin-bottom: var(--space-3);
+}
+
+.dataset-selection-card {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.dataset-selection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.dataset-selection-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  font-size: var(--text-body-small);
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.dataset-selection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+
+.dataset-selection-grid dt {
+  font-size: var(--text-label-small);
+  color: var(--color-text-variant);
+  margin: 0;
+}
+
+.dataset-selection-grid dd {
+  font-size: var(--text-label-medium);
+  color: var(--color-text);
+  margin: 0;
+  word-break: break-word;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-label-small);
+}
+
+/* Inline form error (prevents silent failed jobs) */
+.form-alert {
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  font-size: var(--text-body-small);
+  margin-top: var(--space-4);
+  border: 1px solid transparent;
+}
+
+.form-alert.error {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: var(--color-error);
+}
+
+/* Recent training jobs */
+.training-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+.job-row {
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.job-row-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-1);
+}
+
+.job-row-id {
+  color: var(--color-text);
+}
+
+.job-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-label-small);
+  color: var(--color-text-variant);
+}
+
 .training-actions {
   display: flex;
   gap: var(--space-2);
@@ -626,13 +769,24 @@
 }
 
 .dataset-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   font-size: var(--text-label-small);
   color: var(--color-text-variant);
   margin-bottom: var(--space-3);
+  word-break: break-word;
+}
+
+.dataset-meta i {
+  width: 1rem;
+  text-align: center;
+  margin-right: var(--space-1);
 }
 
 .dataset-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 
@@ -862,3 +1016,10 @@
   word-break: break-all;
   max-width: 200px;
 }
+
+/* Dataset upload status badges */
+.status-badge.uploaded { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+.status-badge.pending { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.status-badge.ready { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.status-badge.processing { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+.status-badge.deleted { background: rgba(107, 114, 128, 0.15); color: #6b7280; }

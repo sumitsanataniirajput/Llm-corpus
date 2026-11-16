@@ -1,20 +1,33 @@
 """CORPUS ULTIMATE — Training job endpoints.
 
-Create, list, pause, resume, stop training jobs.
-Real PyTorch and custom numerical engines are invoked here.
+Create, list, pause, resume, stop training jobs, and stream job progress.
+Every job must reference a model and a dataset owned by the caller. The
+dataset must have a file in private Supabase Storage, otherwise the request is
+rejected up-front instead of creating a job that is guaranteed to fail.
+
+Real PyTorch and custom numerical engines are invoked by the worker.
 """
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+import asyncio
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, text
+from typing import Optional, List
 
-from app.dependencies import require_user, get_db_session
-from app.core.models import TrainingJob
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
+
+from app.dependencies import require_user, get_db_session, verify_supabase_token
+from app.core.database import get_session_factory
+from app.core.models import Dataset, Model, TrainingJob
+from app.api.endpoints.datasets import latest_file_for_dataset, UNUSABLE_STATUSES
 
 router = APIRouter()
+
+# Terminal training states — the progress socket closes once one is reached.
+TERMINAL_STATUSES = {"completed", "failed", "stopped", "cancelled"}
+
+SELECT_DATASET_MESSAGE = "Select a dataset before starting training."
 
 
 class TrainingConfig(BaseModel):
@@ -34,6 +47,7 @@ class JobOut(BaseModel):
     id: str
     owner_id: str
     model_id: Optional[str]
+    dataset_id: Optional[str]
     status: str
     engine: str
     compute: str
@@ -49,12 +63,71 @@ def _job_to_out(job: TrainingJob) -> JobOut:
         id=job.id,
         owner_id=str(job.owner_id),
         model_id=job.model_id,
+        dataset_id=job.dataset_id,
         status=job.status,
         engine=job.engine,
         compute=job.compute,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
     )
+
+
+async def resolve_training_resources(
+    db: AsyncSession,
+    owner_id: uuid.UUID,
+    model_id: str,
+    dataset_id: Optional[str],
+):
+    """Validate that the caller can actually train with this model + dataset.
+
+    Returns ``(dataset, file_row)`` on success. Raises ``HTTPException`` with a
+    clear, user-facing message otherwise — this is what stops jobs from being
+    created with ``dataset_id = null`` or with an unusable dataset.
+    """
+    dataset_id = (dataset_id or "").strip()
+    model_id = (model_id or "").strip()
+
+    if not dataset_id:
+        raise HTTPException(status_code=400, detail=SELECT_DATASET_MESSAGE)
+    if not model_id:
+        raise HTTPException(status_code=400, detail="Select a model before starting training.")
+
+    dataset_result = await db.execute(
+        select(Dataset).where(Dataset.id == dataset_id, Dataset.owner_id == owner_id)
+    )
+    dataset = dataset_result.scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(
+            status_code=404,
+            detail="Dataset not found for this account. Refresh the dataset list and select one of your own datasets.",
+        )
+
+    file_row = await latest_file_for_dataset(db, dataset_id, owner_id)
+    if not file_row:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Dataset '{dataset.name}' has no uploaded file yet. "
+                "Upload a .txt file in Dataset Manager, then select it here."
+            ),
+        )
+    if dataset.status in UNUSABLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Dataset '{dataset.name}' is {dataset.status} and cannot be used for training.",
+        )
+
+    model_result = await db.execute(
+        select(Model).where(Model.id == model_id, Model.owner_id == owner_id)
+    )
+    model = model_result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(
+            status_code=404,
+            detail="Model not found for this account. Refresh the model list and select one of your own models.",
+        )
+
+    return dataset, file_row
 
 
 @router.get("/", response_model=List[JobOut], tags=["training"])
@@ -71,14 +144,17 @@ async def list_jobs(user=Depends(require_user), db: AsyncSession = Depends(get_d
 
 @router.post("/", response_model=JobOut, tags=["training"])
 async def create_job(config: TrainingConfig, background_tasks: BackgroundTasks, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    job_id = "job_" + uuid.uuid4().hex[:12]
     owner_id = uuid.UUID(user["user_id"])
+    dataset, _file_row = await resolve_training_resources(
+        db, owner_id, config.model_id, config.dataset_id
+    )
+    job_id = "job_" + uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc)
     job = TrainingJob(
         id=job_id,
         owner_id=owner_id,
         model_id=config.model_id,
-        dataset_id=config.dataset_id,
+        dataset_id=dataset.id,
         status="queued",
         engine=config.engine,
         compute=config.compute,
@@ -108,68 +184,51 @@ async def get_job(job_id: str, user=Depends(require_user), db: AsyncSession = De
     return _job_to_out(job)
 
 
-@router.post("/{job_id}/pause", tags=["training"])
-async def pause_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    owner_id = uuid.UUID(user["user_id"])
-    result = await db.execute(
-        select(TrainingJob).where(TrainingJob.id == job_id)
-    )
+async def _get_owned_job(db: AsyncSession, job_id: str, owner_id: uuid.UUID) -> TrainingJob:
+    result = await db.execute(select(TrainingJob).where(TrainingJob.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    job.status = "pausing"
+    return job
+
+
+async def _set_job_status(db: AsyncSession, job_id: str, owner_id: uuid.UUID, status: str) -> str:
+    job = await _get_owned_job(db, job_id, owner_id)
+    job.status = status
     job.updated_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"ok": True, "status": job.status}
+    return job.status
+
+
+@router.post("/{job_id}/pause", tags=["training"])
+async def pause_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+    owner_id = uuid.UUID(user["user_id"])
+    status = await _set_job_status(db, job_id, owner_id, "pausing")
+    return {"ok": True, "status": status}
 
 
 @router.post("/{job_id}/resume", tags=["training"])
 async def resume_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    result = await db.execute(
-        select(TrainingJob).where(TrainingJob.id == job_id)
-    )
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.owner_id != owner_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    job.status = "running"
-    job.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    return {"ok": True, "status": job.status}
+    status = await _set_job_status(db, job_id, owner_id, "running")
+    return {"ok": True, "status": status}
 
 
 @router.post("/{job_id}/stop", tags=["training"])
 async def stop_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    result = await db.execute(
-        select(TrainingJob).where(TrainingJob.id == job_id)
-    )
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.owner_id != owner_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    job.status = "stopping"
-    job.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    return {"ok": True, "status": job.status}
+    status = await _set_job_status(db, job_id, owner_id, "stopping")
+    return {"ok": True, "status": status}
 
 
 @router.get("/{job_id}/metrics", response_model=List[dict], tags=["training"])
 async def list_metrics(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    result = await db.execute(
-        select(TrainingJob).where(TrainingJob.id == job_id)
-    )
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.owner_id != owner_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    job = await _get_owned_job(db, job_id, owner_id)
+    # Reference the job so ownership is checked before reading metrics.
+    _ = job.id
     result = await db.execute(text("""
         SELECT step, loss, learning_rate, tokens_per_second, created_at
         FROM public.training_metrics WHERE job_id = :job_id ORDER BY step ASC
@@ -180,14 +239,8 @@ async def list_metrics(job_id: str, user=Depends(require_user), db: AsyncSession
 @router.get("/{job_id}/logs", response_model=List[dict], tags=["training"])
 async def list_logs(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    result = await db.execute(
-        select(TrainingJob).where(TrainingJob.id == job_id)
-    )
-    job = result.scalar_one_or_none()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.owner_id != owner_id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    job = await _get_owned_job(db, job_id, owner_id)
+    _ = job.id
     result = await db.execute(text("""
         SELECT event, data, created_at
         FROM public.training_job_events WHERE job_id = :job_id
@@ -257,18 +310,114 @@ async def load_checkpoint(checkpoint_id: str, user=Depends(require_user), db: As
     return {"ok": True, "checkpoint_id": checkpoint.id}
 
 
-# WebSocket for real-time training progress
+# ---------------------------------------------------------------------------
+# Real-time progress socket
+# ---------------------------------------------------------------------------
 @router.websocket("/ws/{job_id}")
-async def training_ws(websocket: WebSocket, job_id: str):
+async def training_ws(
+    websocket: WebSocket,
+    job_id: str,
+    token: Optional[str] = Query(default=None),
+    interval: float = Query(default=1.5, ge=0.5, le=10.0),
+):
+    """Stream real job status and real metric rows for one training job.
+
+    The token is passed as a query parameter because browsers cannot set an
+    Authorization header on WebSocket connections. Every message is read from
+    the database — nothing is simulated. The socket closes once the job reaches
+    a terminal state.
+    """
+    user = None
+    if token:
+        try:
+            user = await verify_supabase_token(token)
+        except HTTPException:
+            user = None
+    if not user or not user.get("id"):
+        await websocket.close(code=1008)
+        return
+
+    try:
+        owner_id = uuid.UUID(user["id"])
+    except (ValueError, TypeError):
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
+    last_step = 0
+    last_status = None
+    subscription = "training." + job_id
     try:
         while True:
-            data = await websocket.receive_text()
-            # Echo back as a mock metric for dev
-            await websocket.send_json({
-                "type": "training." + job_id,
-                "event": "metric",
-                "data": {"step": 0, "loss": 0.0},
-            })
+            factory = get_session_factory()
+            async with factory() as db:
+                result = await db.execute(select(TrainingJob).where(TrainingJob.id == job_id))
+                job = result.scalar_one_or_none()
+                if not job or job.owner_id != owner_id:
+                    await websocket.send_json({
+                        "type": subscription, "event": "error",
+                        "data": {"message": "Training job not found for this account."},
+                    })
+                    await websocket.close(code=1008)
+                    return
+
+                if job.status != last_status:
+                    last_status = job.status
+                    await websocket.send_json({
+                        "type": subscription, "event": "status",
+                        "data": {
+                            "job_id": job.id,
+                            "status": job.status,
+                            "dataset_id": job.dataset_id,
+                            "model_id": job.model_id,
+                            "updated_at": job.updated_at.isoformat(),
+                        },
+                    })
+
+                metrics_result = await db.execute(text("""
+                    SELECT step, loss, learning_rate, tokens_per_second
+                    FROM public.training_metrics
+                    WHERE job_id = :job_id AND step > :last_step
+                    ORDER BY step ASC
+                """), {"job_id": job_id, "last_step": last_step})
+                for row in metrics_result.mappings().all():
+                    last_step = int(row["step"])
+                    await websocket.send_json({
+                        "type": subscription, "event": "metric",
+                        "data": {
+                            "job_id": job_id,
+                            "step": int(row["step"]),
+                            "loss": float(row["loss"]) if row["loss"] is not None else None,
+                            "learning_rate": float(row["learning_rate"]) if row["learning_rate"] is not None else None,
+                            "tokens_per_second": float(row["tokens_per_second"]) if row["tokens_per_second"] is not None else None,
+                        },
+                    })
+
+                if job.status in TERMINAL_STATUSES:
+                    events_result = await db.execute(text("""
+                        SELECT event, data FROM public.training_job_events
+                        WHERE job_id = :job_id ORDER BY created_at DESC LIMIT 1
+                    """), {"job_id": job_id})
+                    event_row = events_result.mappings().first()
+                    payload = {
+                        "job_id": job_id,
+                        "status": job.status,
+                        "event": event_row["event"] if event_row else job.status,
+                        "data": event_row["data"] if event_row else None,
+                    }
+                    await websocket.send_json({
+                        "type": subscription,
+                        "event": "complete" if job.status == "completed" else "error",
+                        "data": payload,
+                    })
+                    await websocket.close()
+                    return
+
+            await asyncio.sleep(interval)
     except WebSocketDisconnect:
         pass
+    except Exception:
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass

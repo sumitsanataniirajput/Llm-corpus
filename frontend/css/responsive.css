@@ -62,6 +62,19 @@
   .training-actions .btn {
     min-width: auto;
   }
+
+  .dataset-selection-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .job-row-meta {
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .training-panel-header {
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 480px) {
