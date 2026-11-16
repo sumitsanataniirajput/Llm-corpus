@@ -32,6 +32,14 @@ function setFiles(app, input, names) {
   return files;
 }
 
+test('datasets module loads and exposes the upload actions', () => {
+  const app = createApp(datasetFixtures());
+  assert.ok(app.window.datasets, 'window.datasets is defined after loading the real frontend scripts');
+  assert.equal(typeof app.window.datasets.render, 'function');
+  assert.equal(typeof app.window.datasets.showUpload, 'function');
+  assert.equal(typeof app.window.datasets.handleUpload, 'function');
+});
+
 test('multiple selected files each create and upload their own dataset record', async () => {
   const app = createApp(datasetFixtures());
   await app.window.datasets.render();
