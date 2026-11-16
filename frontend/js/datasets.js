@@ -42,7 +42,14 @@ window.datasets = (function () {
           db.createObjectStore(QUEUE_STORE_NAME, { keyPath: 'ownerId' });
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => {
+          db.close();
+          queueDbPromise = null;
+        };
+        resolve(db);
+      };
       request.onerror = () => reject(request.error || new Error('Could not open local upload storage.'));
       request.onblocked = () => reject(new Error('Local upload storage is busy in another tab.'));
     }).catch(err => {
@@ -93,11 +100,6 @@ window.datasets = (function () {
       // or blocked. Do not silently pretend persistence succeeded.
       console.warn('[CORPUS] Could not persist pending dataset files:', err);
       return false;
-    } finally {
-      if (db) {
-        try { db.close(); } catch (e) {}
-        queueDbPromise = null;
-      }
     }
   }
 
@@ -148,11 +150,6 @@ window.datasets = (function () {
       ui.toast(queue.length + ' pending file' + (queue.length === 1 ? '' : 's') + ' restored from this device.', 'info');
     } catch (err) {
       console.warn('[CORPUS] Could not restore pending dataset files:', err);
-    } finally {
-      if (db) {
-        try { db.close(); } catch (e) {}
-        queueDbPromise = null;
-      }
     }
   }
 
