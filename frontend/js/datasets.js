@@ -337,7 +337,7 @@ window.datasets = (function () {
       input.addEventListener('click', () => {
         try { input.value = ''; } catch (e) { /* read-only in mocked inputs */ }
       });
-      input.addEventListener('change', (event) => {
+      input.addEventListener('change', async (event) => {
         // The picker is a local selection action; it must never bubble into a
         // parent form/router handler or trigger a document-level submit path.
         event.stopPropagation();
