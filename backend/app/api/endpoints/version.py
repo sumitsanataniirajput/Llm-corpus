@@ -23,7 +23,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 # Bump when a shipped fix must be verified in production.
-BUILD_ID = "2026-11-16.5"
+BUILD_ID = "2026-11-17.1"
 
 # Behaviour markers that must be present in a healthy production deployment.
 FEATURES = [
@@ -36,6 +36,9 @@ FEATURES = [
     "checkpoint-model-ownership",    # checkpoints inherit access from their parent model
     "production-web-cors-origin",    # deployed frontend origin is accepted by CORS
     "android-upload-queue-persistence", # frontend IndexedDB preserves selected files across Android reloads
+    "dataset-storage-io-off-event-loop", # Supabase dataset upload/preview do not block FastAPI
+    "dataset-upload-metadata-rollback", # failed metadata writes remove orphaned private objects
+    "training-storage-io-off-event-loop", # training data/checkpoint transfers do not block FastAPI
 ]
 
 _STARTED_AT = datetime.datetime.now(datetime.timezone.utc).isoformat()
