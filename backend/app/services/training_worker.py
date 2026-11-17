@@ -243,7 +243,11 @@ async def run_training_job(job_id: str, owner_id: str):
             expected_checksum = file_row["checksum"]
             client = _storage()
             bucket = settings.STORAGE_BUCKET
-            raw = client.storage.from_(bucket).download(file_row["storage_path"])
+            # Supabase SDK calls are synchronous: run them in a worker thread so
+            # the whole API's event loop is not blocked during the transfer.
+            raw = await asyncio.to_thread(
+                client.storage.from_(bucket).download, file_row["storage_path"]
+            )
             if isinstance(raw, dict):
                 raw = raw.get("data", b"")
             if isinstance(raw, str):
@@ -300,8 +304,12 @@ async def run_training_job(job_id: str, owner_id: str):
         base = f"{owner_id}/{job_id}"
         checkpoint_path = f"checkpoints/{base}/model.pt"
         tokenizer_path = f"tokenizers/{base}/tokenizer.json"
-        _upload_bytes(client, bucket, checkpoint_path, checkpoint_bytes, "application/octet-stream")
-        _upload_bytes(client, bucket, tokenizer_path, tokenizer_bytes, "application/json")
+        await asyncio.to_thread(
+            _upload_bytes, client, bucket, checkpoint_path, checkpoint_bytes, "application/octet-stream"
+        )
+        await asyncio.to_thread(
+            _upload_bytes, client, bucket, tokenizer_path, tokenizer_bytes, "application/json"
+        )
         async with factory() as db:
             for metric in metrics:
                 await db.execute(text("""

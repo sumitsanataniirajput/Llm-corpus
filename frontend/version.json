@@ -1,16 +1,14 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-16.6",
+  "buildId": "2026-11-16.7",
   "sourceRef": "main",
   "notes": [
-    "Datasets page recovery: when a page module is not registered (stale Android cache, 404, truncated file), the router re-requests that one script once with a cache-busting query (?v=<buildId>&retry=<ts>) and renders the page if it registers. Only then does it show the diagnostics panel — which now includes the frontend build id, the expected script URL and whether the automatic retry ran (frontend/js/router.js).",
-    "Bootstrap now logs which page modules are missing, with their script filenames, before the first render (frontend/js/app-bootstrap.js checkModules).",
-    "Build identity is centralised: frontend/version.json buildId === CORPUS_CONFIG.BUILD_ID === <meta name=corpus-build> === the ?v= query on every local CSS/JS in index.html. A test (frontend/tests/build-id.test.mjs) fails if they drift.",
-    "The Datasets file-selection change handler is async and fully awaited inside try/catch; a persistence failure shows a warning instead of becoming an unhandled rejection (frontend/js/datasets.js).",
-    "Dataset upload: one record per file, bytes go through the backend into the private Supabase bucket, IndexedDB restores the pending queue after Android recreates the page, and a retry reuses the dataset id created before the interruption.",
-    "Dataset upload on mobile: the drop zone is a plain container with a transparent full-size overlay input plus a click fallback, so tapping anywhere opens the phone's file manager exactly once.",
-    "Fluid scaling for every aspect ratio (phone → 4K/TV) and ?v= cache-busting for local assets."
+    "Authentication fix: a backend 401 no longer signs the user out. The session is cleared only when Supabase itself has no session; when the backend rejects a token that Supabase still holds (expired access token, mismatched publishable key, misconfigured backend) the API raises a 'backend rejected your session' error and keeps the user signed in (frontend/js/api.js).",
+    "Navigation fix: Supabase re-emits SIGNED_IN when it restores or refreshes a stored session (page reload, token refresh, returning from the Android file picker). Only an interactive sign-in from this page now navigates to Dashboard; restored sessions re-render the current route instead (frontend/js/auth.js).",
+    "Upload reliability: uploads have a real timeout (CORPUS_CONFIG.UPLOAD_TIMEOUT_MS, default 10 minutes instead of the 15 s JSON request timeout), refresh the access token once and retry the same dataset record on 401, and report explicit network/timeout/401/413/503 messages that state the dataset record is kept for retry (frontend/js/api.js).",
+    "Backend: the synchronous Supabase Storage SDK calls (dataset upload, dataset preview download, training dataset download, checkpoint/tokenizer upload) run in a worker thread instead of blocking the event loop, so a large transfer no longer stalls health checks, token refreshes or dataset listing for other requests.",
+    "Backend: if the dataset_files metadata write fails after the bytes reached storage, the object is deleted again and the dataset is marked failed \u2014 private storage never keeps uploads the database does not know about, and the API never reports success for a file it cannot serve."
   ],
-  "howToVerify": "GET <frontend-url>/version.json — the deployed buildId must equal the buildId committed in frontend/version.json on main."
+  "howToVerify": "GET <frontend-url>/version.json \u2014 the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }

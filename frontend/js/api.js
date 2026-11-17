@@ -74,6 +74,56 @@ window.CORPUS_API = (function () {
     return result;
   }
 
+  /** Current Supabase access token, or null when there is no session. */
+  async function currentSupabaseToken() {
+    try {
+      const { data } = await window.CORPUS_SUPABASE.getSession();
+      return (data && data.session && data.session.access_token) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function authError(message, extra = {}) {
+    const err = new Error(message);
+    err.status = 401;
+    err.data = { message };
+    Object.assign(err, extra);
+    // Keep the machine-readable flags on err.data too: callers and tests use
+    // both shapes, and older code reads err.data.message.
+    if (extra.sessionExpired) err.data.sessionExpired = true;
+    if (extra.backendAuthError) err.data.backendError = true;
+    return err;
+  }
+
+  /** Parse a fetch Response, throwing a descriptive Error for non-2xx. */
+  async function finishResponse(res) {
+    let data;
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      data = await res.json();
+    } else {
+      data = await res.text();
+    }
+    if (!res.ok) {
+      let msg = null;
+      if (data && typeof data === 'object') {
+        if (typeof data.message === 'string' && data.message) msg = data.message;
+        else if (typeof data.detail === 'string' && data.detail) msg = data.detail;
+        else if (Array.isArray(data.detail)) msg = data.detail.map(d => (d && d.msg) || String(d)).join(' ');
+        else if (data.detail && typeof data.detail === 'object') {
+          msg = data.detail.message || (Array.isArray(data.detail.errors) ? data.detail.errors.join(' ') : JSON.stringify(data.detail));
+        }
+      }
+      const err = new Error(msg || 'Request failed (' + res.status + ')');
+      err.status = res.status;
+      err.data = data;
+      err.networkError = false;
+      throw err;
+    }
+    return data;
+  }
+
   async function request(endpoint, options = {}) {
     // Skip protected requests if backend is known to be unavailable
     // (avoids repeated "Failed to fetch" spam and unnecessary token resolution)
@@ -135,69 +185,62 @@ window.CORPUS_API = (function () {
     // Successful response — clear the backend-unavailable flag
     clearBackendUnavailable();
 
-    // Handle 401 — try to refresh the Supabase session once, then retry.
-    // Only retry idempotent methods (GET, DELETE). Never auto-retry POST/PUT to avoid duplicates.
-    if (res.status === 401 && token && options.method !== 'POST' && options.method !== 'PUT') {
-      const refreshed = await refreshSession();
-      if (refreshed) {
-        const retryOpts = {
-          ...options,
-          method: options.method || 'GET',
-          headers: { ...headers(refreshed), ...(options.headers || {}) },
-        };
-        if (options.body && typeof options.body !== 'string') {
-          retryOpts.body = JSON.stringify(options.body);
-          retryOpts.headers['Content-Type'] = 'application/json';
-        }
-        res = await fetch(url, { ...retryOpts, signal: controller.signal });
-      } else {
-        // Session expired and cannot be refreshed.
-        // Only clear user state if Supabase session is genuinely invalid.
-        // Do NOT clear auth just because the backend is misconfigured.
-        try {
-          const { data } = await window.CORPUS_SUPABASE.getSession();
-          if (data && data.session && data.session.access_token) {
-            // Supabase session is valid — backend is misconfigured, not the user's session
-            const err = new Error('Backend authentication error: invalid API key or misconfigured Supabase verification.');
-            err.status = 401;
-            err.data = { message: 'Backend misconfigured', backendError: true };
-            throw err;
+    // Handle 401.
+    //
+    // A 401 from the API does NOT mean "the user is signed out": it means the
+    // backend could not validate this particular token. That happens when
+    //   * the access token expired mid-request (refreshable), or
+    //   * the backend verifies tokens against a different Supabase project /
+    //     is missing its public key (config problem, session still valid).
+    //
+    // The old code threw the "backend misconfigured" error from *inside* the
+    // try block that was meant to detect it, so its own catch ran and wiped the
+    // session — the user was bounced to the login screen while their Supabase
+    // session was perfectly valid. That is the "logged out after upload /
+    // refresh" bug. Everything below keeps the session unless Supabase itself
+    // says there is none.
+    if (res.status === 401) {
+      const sessionToken = await currentSupabaseToken();
+
+      if (!sessionToken) {
+        // No Supabase session at all: this really is a signed-out request.
+        if (state.getUser()) state.clearUser();
+        throw authError('Your session has ended. Please sign in again.', { sessionExpired: true });
+      }
+
+      // Refresh and retry once. Only idempotent methods are retried so a POST
+      // can never be applied twice.
+      const canRetry = options.method !== 'POST' && options.method !== 'PUT';
+      if (canRetry && token) {
+        const refreshed = await refreshSession();
+        if (refreshed && refreshed !== token) {
+          const retryOpts = {
+            ...options,
+            method: options.method || 'GET',
+            headers: { ...headers(refreshed), ...(options.headers || {}) },
+          };
+          if (options.body && typeof options.body !== 'string') {
+            retryOpts.body = JSON.stringify(options.body);
+            retryOpts.headers['Content-Type'] = 'application/json';
           }
-        } catch (e) {
-          // Supabase session also unavailable — clear user state
-          state.clearUser();
-          const err = new Error('Session expired. Please sign in again.');
-          err.status = 401;
-          err.data = { message: 'Session expired' };
-          throw err;
+          res = await fetch(url, { ...retryOpts, signal: controller.signal });
+          if (res.status !== 401) {
+            return finishResponse(res);
+          }
         }
       }
+
+      // Still 401 while Supabase holds a valid session: the backend rejected a
+      // live token. Keep the user signed in and report the real problem.
+      throw authError(
+        'The backend rejected your session (401) even though you are signed in. ' +
+        'Your sign-in is still valid — the API is probably missing SUPABASE_URL / ' +
+        'SUPABASE_PUBLISHABLE_KEY or is verifying tokens for a different Supabase project.',
+        { backendAuthError: true }
+      );
     }
 
-    let data;
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
-      data = await res.json();
-    } else {
-      data = await res.text();
-    }
-    if (!res.ok) {
-      let msg = null;
-      if (data && typeof data === 'object') {
-        if (typeof data.message === 'string' && data.message) msg = data.message;
-        else if (typeof data.detail === 'string' && data.detail) msg = data.detail;
-        else if (Array.isArray(data.detail)) msg = data.detail.map(d => (d && d.msg) || String(d)).join(' ');
-        else if (data.detail && typeof data.detail === 'object') {
-          msg = data.detail.message || (Array.isArray(data.detail.errors) ? data.detail.errors.join(' ') : JSON.stringify(data.detail));
-        }
-      }
-      const err = new Error(msg || 'Request failed (' + res.status + ')');
-      err.status = res.status;
-      err.data = data;
-      err.networkError = false;
-      throw err;
-    }
-    return data;
+    return finishResponse(res);
   }
 
   // ---------- Backend health check ----------
@@ -304,85 +347,160 @@ window.CORPUS_API = (function () {
     return request('/api/v1/datasets/' + encodeURIComponent(datasetId), { method: 'DELETE', token });
   }
 
+  // Dataset bytes are far larger than a JSON request, so uploads get their own
+  // timeout and their own 401 handling:
+  //   * the XHR is given an explicit timeout (a stalled mobile connection used
+  //     to hang forever with no feedback),
+  //   * a 401 refreshes the Supabase session and retries once — long uploads
+  //     regularly outlive one access token — without ever creating a second
+  //     dataset record (the dataset id is created before the upload starts).
+  function uploadTimeoutMs() {
+    const configured = window.CORPUS_CONFIG.UPLOAD_TIMEOUT_MS;
+    return typeof configured === 'number' && configured > 0 ? configured : 600000; // 10 min
+  }
+
+  function uploadUrl(datasetId) {
+    return BASE + '/api/v1/datasets/' + encodeURIComponent(datasetId) + '/upload';
+  }
+
+  function parseUploadFailure(status, payload) {
+    let detail = payload;
+    if (payload && typeof payload === 'object') {
+      detail = payload.message || payload.detail;
+    }
+    let message = typeof detail === 'string' && detail ? detail : 'Upload failed (HTTP ' + status + ')';
+    if (status === 401) {
+      message = 'The upload was rejected (401). Your sign-in is still active — ' +
+        'the backend could not verify the access token. Retry, and if it keeps failing ' +
+        'check the backend SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY.';
+    } else if (status === 413) {
+      message = 'This file is larger than the backend upload limit. Compress or split it, then retry.';
+    } else if (status === 503) {
+      message = 'The backend cannot store files right now: ' + message;
+    } else if (status === 0) {
+      message = 'Upload interrupted by a network error. Your dataset record is kept — press Upload again to resume.';
+    }
+    const err = new Error(message);
+    err.status = status || 0;
+    err.data = payload;
+    return err;
+  }
+
+  /** One upload attempt over XHR, reporting real byte progress. */
+  function uploadOnce(datasetId, file, token, onProgress) {
+    return new Promise((resolve, reject) => {
+      if (typeof XMLHttpRequest === 'undefined') {
+        // No XHR (very old engines): fall back to fetch, no progress events.
+        const formData = new FormData();
+        formData.append('file', file);
+        fetch(uploadUrl(datasetId), {
+          method: 'POST',
+          headers: token ? { Authorization: 'Bearer ' + token } : {},
+          body: formData,
+        }).then(async (res) => {
+          const ct = res.headers.get('content-type') || '';
+          const payload = ct.includes('application/json') ? await res.json() : await res.text();
+          if (!res.ok) {
+            reject(parseUploadFailure(res.status, payload));
+            return;
+          }
+          resolve(payload);
+        }).catch((err) => {
+          const wrapped = new Error('Upload interrupted by a network error: ' + (err.message || err));
+          wrapped.status = 0;
+          wrapped.networkError = true;
+          reject(wrapped);
+        });
+        return;
+      }
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', uploadUrl(datasetId), true);
+      xhr.timeout = uploadTimeoutMs();
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      xhr.upload.onprogress = (event) => {
+        if (!onProgress) return;
+        if (event.lengthComputable && event.total > 0) {
+          onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+        } else {
+          onProgress(null);
+        }
+      };
+      xhr.onload = () => {
+        let payload = null;
+        const ct = xhr.getResponseHeader('content-type') || '';
+        try {
+          payload = ct.indexOf('application/json') !== -1 ? JSON.parse(xhr.responseText) : xhr.responseText;
+        } catch (e) {
+          payload = xhr.responseText;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (onProgress) onProgress(100);
+          resolve(payload);
+          return;
+        }
+        reject(parseUploadFailure(xhr.status, payload));
+      };
+      xhr.onerror = () => {
+        const err = new Error('Upload interrupted — the network connection dropped. Press Upload again to resume; the dataset record is kept.');
+        err.status = 0;
+        err.networkError = true;
+        reject(err);
+      };
+      xhr.ontimeout = () => {
+        const err = new Error('Upload timed out after ' + Math.round(uploadTimeoutMs() / 1000) + 's. Try again on a stronger connection — the dataset record is kept.');
+        err.status = 0;
+        err.code = 'TIMEOUT';
+        reject(err);
+      };
+      const formData = new FormData();
+      formData.append('file', file);
+      xhr.send(formData);
+    });
+  }
+
   async function uploadDatasetFile(datasetId, file, token) {
     const resolvedToken = token || (await state.getAccessToken());
-    const formData = new FormData();
-    formData.append('file', file);
-    const url = BASE + '/api/v1/datasets/' + encodeURIComponent(datasetId) + '/upload';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: resolvedToken ? 'Bearer ' + resolvedToken : '' },
-      body: formData,
-    });
-    let data;
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) data = await res.json();
-    else data = await res.text();
-    if (!res.ok) {
-      const err = new Error(data.message || data.detail || 'Upload failed');
-      err.status = res.status;
+    try {
+      return await uploadOnce(datasetId, file, resolvedToken, null);
+    } catch (err) {
+      if (err && err.status === 401) {
+        const refreshed = await refreshSession();
+        if (refreshed) return uploadOnce(datasetId, file, refreshed, null);
+        throw authError(
+          'The upload was rejected (401) and the session could not be refreshed. ' +
+          'Sign in again, then retry — the dataset record is kept.',
+          { sessionExpired: true }
+        );
+      }
       throw err;
     }
-    return data;
   }
 
   // Upload a dataset file with real progress reporting (XHR upload events).
   // Resolves with the parsed response body, rejects with an Error carrying
   // `status` just like the fetch-based helpers above.
-  function uploadDatasetFileWithProgress(datasetId, file, token, onProgress) {
-    return (async () => {
-      const resolvedToken = token || (await state.getAccessToken());
-      const url = BASE + '/api/v1/datasets/' + encodeURIComponent(datasetId) + '/upload';
-      return new Promise((resolve, reject) => {
-        if (typeof XMLHttpRequest === 'undefined') {
-          // Fall back to the fetch upload (no progress events available).
-          uploadDatasetFile(datasetId, file, resolvedToken).then(resolve).catch(reject);
-          return;
+  async function uploadDatasetFileWithProgress(datasetId, file, token, onProgress) {
+    const resolvedToken = token || (await state.getAccessToken());
+    try {
+      return await uploadOnce(datasetId, file, resolvedToken, onProgress);
+    } catch (err) {
+      if (err && err.status === 401) {
+        // Long uploads outlive a short-lived access token: refresh once and
+        // retry the same dataset id. No second dataset record is created.
+        const refreshed = await refreshSession();
+        if (refreshed) {
+          if (onProgress) onProgress(0);
+          return uploadOnce(datasetId, file, refreshed, onProgress);
         }
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', url, true);
-        if (resolvedToken) xhr.setRequestHeader('Authorization', 'Bearer ' + resolvedToken);
-        xhr.upload.onprogress = (event) => {
-          if (!onProgress) return;
-          if (event.lengthComputable && event.total > 0) {
-            onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
-          } else {
-            onProgress(null);
-          }
-        };
-        xhr.onload = () => {
-          let data = null;
-          const ct = xhr.getResponseHeader('content-type') || '';
-          try {
-            data = ct.indexOf('application/json') !== -1 ? JSON.parse(xhr.responseText) : xhr.responseText;
-          } catch (e) {
-            data = xhr.responseText;
-          }
-          if (xhr.status >= 200 && xhr.status < 300) {
-            if (onProgress) onProgress(100);
-            resolve(data);
-            return;
-          }
-          const detail = data && typeof data === 'object' ? (data.message || data.detail) : data;
-          const err = new Error(typeof detail === 'string' && detail ? detail : 'Upload failed (HTTP ' + xhr.status + ')');
-          err.status = xhr.status;
-          reject(err);
-        };
-        xhr.onerror = () => {
-          const err = new Error('Upload failed — the network connection was interrupted.');
-          err.networkError = true;
-          reject(err);
-        };
-        xhr.ontimeout = () => {
-          const err = new Error('Upload timed out. Try again on a stronger connection.');
-          err.code = 'TIMEOUT';
-          reject(err);
-        };
-        const formData = new FormData();
-        formData.append('file', file);
-        xhr.send(formData);
-      });
-    })();
+        throw authError(
+          'The upload was rejected (401) and the session could not be refreshed. ' +
+          'Sign in again, then press Upload — the dataset record is kept.',
+          { sessionExpired: true }
+        );
+      }
+      throw err;
+    }
   }
 
   async function previewDataset(datasetId, token, maxChars = 2000) {

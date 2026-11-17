@@ -9,6 +9,11 @@ window.auth = (function () {
 
   let currentTab = 'login';
   let initializing = true; // Set to false once initial session check completes
+  // True only while an interactive sign-in/sign-up started from this page is in
+  // flight. Supabase also emits SIGNED_IN when it restores or refreshes a stored
+  // session (page reload, token refresh, returning from the Android file
+  // picker); treating those as fresh logins used to yank the user to Dashboard.
+  let interactiveSignIn = false;
 
   // Check Supabase configuration before allowing any auth operation
   function checkSupabaseConfig() {
@@ -71,13 +76,21 @@ window.auth = (function () {
         if (session && session.user) {
           state.setUser(session.user);
           state.setAuthReady(true);
-          if (!initializing) {
+          const wasInteractive = interactiveSignIn;
+          interactiveSignIn = false;
+          if (wasInteractive) {
             ui.toast('Signed in successfully', 'success');
-          }
-          closeModal();
-          // Navigate to dashboard only if router is initialized
-          if (typeof router !== 'undefined' && router.initialized) {
-            router.navigate('dashboard');
+            closeModal();
+            if (typeof router !== 'undefined' && router.initialized) {
+              router.navigate('dashboard');
+            }
+          } else {
+            // Session restored/refreshed by Supabase (reload, token refresh,
+            // returning from the system file picker). Stay exactly where the
+            // user is and just re-render so the page picks up the session.
+            if (typeof router !== 'undefined' && router.initialized) {
+              router.render();
+            }
           }
           updateProfileUI();
         }
@@ -329,6 +342,7 @@ window.auth = (function () {
       return;
     }
     ui.setLoading(true);
+    interactiveSignIn = true;
     try {
       const { data, error } = await CORPUS_SUPABASE.signIn(email, password);
       if (error) {
@@ -347,16 +361,20 @@ window.auth = (function () {
         if (typeof router !== 'undefined' && router.initialized) {
           router.navigate('dashboard');
         }
+        interactiveSignIn = false;
         updateProfileUI();
       } else if (data && data.user) {
+        interactiveSignIn = false;
         // User exists but no active session — likely email confirmation required
         ui.toast('Account requires email confirmation. Please check your inbox before signing in.', 'info', 10000);
       } else {
+        interactiveSignIn = false;
         ui.toast('Login failed: no session returned', 'error');
       }
     } catch (err) {
       ui.toast(err.message || 'Login failed', 'error');
     } finally {
+      interactiveSignIn = false;
       ui.setLoading(false);
     }
   }
@@ -375,6 +393,7 @@ window.auth = (function () {
       return;
     }
     ui.setLoading(true);
+    interactiveSignIn = true;
     try {
       const { data, error } = await CORPUS_SUPABASE.signUp(email, password, { full_name: name });
       if (error) {
@@ -392,9 +411,11 @@ window.auth = (function () {
         if (typeof router !== 'undefined' && router.initialized) {
           router.navigate('dashboard');
         }
+        interactiveSignIn = false;
         updateProfileUI();
       } else {
         // Email confirmation required — do NOT pretend the user is signed in
+        interactiveSignIn = false;
         ui.toast('Account created! Please check your email to confirm your address before signing in.', 'info', 10000);
         closeModal();
         updateProfileUI();

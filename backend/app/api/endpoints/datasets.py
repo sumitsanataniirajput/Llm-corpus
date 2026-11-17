@@ -12,6 +12,7 @@ dataset is actually usable:
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+import asyncio
 import uuid
 import hashlib
 import os
@@ -139,7 +140,14 @@ async def latest_file_for_dataset(db: AsyncSession, dataset_id: str, owner_id: u
 
 
 def _storage_client():
-    """Create a Supabase Storage client (service role) or raise a clear error."""
+    """Create a Supabase Storage client (service role) or raise a clear error.
+
+    Deliberately not cached: the client is cheap relative to a file transfer,
+    and a process-wide cache would pin one configuration (and one connection
+    pool) for the lifetime of the worker, which is wrong when the environment or
+    the injected client changes. The expensive part — the transfer itself — is
+    already moved off the event loop with asyncio.to_thread in the handlers.
+    """
     if create_client is None:
         raise HTTPException(
             status_code=503,
@@ -299,10 +307,19 @@ async def upload_dataset_file(
             ),
         )
     storage = _storage_client()
+    bucket_api = storage.storage.from_(settings.STORAGE_BUCKET)
     object_path = f"{owner_id}/datasets/{dataset_id}/{uuid.uuid4().hex}_{safe_name}"
     try:
-        storage.storage.from_(settings.STORAGE_BUCKET).upload(
-            object_path, contents,
+        # The Supabase SDK is synchronous. Calling it directly inside this async
+        # endpoint blocked the event loop for the whole transfer, so while one
+        # large upload was in flight every other request (health checks, token
+        # refreshes, dataset lists) stalled or timed out — which the UI reported
+        # as "backend unavailable" and, on a 401, as being signed out. Run it in
+        # a worker thread instead.
+        await asyncio.to_thread(
+            bucket_api.upload,
+            object_path,
+            contents,
             file_options={"content-type": file.content_type or "text/plain", "upsert": "false"},
         )
     except Exception as exc:
@@ -313,24 +330,51 @@ async def upload_dataset_file(
             await db.commit()
         raise HTTPException(status_code=502, detail=f"Could not persist dataset to Supabase Storage: {str(exc)[:300]}")
     checksum = hashlib.sha256(contents).hexdigest()
-    await db.execute(text("""
-        INSERT INTO public.dataset_files
-        (id, dataset_id, storage_path, file_name, file_size, checksum)
-        VALUES (:id, :dataset_id, :storage_path, :file_name, :file_size, :checksum)
-    """), {
-        "id": str(uuid.uuid4()), "dataset_id": dataset_id,
-        "storage_path": object_path, "file_name": safe_name,
-        "file_size": len(contents), "checksum": checksum,
-    })
-    ds.size = len(contents)
-    ds.checksum = checksum
-    ds.status = "uploaded"
-    extension = os.path.splitext(safe_name)[1].lstrip(".").lower()
-    if extension:
-        ds.format = extension
-    ds.updated_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(ds)
+    try:
+        await db.execute(text("""
+            INSERT INTO public.dataset_files
+            (id, dataset_id, storage_path, file_name, file_size, checksum)
+            VALUES (:id, :dataset_id, :storage_path, :file_name, :file_size, :checksum)
+        """), {
+            "id": str(uuid.uuid4()), "dataset_id": dataset_id,
+            "storage_path": object_path, "file_name": safe_name,
+            "file_size": len(contents), "checksum": checksum,
+        })
+        ds.size = len(contents)
+        ds.checksum = checksum
+        ds.status = "uploaded"
+        extension = os.path.splitext(safe_name)[1].lstrip(".").lower()
+        if extension:
+            ds.format = extension
+        ds.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(ds)
+    except Exception as exc:
+        # The bytes are in storage but the metadata write failed. Remove the
+        # object so private storage never accumulates uploads the database does
+        # not know about, and mark the dataset failed so the UI stops calling it
+        # ready.
+        await db.rollback()
+        try:
+            await asyncio.to_thread(bucket_api.remove, [object_path])
+        except Exception:  # pragma: no cover - cleanup is best effort
+            pass
+        try:
+            await db.execute(text("""
+                UPDATE public.datasets SET status = 'failed', updated_at = now()
+                WHERE id = :dataset_id AND owner_id = :owner_id
+                  AND NOT EXISTS (SELECT 1 FROM public.dataset_files WHERE dataset_id = :dataset_id)
+            """), {"dataset_id": dataset_id, "owner_id": str(owner_id)})
+            await db.commit()
+        except Exception:  # pragma: no cover - never mask the original failure
+            await db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The file was stored but the dataset record could not be updated, "
+                f"so the upload was rolled back: {str(exc)[:300]}"
+            ),
+        )
     file_row = await latest_file_for_dataset(db, dataset_id, owner_id)
     return {
         "ok": True,
@@ -370,7 +414,8 @@ async def preview_dataset(
 
     storage = _storage_client()
     try:
-        raw = storage.storage.from_(settings.STORAGE_BUCKET).download(file_row["storage_path"])
+        bucket_api = storage.storage.from_(settings.STORAGE_BUCKET)
+        raw = await asyncio.to_thread(bucket_api.download, file_row["storage_path"])
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not read the stored dataset file: {str(exc)[:300]}")
     if isinstance(raw, dict):
