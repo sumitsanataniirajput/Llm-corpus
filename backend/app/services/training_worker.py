@@ -216,10 +216,6 @@ async def _persist_training_metric(factory, job_id: str, metric: dict):
             (job_id, step, loss, learning_rate, tokens_per_second)
             VALUES (:job_id, :step, :loss, :learning_rate, :tokens_per_second)
         """), {"job_id": job_id, **metric})
-        await db.execute(text("""
-            INSERT INTO public.training_job_events (job_id, event, data)
-            VALUES (:job_id, 'metric', CAST(:data AS jsonb))
-        """), {"job_id": job_id, "data": json.dumps(metric)})
         await db.commit()
 
 
