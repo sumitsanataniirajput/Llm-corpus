@@ -312,3 +312,32 @@ test('API client uses trailing slashes on collection endpoints to avoid 307 redi
   assert.ok(datasetsGet && new URL(datasetsGet.url).pathname.endsWith('/api/v1/datasets/'));
   assert.ok(modelsGet && new URL(modelsGet.url).pathname.endsWith('/api/v1/models/'));
 });
+
+
+test('restores latest completed job and its real metrics after page reload', async () => {
+  const fx = datasetFixtures();
+  fx.jobs = [{
+    id: 'job_completed_real',
+    owner_id: 'user-1',
+    model_id: 'model_1',
+    dataset_id: 'ds_uploaded',
+    status: 'completed',
+    engine: 'pytorch',
+    compute: 'local',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }];
+  fx.metrics = [
+    { step: 1, loss: 5.9, learning_rate: 0.001, tokens_per_second: 70 },
+    { step: 2, loss: 5.3, learning_rate: 0.001, tokens_per_second: 72 },
+  ];
+  const app = createApp(fx);
+  await app.window.training.render();
+
+  assert.match(app.doc.getElementById('t-monitor-status').textContent, /completed/i);
+  assert.equal(app.doc.getElementById('t-metric-step').textContent, '2');
+  assert.equal(app.doc.getElementById('t-metric-loss').textContent, '5.3000');
+  assert.equal(app.doc.getElementById('t-metric-tps').textContent, '72');
+  assert.equal(app.doc.getElementById('t-metric-progress').textContent, '20%');
+  app.window.training.dispose();
+});
