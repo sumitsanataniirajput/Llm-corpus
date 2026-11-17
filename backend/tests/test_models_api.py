@@ -53,11 +53,12 @@ async def test_delete_model_removes_artifacts_and_preserves_history(http, storag
             config={},
         ))
         await db.execute(text("""
-            INSERT INTO public.checkpoints (id, owner_id, model_id, storage_path)
-            VALUES (:id, :owner_id, :model_id, :path)
+            -- public.checkpoints has no owner_id column: ownership is inherited
+            -- from the parent model, exactly like the live schema.
+            INSERT INTO public.checkpoints (id, model_id, storage_path)
+            VALUES (:id, :model_id, :path)
         """), {
             "id": "ckpt_delete_test",
-            "owner_id": USER_ID,
             "model_id": model["id"],
             "path": checkpoint_path,
         })

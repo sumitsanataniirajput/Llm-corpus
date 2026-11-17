@@ -189,9 +189,10 @@ async def test_delete_model_reports_storage_failure_and_preserves_model(http, st
     storage.put(settings.STORAGE_BUCKET, ckpt_path, b"weights")
     factory = get_session_factory()
     async with factory() as db:
+        # Ownership comes from the parent model: public.checkpoints has no
+        # owner_id column (matches the live schema).
         db.add(Checkpoint(
             id="ckpt_fail1",
-            owner_id=uuid.UUID(USER_ID),
             model_id=model["id"],
             storage_path=ckpt_path,
             step=1,

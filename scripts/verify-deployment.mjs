@@ -62,6 +62,12 @@ const ASSET_MARKERS = [
     detail: 'datasetAssetHasTapZone',
   },
   {
+    path: '/js/router.js',
+    marker: 'CORPUS_MODULE_LOADER',
+    label: 'page-module recovery (re-request with cache-bust)',
+    detail: 'routerHasModuleRecovery',
+  },
+  {
     path: '/css/responsive.css',
     marker: 'min-aspect-ratio: 21/9',
     label: 'large-display / TV scaling breakpoints',
@@ -377,6 +383,7 @@ function printReport(backend, frontend, expected) {
   if (!SKIP_ASSET_MARKERS) {
     line('picker overlay served', frontend.details.datasetAssetHasPickerOverlay === true ? 'yes' : 'no');
     line('tap-to-open zone served', frontend.details.datasetAssetHasTapZone === true ? 'yes' : 'no');
+    line('module recovery served', frontend.details.routerHasModuleRecovery === true ? 'yes' : 'no');
     line('large-display CSS served', frontend.details.cssHasLargeDisplayBreakpoints === true ? 'yes' : 'no');
     line('viewport meta served', frontend.details.htmlHasViewportMeta === true ? 'yes' : 'no');
   }
