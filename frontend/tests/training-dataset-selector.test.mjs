@@ -338,6 +338,6 @@ test('restores latest completed job and its real metrics after page reload', asy
   assert.equal(app.doc.getElementById('t-metric-step').textContent, '2');
   assert.equal(app.doc.getElementById('t-metric-loss').textContent, '5.3000');
   assert.equal(app.doc.getElementById('t-metric-tps').textContent, '72');
-  assert.equal(app.doc.getElementById('t-metric-progress').textContent, '20%');
+  assert.equal(app.doc.getElementById('t-metric-progress').textContent, '100%');
   app.window.training.dispose();
 });
