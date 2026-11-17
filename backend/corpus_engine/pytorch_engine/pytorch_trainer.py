@@ -35,6 +35,9 @@ class PyTorchTrainer:
         n_batches = 0
         self.optimizer.zero_grad()
         total_batches = len(dataloader)
+        accumulated_tokens = 0
+        accumulated_loss = 0.0
+        accumulated_batches = 0
         for i, (input_ids, target_ids) in enumerate(dataloader):
             input_ids = input_ids.to(self.device)
             target_ids = target_ids.to(self.device)
@@ -42,6 +45,9 @@ class PyTorchTrainer:
             loss = self.criterion(logits.reshape(-1, logits.size(-1)), target_ids.reshape(-1))
             loss = loss / accum_steps
             loss.backward()
+            accumulated_tokens += int(input_ids.numel())
+            accumulated_loss += float(loss.item() * accum_steps)
+            accumulated_batches += 1
             should_step = ((i + 1) % accum_steps == 0) or (i + 1 == total_batches)
             if should_step:
                 if clip_grad > 0:
@@ -52,11 +58,14 @@ class PyTorchTrainer:
                 if on_step is not None:
                     on_step({
                         "step": self.global_step,
-                        "loss": float(loss.item() * accum_steps),
+                        "loss": float(accumulated_loss / max(accumulated_batches, 1)),
                         "batch": i + 1,
                         "batches": total_batches,
-                        "tokens": int(input_ids.numel()),
+                        "tokens": accumulated_tokens,
                     })
+                accumulated_tokens = 0
+                accumulated_loss = 0.0
+                accumulated_batches = 0
             total_loss += loss.item() * accum_steps
             n_batches += 1
         self.scheduler.step()
