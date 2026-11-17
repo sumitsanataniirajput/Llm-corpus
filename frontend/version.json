@@ -2,7 +2,7 @@
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
   "buildId": "2026-11-17.2",
-  "sourceRef": "fix/android-dataset-file-picker",
+  "sourceRef": "main",
   "notes": [
     "Android file picker: replaced the transparent full-zone input overlay with a visible native file control, removed the synthetic zone-click fallback and click-time input reset, and retained the change-event queue/persistence flow.",
     "Authentication fix: a backend 401 no longer signs the user out. The session is cleared only when Supabase itself has no session; when the backend rejects a token that Supabase still holds (expired access token, mismatched publishable key, misconfigured backend) the API raises a 'backend rejected your session' error and keeps the user signed in (frontend/js/api.js).",
