@@ -647,15 +647,70 @@ window.training = (function () {
   /* ---------------- Jobs ---------------- */
 
   async function loadJobs() {
+    let token;
     try {
-      const token = await state.getAccessToken();
+      token = await state.getAccessToken();
       const data = await window.CORPUS_API.listTrainingJobs(token);
       state.setTrainingJobs(normalizeList(data, 'jobs'));
     } catch (err) {
       state.setTrainingJobs([]);
       log('Could not load training jobs: ' + (err.message || 'unknown error'), 'error');
+      renderJobList();
+      return;
     }
+
     renderJobList();
+    const jobs = state.getTrainingJobs() || [];
+    if (!jobs.length) {
+      wsJobId = null;
+      metricSeries = { steps: [], loss: [], throughput: [] };
+      seenSteps = new Set();
+      updateMetricTiles();
+      updateCharts();
+      updateMonitorStatus(null);
+      return;
+    }
+
+    // Restore the newest real backend job on page load. This makes completed
+    // runs inspectable after navigation/reload instead of showing a misleading
+    // Idle monitor with empty charts.
+    const selected = jobs.find(item => item.id === wsJobId) || jobs[0];
+    const changedJob = wsJobId !== selected.id;
+    wsJobId = selected.id;
+    if (changedJob) {
+      metricSeries = { steps: [], loss: [], throughput: [] };
+      seenSteps = new Set();
+      updateMetricTiles();
+      updateCharts();
+    }
+
+    updateMonitorStatus(selected);
+    updateControls(selected);
+    await refreshJob(selected.id, true);
+
+    if (window.CORPUS_API.listTrainingLogs) {
+      try {
+        const events = await window.CORPUS_API.listTrainingLogs(selected.id, token);
+        (events || []).forEach(entry => {
+          if (!entry || !entry.event) return;
+          if (entry.event === 'started') {
+            log('Worker started training from the selected stored dataset.', 'info');
+          } else if (entry.event === 'completed') {
+            log('Training completed and checkpoint saved.', 'success');
+          } else if (entry.event === 'failed') {
+            reportJobFailure(selected.id, entry.data && entry.data.error);
+          }
+        });
+      } catch (err) {
+        log('Could not restore training event history: ' + (err.message || 'unknown error'), 'warn');
+      }
+    }
+
+    if (selected.model_id) await loadCheckpoints(selected.model_id);
+    const latest = state.getTrainingJob(selected.id) || selected;
+    if (isActiveStatus(latest.status) && !startInFlight) {
+      connectJobStream(selected.id);
+    }
   }
 
   function renderJobList() {
