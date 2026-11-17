@@ -215,10 +215,6 @@ async def _persist_training_metric(factory, job_id: str, metric: dict):
             INSERT INTO public.training_metrics
             (job_id, step, loss, learning_rate, tokens_per_second)
             VALUES (:job_id, :step, :loss, :learning_rate, :tokens_per_second)
-            ON CONFLICT (job_id, step) DO UPDATE SET
-                loss = EXCLUDED.loss,
-                learning_rate = EXCLUDED.learning_rate,
-                tokens_per_second = EXCLUDED.tokens_per_second
         """), {"job_id": job_id, **metric})
         await db.execute(text("""
             INSERT INTO public.training_job_events (job_id, event, data)
