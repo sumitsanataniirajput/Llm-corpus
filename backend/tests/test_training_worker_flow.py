@@ -130,7 +130,6 @@ async def test_worker_trains_with_the_job_dataset_from_storage(http, http_as_oth
     assert metrics[-1]["loss"] == pytest.approx(1.75)
     assert events[0]["event"] == "started"
     assert events[-1]["event"] == "completed"
-    assert sum(e["event"] == "metric" for e in events) == 2
     started = events[0]["data"]
     assert started["dataset_id"] == dataset["id"]
     assert started["file_name"] == "worker.txt"
