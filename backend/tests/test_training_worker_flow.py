@@ -66,10 +66,13 @@ def _patch_worker(monkeypatch, storage, metrics=None):
     ]
     seen = {}
 
-    def fake_train(text_data, model_config, job_config):
+    def fake_train(text_data, model_config, job_config, on_metric=None):
         seen["text"] = text_data
         seen["model_config"] = model_config
         seen["job_config"] = job_config
+        if on_metric:
+            for metric in metrics:
+                on_metric(metric)
         return (
             {"vocab_size": 64, "context_length": 32, "d_model": 32, "n_layers": 1,
              "n_heads": 4, "d_ff": 64, "learning_rate": 0.001, "epochs": 1},
@@ -125,7 +128,7 @@ async def test_worker_trains_with_the_job_dataset_from_storage(http, http_as_oth
 
     assert [m["step"] for m in metrics] == [1, 2]
     assert metrics[-1]["loss"] == pytest.approx(1.75)
-    assert [e["event"] for e in events] == ["started", "completed"]
+    assert [e["event"] for e in events] == ["started", "metric", "metric", "completed"]
     started = events[0]["data"]
     assert started["dataset_id"] == dataset["id"]
     assert started["file_name"] == "worker.txt"
