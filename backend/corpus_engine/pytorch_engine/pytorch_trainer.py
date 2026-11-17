@@ -29,7 +29,7 @@ class PyTorchTrainer:
         self.history = []
 
     def train_epoch(self, dataloader: DataLoader, clip_grad: float = 1.0,
-                    accum_steps: int = 1) -> float:
+                    accum_steps: int = 1, on_step=None) -> float:
         self.model.train()
         total_loss = 0.0
         n_batches = 0
@@ -49,6 +49,13 @@ class PyTorchTrainer:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
                 self.global_step += 1
+                if on_step is not None:
+                    on_step({
+                        "step": self.global_step,
+                        "loss": float(loss.item() * accum_steps),
+                        "batch": i + 1,
+                        "batches": total_batches,
+                    })
             total_loss += loss.item() * accum_steps
             n_batches += 1
         self.scheduler.step()
