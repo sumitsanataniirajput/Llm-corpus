@@ -1048,6 +1048,7 @@ window.training = (function () {
     const job = state.getTrainingJob(jobId) || { id: jobId, status: payload.status };
     updateControls(job);
     updateMonitorStatus(job);
+    updateMetricTiles();
     log('Job ' + jobId + ' status: ' + payload.status);
     if (!isActiveStatus(payload.status)) {
       stopPolling();
