@@ -232,7 +232,7 @@ window.training = (function () {
           <div class="metric-tile"><div class="metric-value" id="t-metric-step">—</div><div class="metric-label">Latest step</div></div>
           <div class="metric-tile"><div class="metric-value" id="t-metric-loss">—</div><div class="metric-label">Loss</div></div>
           <div class="metric-tile"><div class="metric-value" id="t-metric-tps">—</div><div class="metric-label">Tokens / sec</div></div>
-          <div class="metric-tile"><div class="metric-value" id="t-metric-progress">—</div><div class="metric-label">Epoch progress</div></div>
+          <div class="metric-tile"><div class="metric-value" id="t-metric-progress">—</div><div class="metric-label">Job completion</div></div>
         </div>
 
         <div class="training-charts" id="training-charts">
@@ -647,15 +647,70 @@ window.training = (function () {
   /* ---------------- Jobs ---------------- */
 
   async function loadJobs() {
+    let token;
     try {
-      const token = await state.getAccessToken();
+      token = await state.getAccessToken();
       const data = await window.CORPUS_API.listTrainingJobs(token);
       state.setTrainingJobs(normalizeList(data, 'jobs'));
     } catch (err) {
       state.setTrainingJobs([]);
       log('Could not load training jobs: ' + (err.message || 'unknown error'), 'error');
+      renderJobList();
+      return;
     }
+
     renderJobList();
+    const jobs = state.getTrainingJobs() || [];
+    if (!jobs.length) {
+      wsJobId = null;
+      metricSeries = { steps: [], loss: [], throughput: [] };
+      seenSteps = new Set();
+      updateMetricTiles();
+      updateCharts();
+      updateMonitorStatus(null);
+      return;
+    }
+
+    // Restore the newest real backend job on page load. This makes completed
+    // runs inspectable after navigation/reload instead of showing a misleading
+    // Idle monitor with empty charts.
+    const selected = jobs.find(item => item.id === wsJobId) || jobs[0];
+    const changedJob = wsJobId !== selected.id;
+    wsJobId = selected.id;
+    if (changedJob) {
+      metricSeries = { steps: [], loss: [], throughput: [] };
+      seenSteps = new Set();
+      updateMetricTiles();
+      updateCharts();
+    }
+
+    updateMonitorStatus(selected);
+    updateControls(selected);
+    await refreshJob(selected.id, true);
+
+    if (window.CORPUS_API.listTrainingLogs) {
+      try {
+        const events = await window.CORPUS_API.listTrainingLogs(selected.id, token);
+        (events || []).forEach(entry => {
+          if (!entry || !entry.event) return;
+          if (entry.event === 'started') {
+            log('Worker started training from the selected stored dataset.', 'info');
+          } else if (entry.event === 'completed') {
+            log('Training completed and checkpoint saved.', 'success');
+          } else if (entry.event === 'failed') {
+            reportJobFailure(selected.id, entry.data && entry.data.error);
+          }
+        });
+      } catch (err) {
+        log('Could not restore training event history: ' + (err.message || 'unknown error'), 'warn');
+      }
+    }
+
+    if (selected.model_id) await loadCheckpoints(selected.model_id);
+    const latest = state.getTrainingJob(selected.id) || selected;
+    if (isActiveStatus(latest.status) && !startInFlight) {
+      connectJobStream(selected.id);
+    }
   }
 
   function renderJobList() {
@@ -972,14 +1027,14 @@ window.training = (function () {
       ? Math.round(metricSeries.throughput[last]).toLocaleString()
       : '—';
     if (progressEl) {
-      const epochsEl = document.getElementById('t-epochs');
-      const epochs = epochsEl ? parseInt(epochsEl.value, 10) : NaN;
-      if (last >= 0 && Number.isFinite(epochs) && epochs > 0) {
-        const percent = Math.min(100, Math.round((metricSeries.steps[last] / epochs) * 100));
-        progressEl.textContent = percent + '%';
-      } else {
-        progressEl.textContent = '—';
-      }
+      const job = wsJobId ? state.getTrainingJob(wsJobId) : null;
+      const status = job && job.status ? String(job.status).toLowerCase() : '';
+      if (status === 'completed') progressEl.textContent = '100%';
+      else if (status === 'failed') progressEl.textContent = 'Failed';
+      else if (status === 'stopped' || status === 'cancelled') progressEl.textContent = 'Stopped';
+      else if (ACTIVE_STATUSES.indexOf(status) !== -1) progressEl.textContent = 'In progress';
+      else if (status === 'queued') progressEl.textContent = 'Queued';
+      else progressEl.textContent = '—';
     }
   }
 
@@ -993,6 +1048,7 @@ window.training = (function () {
     const job = state.getTrainingJob(jobId) || { id: jobId, status: payload.status };
     updateControls(job);
     updateMonitorStatus(job);
+    updateMetricTiles();
     log('Job ' + jobId + ' status: ' + payload.status);
     if (!isActiveStatus(payload.status)) {
       stopPolling();
