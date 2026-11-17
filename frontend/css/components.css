@@ -868,7 +868,9 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
 
 /* Only decorative elements ignore taps. The native file input remains a
    visible, directly tappable control for Android WebView compatibility. */
-.drop-zone > :not(input[type="file"]) {
+.drop-zone > i,
+.drop-zone > strong,
+.drop-zone > span {
   pointer-events: none;
 }
 
