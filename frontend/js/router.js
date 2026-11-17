@@ -42,6 +42,105 @@ window.router = (function () {
     settings: 'settings',
   };
 
+  // Route → script that registers the module. Used to recover from a module
+  // that is not registered (stale Android cache, a 404, or a truncated file)
+  // by requesting the exact file again with a cache-busting query.
+  const MODULE_SCRIPTS = {
+    dashboard: 'js/dashboard.js',
+    models: 'js/models.js',
+    training: 'js/training.js',
+    statistics: 'js/statistics.js',
+    'ai-information': 'js/ai-information.js',
+    chat: 'js/chat.js',
+    'prediction-lab': 'js/prediction.js',
+    'neural-lab': 'js/neural-lab.js',
+    datasets: 'js/datasets.js',
+    evaluation: 'js/evaluation.js',
+    compute: 'js/compute.js',
+    'cloud-storage': 'js/storage.js',
+    experiments: 'js/experiments.js',
+    settings: 'js/settings.js',
+  };
+
+  // One recovery attempt per route per page load: retrying in a loop would only
+  // hammer the server when the file is genuinely broken.
+  const reloadAttempted = Object.create(null);
+  const reloadedUrls = Object.create(null);
+
+  function buildId() {
+    const cfg = window.CORPUS_CONFIG || {};
+    if (cfg.BUILD_ID) return String(cfg.BUILD_ID);
+    const meta = document.querySelector('meta[name="corpus-build"]');
+    const value = meta ? meta.getAttribute('content') : '';
+    return value || 'dev';
+  }
+
+  /** Load a script element; resolves true on load, false on error/timeout. */
+  function defaultScriptLoader(src, timeoutMs) {
+    if (typeof window.CORPUS_MODULE_LOADER === 'function') {
+      // Hosts that cannot inject scripts (strict CSP) or tests plug their own.
+      return Promise.resolve(window.CORPUS_MODULE_LOADER(src));
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+      const el = document.createElement('script');
+      const timer = setTimeout(() => finish(false), timeoutMs || 6000);
+      el.async = false;
+      el.src = src;
+      el.onload = () => { clearTimeout(timer); finish(true); };
+      el.onerror = () => { clearTimeout(timer); finish(false); };
+      try {
+        document.head.appendChild(el);
+      } catch (err) {
+        clearTimeout(timer);
+        finish(false);
+      }
+    });
+  }
+
+  async function reloadPageModule(route) {
+    const globalName = PAGE_MODULES[route];
+    const file = MODULE_SCRIPTS[route];
+    if (!globalName || !file) return null;
+    if (reloadAttempted[route]) return window[globalName] && window[globalName].render ? window[globalName] : null;
+    reloadAttempted[route] = true;
+
+    const url = file + '?v=' + encodeURIComponent(buildId()) + '&retry=' + Date.now();
+    reloadedUrls[route] = url;
+    try {
+      window.CORPUS_APP.logDiagnostic('router: ' + globalName + ' is not registered, retrying ' + url);
+    } catch (e) { /* logging must never break navigation */ }
+
+    const loaded = await defaultScriptLoader(url);
+    const page = window[globalName];
+    if (!loaded) {
+      try {
+        window.CORPUS_APP.recordError(
+          'router.module-reload',
+          'Could not load ' + url + ' (network error or blocked script).',
+          null
+        );
+      } catch (e) { /* ignore */ }
+      return null;
+    }
+    if (!page || typeof page.render !== 'function') {
+      try {
+        window.CORPUS_APP.recordError(
+          'router.module-register',
+          url + ' loaded but did not register window.' + globalName + '.render (syntax/runtime error in the file).',
+          null
+        );
+      } catch (e) { /* ignore */ }
+      return null;
+    }
+    return page;
+  }
+
   function disposePage(route) {
     if (!route) return;
     const name = PAGE_MODULES[route];
@@ -253,6 +352,11 @@ window.router = (function () {
   function missingModulePanel(route, moduleName, iconClass) {
     const diag = lastRecordedScriptError();
     const globalName = PAGE_MODULES[route] || route;
+    const build = buildId();
+    const expectedScript = MODULE_SCRIPTS[route]
+      ? MODULE_SCRIPTS[route] + '?v=' + build
+      : '(no script mapped for this route)';
+    const retried = reloadedUrls[route];
     const globalState = globalName && typeof window[globalName] === 'undefined'
       ? 'The module global <code>window.' + escapeHtml(globalName) + '</code> is undefined — its script did not execute (failed download or a syntax/runtime error before registration).'
       : 'The module global exists, but its <code>render()</code> function is missing.';
@@ -270,6 +374,13 @@ window.router = (function () {
         <h3>${escapeHtml(moduleName)}</h3>
         <p>${escapeHtml(moduleName)} module not loaded.</p>
         <p style="font-size:var(--text-body-small);">${globalState}</p>
+        <div style="text-align:left; margin:var(--space-2) auto; max-width:640px; background:var(--color-bg-muted); color:var(--color-text-variant); padding:var(--space-3); border-radius:var(--radius-md); font-size:var(--text-caption); line-height:1.6;">
+          <div><strong>Frontend build:</strong> <code>${escapeHtml(build)}</code></div>
+          <div><strong>Expected script:</strong> <code>${escapeHtml(expectedScript)}</code></div>
+          <div><strong>Automatic recovery:</strong> ${retried
+            ? 're-requested <code>' + escapeHtml(retried) + '</code> and it still did not register. The script is missing on the server or contains a syntax/runtime error.'
+            : 'not attempted (module was present when the page loaded).'}</div>
+        </div>
         ${detail}
         <div class="form-actions" style="justify-content:center;">
           <button class="btn btn-outline" type="button" onclick="location.reload()">Reload page</button>
@@ -350,202 +461,90 @@ window.router = (function () {
     navigate(route);
   }
 
-  /* ---------- Page renderers (await async page modules) ---------- */
+  /* ---------- Page renderers ----------
 
-  async function renderDashboard() {
-    const container = window.CORPUS_APP.requirePageContainer('renderDashboard');
+     Every page follows the same contract: the module must exist as
+     `window.<global>` and expose `render()`. When it does not, the router first
+     tries to recover by re-requesting that one module script with a
+     cache-busting query (a stale Android/desktop cache, an interrupted
+     download or a half-written file leaves the global undefined), and only then
+     shows the diagnostics panel. That converts the "Datasets module not loaded"
+     dead end into a page that usually recovers by itself.
+  ------------------------------------------------------------------------ */
+
+  async function renderModulePage(route, moduleName, iconClass, fnName) {
+    const container = window.CORPUS_APP.requirePageContainer(fnName);
+    const globalName = PAGE_MODULES[route];
     try {
-      if (window.dashboard && typeof window.dashboard.render === 'function') {
-        await window.dashboard.render();
+      let page = globalName ? window[globalName] : null;
+      if (!page || typeof page.render !== 'function') {
+        page = await reloadPageModule(route);
+      }
+      if (page && typeof page.render === 'function') {
+        await page.render();
       } else {
-        container.innerHTML = missingModulePanel('dashboard', 'Dashboard', 'fa-home');
+        container.innerHTML = missingModulePanel(route, moduleName, iconClass);
       }
     } catch (err) {
-      window.CORPUS_APP.recordError('renderDashboard', err.message, err);
-      container.innerHTML = renderErrorPanel('dashboard', err);
+      window.CORPUS_APP.recordError(fnName, err.message, err);
+      container.innerHTML = renderErrorPanel(route, err);
     }
+  }
+
+  async function renderDashboard() {
+    return renderModulePage('dashboard', 'Dashboard', 'fa-home', 'renderDashboard');
   }
 
   async function renderModels() {
-    const container = window.CORPUS_APP.requirePageContainer('renderModels');
-    try {
-      if (window.models && typeof window.models.render === 'function') {
-        await window.models.render();
-      } else {
-        container.innerHTML = missingModulePanel('models', 'Models', 'fa-cube');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderModels', err.message, err);
-      container.innerHTML = renderErrorPanel('models', err);
-    }
+    return renderModulePage('models', 'Models', 'fa-cube', 'renderModels');
   }
 
   async function renderTraining() {
-    const container = window.CORPUS_APP.requirePageContainer('renderTraining');
-    try {
-      if (window.training && typeof window.training.render === 'function') {
-        await window.training.render();
-      } else {
-        container.innerHTML = missingModulePanel('training', 'Training Center', 'fa-flask');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderTraining', err.message, err);
-      container.innerHTML = renderErrorPanel('training', err);
-    }
+    return renderModulePage('training', 'Training Center', 'fa-flask', 'renderTraining');
   }
 
   async function renderStatistics() {
-    const container = window.CORPUS_APP.requirePageContainer('renderStatistics');
-    try {
-      if (window.statistics && typeof window.statistics.render === 'function') {
-        await window.statistics.render();
-      } else {
-        container.innerHTML = missingModulePanel('statistics', 'Statistics', 'fa-chart-line');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderStatistics', err.message, err);
-      container.innerHTML = renderErrorPanel('statistics', err);
-    }
+    return renderModulePage('statistics', 'Statistics', 'fa-chart-line', 'renderStatistics');
   }
 
   async function renderAIInformation() {
-    const container = window.CORPUS_APP.requirePageContainer('renderAIInformation');
-    try {
-      if (window.aiInfo && typeof window.aiInfo.render === 'function') {
-        await window.aiInfo.render();
-      } else {
-        container.innerHTML = missingModulePanel('ai-information', 'AI Information', 'fa-info-circle');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderAIInformation', err.message, err);
-      container.innerHTML = renderErrorPanel('ai-information', err);
-    }
+    return renderModulePage('ai-information', 'AI Information', 'fa-info-circle', 'renderAIInformation');
   }
 
   async function renderChat() {
-    const container = window.CORPUS_APP.requirePageContainer('renderChat');
-    try {
-      if (window.chat && typeof window.chat.render === 'function') {
-        await window.chat.render();
-      } else {
-        container.innerHTML = missingModulePanel('chat', 'AI Chat', 'fa-comments');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderChat', err.message, err);
-      container.innerHTML = renderErrorPanel('chat', err);
-    }
+    return renderModulePage('chat', 'AI Chat', 'fa-comments', 'renderChat');
   }
 
   async function renderPredictionLab() {
-    const container = window.CORPUS_APP.requirePageContainer('renderPredictionLab');
-    try {
-      if (window.prediction && typeof window.prediction.render === 'function') {
-        await window.prediction.render();
-      } else {
-        container.innerHTML = missingModulePanel('prediction-lab', 'Prediction Lab', 'fa-microscope');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderPredictionLab', err.message, err);
-      container.innerHTML = renderErrorPanel('prediction-lab', err);
-    }
+    return renderModulePage('prediction-lab', 'Prediction Lab', 'fa-microscope', 'renderPredictionLab');
   }
 
   async function renderNeuralLab() {
-    const container = window.CORPUS_APP.requirePageContainer('renderNeuralLab');
-    try {
-      if (window.neuralLab && typeof window.neuralLab.render === 'function') {
-        await window.neuralLab.render();
-      } else {
-        container.innerHTML = missingModulePanel('neural-lab', 'Neural Lab', 'fa-microchip');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderNeuralLab', err.message, err);
-      container.innerHTML = renderErrorPanel('neural-lab', err);
-    }
+    return renderModulePage('neural-lab', 'Neural Lab', 'fa-microchip', 'renderNeuralLab');
   }
 
   async function renderDatasets() {
-    const container = window.CORPUS_APP.requirePageContainer('renderDatasets');
-    try {
-      if (window.datasets && typeof window.datasets.render === 'function') {
-        await window.datasets.render();
-      } else {
-        container.innerHTML = missingModulePanel('datasets', 'Datasets', 'fa-database');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderDatasets', err.message, err);
-      container.innerHTML = renderErrorPanel('datasets', err);
-    }
+    return renderModulePage('datasets', 'Datasets', 'fa-database', 'renderDatasets');
   }
 
   async function renderEvaluation() {
-    const container = window.CORPUS_APP.requirePageContainer('renderEvaluation');
-    try {
-      if (window.evaluation && typeof window.evaluation.render === 'function') {
-        await window.evaluation.render();
-      } else {
-        container.innerHTML = missingModulePanel('evaluation', 'Evaluation', 'fa-check-double');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderEvaluation', err.message, err);
-      container.innerHTML = renderErrorPanel('evaluation', err);
-    }
+    return renderModulePage('evaluation', 'Evaluation', 'fa-check-double', 'renderEvaluation');
   }
 
   async function renderCompute() {
-    const container = window.CORPUS_APP.requirePageContainer('renderCompute');
-    try {
-      if (window.compute && typeof window.compute.render === 'function') {
-        await window.compute.render();
-      } else {
-        container.innerHTML = missingModulePanel('compute', 'Compute', 'fa-server');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderCompute', err.message, err);
-      container.innerHTML = renderErrorPanel('compute', err);
-    }
+    return renderModulePage('compute', 'Compute', 'fa-server', 'renderCompute');
   }
 
   async function renderStorage() {
-    const container = window.CORPUS_APP.requirePageContainer('renderStorage');
-    try {
-      if (window.storage && typeof window.storage.render === 'function') {
-        await window.storage.render();
-      } else {
-        container.innerHTML = missingModulePanel('cloud-storage', 'Cloud Storage', 'fa-cloud');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderStorage', err.message, err);
-      container.innerHTML = renderErrorPanel('cloud-storage', err);
-    }
+    return renderModulePage('cloud-storage', 'Cloud Storage', 'fa-cloud', 'renderStorage');
   }
 
   async function renderExperiments() {
-    const container = window.CORPUS_APP.requirePageContainer('renderExperiments');
-    try {
-      if (window.experiments && typeof window.experiments.render === 'function') {
-        await window.experiments.render();
-      } else {
-        container.innerHTML = missingModulePanel('experiments', 'Experiments', 'fa-flask');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderExperiments', err.message, err);
-      container.innerHTML = renderErrorPanel('experiments', err);
-    }
+    return renderModulePage('experiments', 'Experiments', 'fa-flask', 'renderExperiments');
   }
 
   async function renderSettings() {
-    const container = window.CORPUS_APP.requirePageContainer('renderSettings');
-    try {
-      if (window.settings && typeof window.settings.render === 'function') {
-        await window.settings.render();
-      } else {
-        container.innerHTML = missingModulePanel('settings', 'Settings', 'fa-cog');
-      }
-    } catch (err) {
-      window.CORPUS_APP.recordError('renderSettings', err.message, err);
-      container.innerHTML = renderErrorPanel('settings', err);
-    }
+    return renderModulePage('settings', 'Settings', 'fa-cog', 'renderSettings');
   }
 
   async function renderAuth() {

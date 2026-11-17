@@ -104,6 +104,36 @@ window.CORPUS_BOOTSTRAP = (function () {
       return false;
     }
     log('All required modules present');
+
+    // Page modules are optional for boot but each one that failed to register
+    // is named here, with the script that should have defined it, so the
+    // console says exactly which file is broken instead of leaving the user
+    // with a generic "module not loaded" page later. The router can also
+    // recover such a module on demand (see frontend/js/router.js).
+    const pageModules = {
+      dashboard: 'js/dashboard.js',
+      models: 'js/models.js',
+      training: 'js/training.js',
+      statistics: 'js/statistics.js',
+      aiInfo: 'js/ai-information.js',
+      chat: 'js/chat.js',
+      prediction: 'js/prediction.js',
+      neuralLab: 'js/neural-lab.js',
+      datasets: 'js/datasets.js',
+      evaluation: 'js/evaluation.js',
+      compute: 'js/compute.js',
+      storage: 'js/storage.js',
+      experiments: 'js/experiments.js',
+      settings: 'js/settings.js',
+    };
+    const missingPages = Object.keys(pageModules).filter(name => typeof window[name] === 'undefined');
+    if (missingPages.length) {
+      error('Page modules not registered: ' +
+        missingPages.map(name => name + ' (' + pageModules[name] + ')').join(', ') +
+        ' — those pages will try to reload their script, then show diagnostics.');
+    } else {
+      log('All page modules registered');
+    }
     return true;
   }
 

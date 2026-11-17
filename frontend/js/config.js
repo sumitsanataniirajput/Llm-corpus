@@ -39,6 +39,12 @@ window.CORPUS_CONFIG = {
   APP_NAME: 'CORPUS ULTIMATE',
   APP_VERSION: '1.0.0',
 
+  // Must match frontend/version.json buildId and the ?v= query on every local
+  // CSS/JS in index.html. Used to cache-bust a page module the router has to
+  // re-request when one failed to register. Enforced by
+  // frontend/tests/build-id.test.mjs.
+  BUILD_ID: '2026-11-16.6',
+
   // Default model configuration (small, CPU-friendly)
   DEFAULT_MODEL_CONFIG: {
     vocab_size: 5000,

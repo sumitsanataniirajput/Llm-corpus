@@ -48,7 +48,7 @@ Expected:
 ```json
 {
   "service": "corpus-ultimate-api",
-  "build_id": "2026-11-17.1",
+  "build_id": "2026-11-16.5",
   "commit": "<sha of the newest commit on main>",
   "branch": "main",
   "features": [
@@ -75,7 +75,7 @@ service is running an old build:
    re-check *Settings → Repository* and the URL you curl.
 
 A missing `/api/v1/version` route (404) is itself proof of an old build: the
-route only exists from commit that introduced `build_id 2026-11-17.1` onward.
+route only exists from commit that introduced the version endpoint onward.
 
 ---
 
@@ -109,6 +109,16 @@ It checks:
 
    `index.html` also requests every local stylesheet/script with
    `?v=<buildId>`, so a stale browser cache can no longer hide a shipped fix.
+   The same id lives in `frontend/version.json`, `CORPUS_CONFIG.BUILD_ID` and
+   `<meta name="corpus-build">`; `frontend/tests/build-id.test.mjs` fails if
+   they ever drift.
+
+   If a page still cannot find its module (a phone with a poisoned cache, a
+   truncated download), the router re-requests that single script once as
+   `js/<page>.js?v=<buildId>&retry=<timestamp>` and renders the page if it
+   registers. Only if that also fails does it show the diagnostics panel, which
+   now prints the frontend build id, the expected script URL, the last captured
+   error (file:line) and whether the automatic retry ran.
 
 Render's free-tier “Application loading” splash is retried, not reported as a
 broken service. Output names the exact stale artefact, e.g.:
@@ -116,7 +126,7 @@ broken service. Output names the exact stale artefact, e.g.:
 ```
 RESULT: the live deployment does NOT match this checkout.
 - <api>/api/v1/version -> 404 Not Found. The running API does not expose the version route at all,
-  so it is OLDER than build 2026-11-17.1: redeploy corpus-ultimate-api from main
+  so it is OLDER than the build on main: redeploy corpus-ultimate-api from main
 ```
 
 `.github/workflows/verify-deployment.yml` runs it on every push to `main`
@@ -237,7 +247,7 @@ phone:
    input, so there is no label/JS double activation).
 4b. Hard-refresh (Chrome ⋮ → Reload) and repeat: local assets are requested as
    `css/…?v=<buildId>`, so the old stylesheet must not be reused. In DevTools
-   remote debugging the network panel must show `?v=2026-11-17.1`.
+   remote debugging the network panel must show `?v=2026-11-16.6`.
 5. Select one `.txt` file → it appears once in the upload queue → **Upload** →
    progress reaches 100% and the dataset shows `uploaded`.
 6. Select a `.pdf` file → same flow.
@@ -268,8 +278,37 @@ layout scales instead of stretching. Check, at each size, that:
 `frontend/tests/responsive-layout.test.mjs` pins all of the above to the
 stylesheet; it runs in `npm test`.
 
+---
+
+## 7c. Datasets page acceptance (the reported failure)
+
+The symptom was the Datasets page showing **"Datasets module not loaded."**
+with no usable detail. Walk the whole path on the deployed site:
+
+1. `GET <WEB>/version.json` → `buildId` equals `frontend/version.json` on main.
+2. `GET <WEB>/js/datasets.js?v=<that buildId>` → **HTTP 200** and the body
+   contains `window.datasets`.
+3. `GET <WEB>/js/router.js` → contains `CORPUS_MODULE_LOADER` (the recovery
+   loader) and `Automatic recovery` (the diagnostics panel).
+4. Open the site signed in → **Datasets**: the page must show the Dataset
+   Manager (Upload dataset, drop zone, dataset-name field, queue, library),
+   never the missing-module panel.
+5. On Android: **Upload dataset** → tap the zone → Files opens → pick a `.txt`
+   → it appears once in the queue → enter a name → **Upload** → progress runs
+   → the dataset appears in the library with status `uploaded`.
+6. Reload the page while a file is queued (before uploading) → the queue and
+   the dataset name come back from IndexedDB.
+7. **Training Center** → pick that dataset → *Start training* is enabled only
+   when the dataset has an uploaded file → the created job reports the real
+   `dataset_id` and, once it runs, real metrics/checkpoints appear.
+
+If step 4 still shows the panel, the panel itself now names the frontend build,
+the exact script URL it expected, the last captured JS error (file:line) and
+whether the automatic retry ran — paste that, it identifies the broken file
+without guesswork.
+
 `GET https://corpus-ultimate-web.onrender.com/version.json` must already show
-`buildId 2026-11-17.1` before you test — otherwise you are testing the old CSS.
+`buildId 2026-11-16.6` before you test — otherwise you are testing the old CSS.
 
 ---
 
@@ -317,6 +356,6 @@ this one — is invisible to users.
 Both also need to be re-checked after the redeploy:
 
 ```bash
-curl -s https://corpus-ultimate-api.onrender.com/api/v1/version   # build_id 2026-11-17.1 + commit == main
-curl -s https://corpus-ultimate-web.onrender.com/version.json     # buildId 2026-11-17.1
+curl -s https://corpus-ultimate-api.onrender.com/api/v1/version   # build_id == backend BUILD_ID on main, commit == main
+curl -s https://corpus-ultimate-web.onrender.com/version.json     # buildId == frontend/version.json on main
 ```

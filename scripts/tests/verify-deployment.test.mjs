@@ -69,6 +69,7 @@ function json(res, status, body) {
 // assets, so a "current" mock site really does look like a current deployment.
 const SHIPPED_ASSETS = {
   '/js/datasets.js': 'const overlay = "drop-zone-input"; const zone = "datasets-drop";',
+  '/js/router.js': 'if (typeof window.CORPUS_MODULE_LOADER === \'function\') { /* recovery */ }',
   '/css/responsive.css': '@media (min-aspect-ratio: 21/9) and (min-width: 1600px) { :root { --page-max: min(2100px, 78vw); } }',
   '/index.html': '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">',
 };
@@ -131,6 +132,7 @@ test('a stale deployment fails with an actionable message', async () => {
     assert.match(result.stdout, /predate the\s+mobile file-picker overlay/);
     assert.match(result.stdout, /predate the\s+large-display \/ TV scaling breakpoints/);
     assert.match(result.stdout, /picker overlay served\s+no/);
+    assert.match(result.stdout, /module recovery served\s+no/);
   } finally {
     await site.close();
   }
