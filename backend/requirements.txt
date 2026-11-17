@@ -15,6 +15,9 @@ alembic==1.13.1
 # Supabase
 supabase==2.34.1
 
+# Keep NumPy 1.x for compatibility with the pinned PyTorch 2.1.0 binary.
+numpy==1.26.4
+
 # PyTorch (CPU version — install CUDA variant separately if needed)
 torch==2.1.0
 
