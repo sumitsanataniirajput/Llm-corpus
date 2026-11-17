@@ -55,6 +55,7 @@ class PyTorchTrainer:
                         "loss": float(loss.item() * accum_steps),
                         "batch": i + 1,
                         "batches": total_batches,
+                        "tokens": int(input_ids.numel()),
                     })
             total_loss += loss.item() * accum_steps
             n_batches += 1
