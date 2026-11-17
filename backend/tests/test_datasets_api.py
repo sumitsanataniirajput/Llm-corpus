@@ -209,3 +209,59 @@ async def test_failed_storage_upload_marks_dataset_failed_and_allows_retry(http,
     assert ok_resp.status_code == 200, ok_resp.text
     assert ok_resp.json()["dataset"]["status"] == "uploaded"
     assert ok_resp.json()["dataset"]["has_file"] is True
+
+
+@pytest.mark.asyncio
+async def test_storage_transfer_runs_off_the_event_loop(http, storage, monkeypatch):
+    """The synchronous Supabase SDK must not block the API's event loop.
+
+    A blocking upload stalls every other request (health checks, token refresh,
+    dataset listing) for the whole transfer, which the UI reports as "backend
+    unavailable" and — on the resulting 401s — as being signed out.
+    """
+    import threading
+
+    from tests.fakes import FakeBucket
+
+    dataset = await _create_dataset(http, name="Threaded upload")
+    seen = {}
+    original_upload = FakeBucket.upload
+
+    def recording_upload(self, path, data, file_options=None):
+        seen["main"] = threading.current_thread() is threading.main_thread()
+        return original_upload(self, path, data, file_options)
+
+    monkeypatch.setattr(FakeBucket, "upload", recording_upload)
+
+    payload = await _upload(http, dataset["id"], content=b"threaded body\n" * 5, filename="threaded.txt")
+    assert payload["ok"] is True
+    assert seen.get("main") is False, "the storage call must run in a worker thread, not the event loop"
+
+
+@pytest.mark.asyncio
+async def test_metadata_write_failure_removes_the_uploaded_object(http, storage, monkeypatch):
+    """A failed dataset_files insert must not leave an orphaned private object."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    dataset = await _create_dataset(http, name="Rollback upload")
+    real_execute = AsyncSession.execute
+
+    async def patched_execute(self, statement, *args, **kwargs):
+        if "INSERT INTO public.dataset_files" in str(statement):
+            raise RuntimeError("simulated metadata write failure")
+        return await real_execute(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", patched_execute)
+
+    files = {"file": ("rollback.txt", b"rollback body\n" * 4, "text/plain")}
+    resp = await http.post(f"/api/v1/datasets/{dataset['id']}/upload", files=files)
+    monkeypatch.undo()
+
+    assert resp.status_code == 500, resp.text
+    assert "rolled back" in resp.json()["detail"].lower()
+    assert storage.paths(settings.STORAGE_BUCKET) == [], "the orphaned object was removed"
+
+    listed = await http.get("/api/v1/datasets/")
+    stored = [d for d in listed.json() if d["id"] == dataset["id"]][0]
+    assert stored["status"] == "failed"
+    assert stored["has_file"] is False
