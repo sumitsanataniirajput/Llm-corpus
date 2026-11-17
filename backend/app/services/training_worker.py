@@ -168,7 +168,7 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
     def report_optimizer_step(step_data):
         nonlocal processed_tokens
         _check_not_stopped(current_job_id)
-        processed_tokens += int(step_data.get("batch", 1)) * int(loader.batch_size or 1) * context
+        processed_tokens += int(step_data.get("tokens") or (int(loader.batch_size or 1) * context))
         elapsed = max(time.monotonic() - started, 0.001)
         metric = {
             "step": int(step_data["step"]),
