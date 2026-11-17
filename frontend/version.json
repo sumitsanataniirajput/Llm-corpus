@@ -1,14 +1,15 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-16.7",
+  "buildId": "2026-11-17.2",
   "sourceRef": "main",
   "notes": [
+    "Android file picker: replaced the transparent full-zone input overlay with a visible native file control, removed the synthetic zone-click fallback and click-time input reset, and retained the change-event queue/persistence flow.",
     "Authentication fix: a backend 401 no longer signs the user out. The session is cleared only when Supabase itself has no session; when the backend rejects a token that Supabase still holds (expired access token, mismatched publishable key, misconfigured backend) the API raises a 'backend rejected your session' error and keeps the user signed in (frontend/js/api.js).",
     "Navigation fix: Supabase re-emits SIGNED_IN when it restores or refreshes a stored session (page reload, token refresh, returning from the Android file picker). Only an interactive sign-in from this page now navigates to Dashboard; restored sessions re-render the current route instead (frontend/js/auth.js).",
     "Upload reliability: uploads have a real timeout (CORPUS_CONFIG.UPLOAD_TIMEOUT_MS, default 10 minutes instead of the 15 s JSON request timeout), refresh the access token once and retry the same dataset record on 401, and report explicit network/timeout/401/413/503 messages that state the dataset record is kept for retry (frontend/js/api.js).",
     "Backend: the synchronous Supabase Storage SDK calls (dataset upload, dataset preview download, training dataset download, checkpoint/tokenizer upload) run in a worker thread instead of blocking the event loop, so a large transfer no longer stalls health checks, token refreshes or dataset listing for other requests.",
-    "Backend: if the dataset_files metadata write fails after the bytes reached storage, the object is deleted again and the dataset is marked failed \u2014 private storage never keeps uploads the database does not know about, and the API never reports success for a file it cannot serve."
+    "Backend: if the dataset_files metadata write fails after the bytes reached storage, the object is deleted again and the dataset is marked failed — private storage never keeps uploads the database does not know about, and the API never reports success for a file it cannot serve."
   ],
-  "howToVerify": "GET <frontend-url>/version.json \u2014 the deployed buildId must equal the buildId committed in frontend/version.json on main."
+  "howToVerify": "GET <frontend-url>/version.json — the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }
