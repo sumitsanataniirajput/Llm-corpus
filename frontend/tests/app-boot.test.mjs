@@ -150,11 +150,6 @@ function bootApp({ datasets = [], hash = '#/datasets' } = {}) {
     return jsonResponse({ detail: 'not found: ' + route }, 404);
   };
 
-  window.CORPUS_SUPABASE = {
-    getSession: async () => ({ data: { session: { access_token: 'test-token', user: { id: 'user-1' } } } }),
-    init() {},
-  };
-
   // --- load the real scripts in document order ----------------------------
   const loaded = [];
   for (const rel of localScripts()) {
@@ -168,6 +163,21 @@ function bootApp({ datasets = [], hash = '#/datasets' } = {}) {
     }
     loaded.push(rel);
   }
+
+  // supabase-client.js defines window.CORPUS_SUPABASE while loading, so the
+  // network-free stub must be installed *after* the scripts run.
+  window.CORPUS_SUPABASE = {
+    getSession: async () => ({ data: { session: { access_token: 'test-token', user: { id: 'user-1' } } } }),
+    init() {},
+    signIn: async () => ({ data: { session: { access_token: 'test-token', user: { id: 'user-1', email: 'tester@example.com' } } }, error: null }),
+    signOut: async () => ({}),
+    // auth.init() subscribes here; the tests fire the events Supabase would.
+    onAuthStateChange(cb) {
+      window.__authStateCallbacks = window.__authStateCallbacks || [];
+      window.__authStateCallbacks.push(cb);
+      return { unsubscribe() {} };
+    },
+  };
 
   // In production the bootstrap hands the container to CORPUS_APP before the
   // first render; do the same here so the router's requirePageContainer works.
@@ -325,5 +335,54 @@ test('an unrecoverable module shows diagnostics with build id, script URL and re
   assert.match(text, /Expected script:\s*js\/datasets\.js\?v=/);
   assert.match(text, /Automatic recovery:\s*re-requested/);
   assert.equal(requested.length, 1);
+  app.dom.window.close();
+});
+
+test('a Supabase SIGNED_IN event on reload does not yank the user to the dashboard', async () => {
+  const app = bootApp();
+  await startApp(app);
+  await goTo(app.window, 'datasets');
+
+  const container = app.doc.getElementById('page-container');
+  assert.match(container.textContent, /Dataset Manager/);
+  assert.equal(app.window.location.hash, '#/datasets');
+
+  // supabase-js re-emits SIGNED_IN when it restores/refreshes a stored session
+  // (page reload, token refresh, coming back from the Android file picker).
+  // That must not be treated as a fresh login.
+  const cbs = app.window.__authStateCallbacks || [];
+  assert.ok(cbs.length > 0, 'auth.init() subscribed to auth state changes');
+  cbs.forEach((cb) => cb('SIGNED_IN', { user: { id: 'user-1', email: 'tester@example.com' } }));
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  assert.equal(app.window.location.hash, '#/datasets', 'the current route is preserved');
+  assert.match(app.doc.getElementById('page-container').textContent, /Dataset Manager/);
+  assert.doesNotMatch(app.doc.body.textContent, /Sign in required/i);
+  app.dom.window.close();
+});
+
+test('TOKEN_REFRESHED keeps the page and the signed-in user', async () => {
+  const app = bootApp();
+  await startApp(app);
+  await goTo(app.window, 'datasets');
+
+  const cbs = app.window.__authStateCallbacks || [];
+  cbs.forEach((cb) => cb('TOKEN_REFRESHED', { user: { id: 'user-1', email: 'tester@example.com' } }));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.equal(app.window.location.hash, '#/datasets');
+  assert.equal(app.window.state.getUser().id, 'user-1');
+  app.dom.window.close();
+});
+
+test('reloading on the dataset page restores that page instead of the dashboard', async () => {
+  const app = bootApp();
+  // The previous page life stored the route before the browser reloaded
+  // (Android can recreate the page after the file picker closes).
+  app.window.sessionStorage.setItem('corpus:last-route', 'datasets');
+  await startApp(app);
+
+  assert.equal(app.window.location.hash, '#/datasets', 'the saved route is restored into the URL');
+  assert.match(app.doc.getElementById('page-container').textContent, /Dataset Manager/);
   app.dom.window.close();
 });

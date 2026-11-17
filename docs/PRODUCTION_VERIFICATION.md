@@ -247,7 +247,7 @@ phone:
    input, so there is no label/JS double activation).
 4b. Hard-refresh (Chrome ⋮ → Reload) and repeat: local assets are requested as
    `css/…?v=<buildId>`, so the old stylesheet must not be reused. In DevTools
-   remote debugging the network panel must show `?v=2026-11-16.6`.
+   remote debugging the network panel must show `?v=2026-11-16.7`.
 5. Select one `.txt` file → it appears once in the upload queue → **Upload** →
    progress reaches 100% and the dataset shows `uploaded`.
 6. Select a `.pdf` file → same flow.
@@ -308,7 +308,7 @@ whether the automatic retry ran — paste that, it identifies the broken file
 without guesswork.
 
 `GET https://corpus-ultimate-web.onrender.com/version.json` must already show
-`buildId 2026-11-16.6` before you test — otherwise you are testing the old CSS.
+`buildId 2026-11-16.7` before you test — otherwise you are testing the old CSS.
 
 ---
 
@@ -359,3 +359,30 @@ Both also need to be re-checked after the redeploy:
 curl -s https://corpus-ultimate-api.onrender.com/api/v1/version   # build_id == backend BUILD_ID on main, commit == main
 curl -s https://corpus-ultimate-web.onrender.com/version.json     # buildId == frontend/version.json on main
 ```
+
+---
+
+## 9. Session & upload regression checklist (build 2026-11-16.7)
+
+These are the behaviours the authentication/upload repair guarantees. Every one
+of them is covered by an automated test where the flow is testable without a
+real phone; the mobile-only rows still need a manual pass on the deployed build.
+
+| # | Scenario | Expected | Automated coverage |
+|---|---|---|---|
+| 1 | Sign in | Dashboard opens once, no duplicate navigation | `frontend/tests/app-boot.test.mjs` (interactive sign-in) |
+| 2 | Upload `.csv` / `.json` / `.jsonl` / `.txt` | One dataset per file, `status=uploaded`, file present in the private bucket | `frontend/tests/dataset-upload.test.mjs`, `backend/tests/test_datasets_api.py` |
+| 3 | Reload after login | Session restored, same user, no login screen | `frontend/tests/app-boot.test.mjs`, `session-and-upload.test.mjs` |
+| 4 | Reload after upload | Dataset still listed with its file metadata (not `pending`) | `backend/tests/test_datasets_api.py::test_list_datasets_includes_latest_file_metadata` |
+| 5 | Reload on the Datasets page | Datasets page is restored, not Dashboard | `frontend/tests/app-boot.test.mjs` (last-route restore) |
+| 6 | Upload failure | Clear message, dataset record kept, retry reuses the same id (no duplicate) | `frontend/tests/dataset-upload.test.mjs`, `session-and-upload.test.mjs` |
+| 7 | Expired access token during upload | Token refreshed once, upload retried, session stays signed in | `frontend/tests/session-and-upload.test.mjs` (401 → refresh → retry) |
+| 8 | Backend 401 while Supabase session valid | No logout; error says the session is still valid | `frontend/tests/session-and-upload.test.mjs` |
+| 9 | Dataset listing | Owner sees their datasets only; storage path is under `<owner>/datasets/<id>/` | `backend/tests/test_datasets_api.py` |
+| 10 | Start training can read the dataset | Worker downloads the stored file, verifies the checksum, extracts text | `backend/tests/test_full_training_flow.py`, `test_training_worker_flow.py` |
+| 11 | Ownership isolation | Another user cannot list, read, preview or delete the dataset | `backend/tests/test_datasets_api.py` (403/404 cases) |
+| 12 | Metadata write failure after storage upload | 500, orphaned object removed, dataset `failed` (never `uploaded`) | `backend/tests/test_datasets_api.py::test_metadata_write_failure_removes_the_uploaded_object` |
+
+Deployment note: the frontend and the backend must be deployed **together**.
+The frontend tolerates the older backend, but the upload timeout/refresh path
+and the non-blocking storage calls only take effect once the API is redeployed.
