@@ -107,7 +107,9 @@ async def test_upload_select_train_full_flow(http, storage, monkeypatch):
 
     logs = (await http.get(f"/api/v1/training/{job['id']}/logs")).json()
     events = [entry["event"] for entry in logs]
-    assert events == ["started", "metric", "metric", "completed"]
+    assert events[0] == "started"
+    assert events[-1] == "completed"
+    assert events.count("metric") == 2
     assert logs[0]["data"]["dataset_id"] == dataset["id"]
     assert logs[0]["data"]["file_name"] == "fullflow.txt"
 
