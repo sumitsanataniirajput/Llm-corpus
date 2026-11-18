@@ -1761,3 +1761,247 @@
 .chat-settings-details[open] .chat-settings-summary::after { transform: rotate(180deg); }
 .chat-settings-details[open] .chat-settings-summary { color: var(--color-text); }
 
+
+/* ========================================
+   Live progress (Training page) and device panels
+   ======================================== */
+
+.job-progress-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  min-width: 0;
+}
+
+.job-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.job-progress-stage {
+  font-size: var(--text-body-small);
+  font-weight: 600;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.job-progress-percent {
+  color: var(--color-text-variant);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-progress-track,
+.job-row-progress,
+.device-progress {
+  position: relative;
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-surface-alt, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--color-border);
+  min-width: 0;
+}
+
+.job-progress-track > span,
+.job-row-progress > span,
+.device-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent, var(--color-primary)));
+  transition: width 0.35s ease;
+}
+
+/* An unmeasurable stage says so instead of drawing a fake percentage. */
+.job-progress-track.indeterminate > span,
+.job-row-progress.indeterminate > span,
+.device-progress-indeterminate::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: 35%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  animation: corpus-indeterminate 1.6s ease-in-out infinite;
+}
+
+@keyframes corpus-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-progress-track.indeterminate > span,
+  .job-row-progress.indeterminate > span,
+  .device-progress-indeterminate::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+  }
+  .job-progress-track > span,
+  .job-row-progress > span,
+  .device-progress > span { transition: none; }
+}
+
+.job-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: var(--text-label-small);
+  color: var(--color-text-muted);
+}
+
+.job-row-stage {
+  font-size: var(--text-label-small);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.job-row-progress { margin: var(--space-1) 0 4px; }
+
+.job-row-percent {
+  display: block;
+  font-size: var(--text-label-small);
+  color: var(--color-text-variant);
+  margin-bottom: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-1);
+}
+
+/* ---------- Device pages ---------- */
+
+.device-panel { margin-bottom: var(--space-4); }
+
+.device-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--text-label-small);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.device-status i { font-size: 0.45rem; }
+.device-status-online { color: var(--color-success, #4ade80); border-color: var(--color-success, #4ade80); }
+.device-status-busy { color: var(--color-primary); border-color: var(--color-primary); }
+.device-status-paused { color: var(--color-warning, #fbbf24); border-color: var(--color-warning, #fbbf24); }
+.device-status-offline { color: var(--color-text-muted); }
+
+.device-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.kv-grid-compact { gap: var(--space-2) var(--space-3); }
+
+.device-card-actions,
+.device-assign-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.device-assign-row select { flex: 1 1 160px; min-width: 0; }
+
+.device-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.device-toggle {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.device-toggle strong { font-size: var(--text-body-small); color: var(--color-text); display: block; }
+.device-toggle .field-hint { display: block; margin: 0; }
+
+.device-warnings {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-label-small);
+  color: var(--color-text-muted);
+}
+
+.device-warnings li { display: flex; gap: 0.4rem; align-items: flex-start; overflow-wrap: anywhere; }
+.device-warnings i { color: var(--color-warning, #fbbf24); margin-top: 2px; }
+
+.device-mini-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.device-mini-list li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; min-width: 0; }
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--space-3);
+}
+
+.mode-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  min-width: 0;
+}
+
+.mode-card h3 {
+  font-size: var(--text-body-medium);
+  margin: 0 0 var(--space-1);
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.job-progress-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.device-task-list {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  font-size: var(--text-label-small);
+  color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}

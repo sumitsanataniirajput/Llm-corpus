@@ -43,6 +43,8 @@ window.router = (function () {
     datasets: 'datasets',
     evaluation: 'evaluation',
     compute: 'compute',
+    'device-compute': 'devices',
+    'multi-device': 'devices',
     'cloud-storage': 'storage',
     experiments: 'experiments',
     settings: 'settings',
@@ -63,6 +65,8 @@ window.router = (function () {
     datasets: 'js/datasets.js',
     evaluation: 'js/evaluation.js',
     compute: 'js/compute.js',
+    'device-compute': 'js/devices.js',
+    'multi-device': 'js/devices.js',
     'cloud-storage': 'js/storage.js',
     experiments: 'js/experiments.js',
     settings: 'js/settings.js',
@@ -172,6 +176,8 @@ window.router = (function () {
     datasets: renderDatasets,
     evaluation: renderEvaluation,
     compute: renderCompute,
+    'device-compute': renderDeviceCompute,
+    'multi-device': renderMultiDevice,
     'cloud-storage': renderStorage,
     experiments: renderExperiments,
     settings: renderSettings,
@@ -195,6 +201,8 @@ window.router = (function () {
       { route: 'datasets', label: 'Datasets', icon: 'fa-database' },
       { route: 'evaluation', label: 'Evaluation', icon: 'fa-check-double' },
       { route: 'compute', label: 'Compute', icon: 'fa-server' },
+      { route: 'device-compute', label: 'Device Compute', icon: 'fa-microchip' },
+      { route: 'multi-device', label: 'Multi-Device Training', icon: 'fa-network-wired' },
       { route: 'cloud-storage', label: 'Cloud Storage', icon: 'fa-cloud' },
       { route: 'experiments', label: 'Experiments', icon: 'fa-flask' },
       { route: 'settings', label: 'Settings', icon: 'fa-cog' },
@@ -479,6 +487,7 @@ window.router = (function () {
             'Statistics': 'statistics', 'AI Information': 'ai-information', 'AI Chat': 'chat',
             'Prediction Lab': 'prediction-lab', 'Neural Lab': 'neural-lab', 'Datasets': 'datasets',
             'Evaluation': 'evaluation', 'Compute': 'compute', 'Cloud Storage': 'cloud-storage',
+            'Device Compute': 'device-compute', 'Multi-Device Training': 'multi-device',
             'Experiments': 'experiments', 'Settings': 'settings',
           };
           item.classList.toggle('active', known[label.textContent] === route);
@@ -577,6 +586,14 @@ window.router = (function () {
 
   async function renderCompute() {
     return renderModulePage('compute', 'Compute', 'fa-server', 'renderCompute');
+  }
+
+  async function renderDeviceCompute() {
+    return renderModulePage('device-compute', 'Device Compute', 'fa-microchip', 'renderDeviceCompute');
+  }
+
+  async function renderMultiDevice() {
+    return renderModulePage('multi-device', 'Multi-Device Training', 'fa-network-wired', 'renderMultiDevice');
   }
 
   async function renderStorage() {
