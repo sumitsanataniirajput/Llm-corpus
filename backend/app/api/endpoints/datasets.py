@@ -317,10 +317,11 @@ async def create_dataset_upload_session(
     bucket_api = storage.storage.from_(settings.STORAGE_BUCKET)
     object_path = f"{owner_id}/datasets/{dataset_id}/{uuid.uuid4().hex}_{safe_name}"
     try:
+        # Supabase Python SDK 2.34.x exposes create_signed_upload_url(path);
+        # its default is upsert=false, which is what this unique path requires.
         signed = await asyncio.to_thread(
             bucket_api.create_signed_upload_url,
             object_path,
-            {"upsert": "false"},
         )
         if isinstance(signed, dict) and isinstance(signed.get("data"), dict):
             signed = signed["data"]
