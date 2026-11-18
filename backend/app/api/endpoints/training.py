@@ -311,24 +311,68 @@ async def _set_job_status(db: AsyncSession, job_id: str, owner_id: uuid.UUID, st
 @router.post("/{job_id}/pause", tags=["training"])
 async def pause_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    status = await _set_job_status(db, job_id, owner_id, "pausing")
-    return {"ok": True, "status": status}
+    from app.services import training_worker
+
+    job = await _get_owned_job(db, job_id, owner_id)
+    if job.status == "paused":
+        return {"ok": True, "status": "paused", "signaled": True}
+    if job.status not in {"running", "pausing"}:
+        raise HTTPException(status_code=409, detail=f"Cannot pause a job in '{job.status}' state.")
+    if not training_worker.request_job_pause(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="The training worker is not active in this server. Refresh the job status before retrying.",
+        )
+    job.status = "pausing"
+    job.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "status": job.status, "signaled": True}
 
 
 @router.post("/{job_id}/resume", tags=["training"])
 async def resume_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
-    status = await _set_job_status(db, job_id, owner_id, "running")
-    return {"ok": True, "status": status}
+    from app.services import training_worker
+
+    job = await _get_owned_job(db, job_id, owner_id)
+    if job.status == "running":
+        return {"ok": True, "status": "running", "signaled": True}
+    if job.status not in {"paused", "pausing"}:
+        raise HTTPException(status_code=409, detail=f"Cannot resume a job in '{job.status}' state.")
+    if not training_worker.request_job_resume(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="The paused worker is no longer active in this server. Refresh the job status before retrying.",
+        )
+    job.status = "running"
+    job.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "status": job.status, "signaled": True}
 
 
 @router.post("/{job_id}/stop", tags=["training"])
 async def stop_job(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
     from app.services import training_worker
+
     job = await _get_owned_job(db, job_id, owner_id)
+    if job.status in TERMINAL_STATUSES:
+        return {"ok": True, "status": job.status, "signaled": False}
+    if job.status == "stopping":
+        return {"ok": True, "status": "stopping", "signaled": True}
+
     signaled = training_worker.request_job_stop(job_id)
-    next_status = "stopping" if (signaled or job.status == "running") else "stopped"
+    if job.status == "queued" and not signaled:
+        # The background worker may not have registered yet. Persist a terminal
+        # state; when its task starts it checks this value before doing work.
+        next_status = "stopped"
+    elif signaled:
+        next_status = "stopping"
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail="The training worker is not active in this server. The job was not marked as stopping.",
+        )
     job.status = next_status
     job.updated_at = datetime.now(timezone.utc)
     await db.commit()
