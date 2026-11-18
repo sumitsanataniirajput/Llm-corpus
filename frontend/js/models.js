@@ -43,7 +43,7 @@ window.models = (function () {
           <p class="section-subtitle">Create, inspect and train CORPUS language models. Architecture values come from each saved model record.</p>
         </div>
         <div class="page-header-actions">
-          <button class="btn btn-outline" type="button" onclick="models.loadModels()">
+          <button class="btn btn-outline" type="button" onclick="models.loadModels(this)">
             <i class="fas fa-rotate"></i> Refresh
           </button>
           <button class="btn btn-primary" type="button" onclick="models.openCreateModal()">
@@ -150,7 +150,20 @@ window.models = (function () {
     await loadModels();
   }
 
-  async function loadModels() {
+  async function loadModels(sourceButton) {
+    // A visible refresh control must show that it is working; the page load
+    // itself calls this without a button.
+    if (sourceButton) {
+      return window.CORPUS_ACTIONS.refresh({
+        name: 'Refresh models',
+        element: sourceButton,
+        run: loadModelsData,
+      });
+    }
+    return loadModelsData();
+  }
+
+  async function loadModelsData() {
     const container = document.getElementById('model-library');
     if (container) container.innerHTML = ui.skeletonCards(2);
     try {
@@ -247,7 +260,7 @@ window.models = (function () {
             <button class="btn btn-outline btn-sm" type="button" onclick="models.trainModel('${esc(model.id)}')" title="Open the Training Center with this model">
               <i class="fas fa-play"></i> Train
             </button>
-            <button class="btn btn-outline btn-sm" type="button" onclick="models.cloneModel('${esc(model.id)}')">
+            <button class="btn btn-outline btn-sm" type="button" onclick="models.cloneModel('${esc(model.id)}', this)">
               <i class="fas fa-copy"></i> Clone
             </button>
             <button class="btn btn-danger btn-sm" type="button" data-delete-model="${esc(model.id)}" aria-label="Delete ${esc(model.name || model.id)}" title="Delete model">
@@ -387,25 +400,37 @@ window.models = (function () {
     }
 
     const submitBtn = document.querySelector('#model-form button[type="submit"]');
-    ui.setButtonLoading(submitBtn, true);
-    try {
-      const token = await state.getAccessToken();
-      const data = await window.CORPUS_API.createModel(config, token);
-      const created = data && data.model ? data.model : data;
-      if (created && created.id) state.addModel(created);
-      ui.toast('Model created', 'success');
-      closeCreateModal();
-      await loadModels();
-    } catch (err) {
-      const detail = err && err.data && err.data.detail;
-      const message = Array.isArray(detail)
-        ? detail.join(' ')
-        : (typeof detail === 'string' ? detail : (err.message || 'Failed to create model'));
-      showFormError(message);
-      ui.toast(message, 'error');
-    } finally {
-      ui.setButtonLoading(submitBtn, false);
-    }
+    // The action manager owns the button for the whole request: label, lock,
+    // restore. Nothing here can leave it saying "Creating…" after an error.
+    await window.CORPUS_ACTIONS.run({
+      name: 'Create model',
+      key: 'models:create',
+      element: submitBtn,
+      label: 'Creating…',
+      success: 'Model created successfully!',
+      failure: 'Could not create the model.',
+      run: async function () {
+        const token = await state.getAccessToken();
+        return window.CORPUS_API.createModel(config, token);
+      },
+      onSuccess: async function (data) {
+        const created = data && data.model ? data.model : data;
+        if (created && created.id) state.addModel(created);
+        closeCreateModal();
+        // Only the affected collection is refreshed, and the cache entry was
+        // already dropped by the write itself.
+        await loadModels();
+      },
+      onFailure: function (err) {
+        const detail = err && err.data && err.data.detail;
+        const message = Array.isArray(detail)
+          ? detail.join(' ')
+          : (typeof detail === 'string' ? detail : (err && err.message) || 'Failed to create model');
+        showFormError(message);
+      },
+      // The manager already announced the failure; the form shows the detail.
+      notifyFailure: true,
+    });
     return false;
   }
 
@@ -429,18 +454,25 @@ window.models = (function () {
     router.navigate('training');
   }
 
-  async function cloneModel(id) {
-    ui.confirm('Clone model', 'Create a copy of this model configuration?', async () => {
-      try {
-        const token = await state.getAccessToken();
-        const data = await window.CORPUS_API.cloneModel(id, token);
-        const created = data && data.model ? data.model : data;
-        if (created && created.id) state.addModel(created);
-        ui.toast('Model cloned', 'success');
-        await loadModels();
-      } catch (err) {
-        ui.toast(err.message || 'Clone failed', 'error');
-      }
+  async function cloneModel(id, sourceButton) {
+    ui.confirm('Clone model', 'Create a copy of this model configuration?', function () {
+      return window.CORPUS_ACTIONS.run({
+        name: 'Clone model',
+        key: 'models:clone:' + id,
+        element: sourceButton || null,
+        label: 'Cloning…',
+        success: 'Model cloned successfully!',
+        failure: 'Could not clone the model.',
+        run: async function () {
+          const token = await state.getAccessToken();
+          return window.CORPUS_API.cloneModel(id, token);
+        },
+        onSuccess: async function (data) {
+          const created = data && data.model ? data.model : data;
+          if (created && created.id) state.addModel(created);
+          await loadModels();
+        },
+      });
     });
   }
 
@@ -448,24 +480,37 @@ window.models = (function () {
     if (!id || deletingIds.has(id)) return;
     deletingIds.add(id);
     const btn = document.querySelector('[data-delete-model="' + id.replace(/"/g, '\\"') + '"]');
-    if (btn) ui.setButtonLoading(btn, true);
-    try {
-      const token = await state.getAccessToken();
-      if (!token) {
-        throw new Error('Authentication required. Please sign in again.');
-      }
-      const result = await window.CORPUS_API.deleteModel(id, token, options);
-      state.removeModel(id);
-      const active = state.getActiveModel ? state.getActiveModel() : null;
-      if (active && active.id === id && state.setActiveModel) {
-        state.setActiveModel(null);
-      }
-      ui.toast('Model deleted', 'success');
-      if (result && result.storage_cleanup_warning) {
-        ui.toast(result.storage_cleanup_warning, 'warning', 7000);
-      }
-      await loadModels();
-    } catch (err) {
+    const outcome = await window.CORPUS_ACTIONS.run({
+      name: 'Delete model',
+      key: 'models:delete:' + id,
+      element: btn,
+      label: 'Deleting…',
+      success: 'Model deleted successfully!',
+      // Failure wording depends on the status code, so it is announced below.
+      notifyFailure: false,
+      run: async function () {
+        const token = await state.getAccessToken();
+        if (!token) {
+          throw new Error('Authentication required. Please sign in again.');
+        }
+        return window.CORPUS_API.deleteModel(id, token, options);
+      },
+      onSuccess: async function (result) {
+        state.removeModel(id);
+        const active = state.getActiveModel ? state.getActiveModel() : null;
+        if (active && active.id === id && state.setActiveModel) {
+          state.setActiveModel(null);
+        }
+        if (result && result.storage_cleanup_warning) {
+          ui.toast(result.storage_cleanup_warning, 'warning', 7000);
+        }
+        await loadModels();
+      },
+    });
+    deletingIds.delete(id);
+
+    if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
+      const err = outcome.error;
       if (err && err.status === 409 && !options.stopActive) {
         const msg = err.message || 'This model has an active training job.';
         ui.toast(msg, 'warning', 6000);
@@ -488,11 +533,8 @@ window.models = (function () {
           9000
         );
       } else {
-        ui.toast((err && err.message) || 'Delete failed', 'error', 6000);
+        ui.toast(outcome.message || 'Delete failed', 'error', 6000);
       }
-    } finally {
-      deletingIds.delete(id);
-      if (btn && btn.isConnected) ui.setButtonLoading(btn, false);
     }
   }
 

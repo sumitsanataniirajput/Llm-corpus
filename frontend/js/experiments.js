@@ -33,7 +33,7 @@ window.experiments = (function () {
           <p class="section-subtitle">Experiment records returned by the backend: configuration, status and notes.</p>
         </div>
         <div class="page-header-actions">
-          <button class="btn btn-outline" type="button" onclick="experiments.loadExperiments()">
+          <button class="btn btn-outline" type="button" onclick="experiments.loadExperiments(this)">
             <i class="fas fa-rotate"></i> Refresh
           </button>
         </div>
@@ -47,7 +47,15 @@ window.experiments = (function () {
     await loadExperiments();
   }
 
-  async function loadExperiments() {
+  async function loadExperiments(sourceButton) {
+    return window.CORPUS_ACTIONS.refresh({
+      name: 'Refresh experiments',
+      element: sourceButton || null,
+      run: loadExperimentsData,
+    });
+  }
+
+  async function loadExperimentsData() {
     const container = document.getElementById('experiments-grid');
     if (container) container.innerHTML = ui.skeletonCards(2);
     try {

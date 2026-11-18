@@ -55,7 +55,7 @@ window.dashboard = (function () {
           <p class="section-subtitle">Welcome back, ${esc(user.email || 'researcher')}. Live status from your CORPUS backend.</p>
         </div>
         <div class="page-header-actions">
-          <button class="btn btn-outline" id="dash-refresh" type="button" onclick="dashboard.refresh()">
+          <button class="btn btn-outline" id="dash-refresh" type="button" onclick="dashboard.refresh(this)">
             <i class="fas fa-rotate"></i> Refresh
           </button>
           <button class="btn btn-primary" type="button" onclick="router.navigate('models')">
@@ -146,25 +146,21 @@ window.dashboard = (function () {
     await loadAll();
   }
 
-  async function refresh() {
-    const btn = document.getElementById('dash-refresh');
+  async function refresh(sourceButton) {
+    const btn = sourceButton || document.getElementById('dash-refresh');
     if (loading) return;
-    if (btn) {
-      btn.disabled = true;
-      btn.setAttribute('aria-busy', 'true');
-    }
     // A manual refresh means "show me the truth", so bypass the read cache.
-    if (window.CORPUS_API && typeof window.CORPUS_API.invalidateCache === 'function') {
-      window.CORPUS_API.invalidateCache();
-    }
-    try {
-      await loadAll();
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.removeAttribute('aria-busy');
-      }
-    }
+    return window.CORPUS_ACTIONS.refresh({
+      name: 'Refresh dashboard',
+      key: 'dashboard:refresh',
+      element: btn,
+      run: async function () {
+        if (window.CORPUS_API && typeof window.CORPUS_API.invalidateCache === 'function') {
+          window.CORPUS_API.invalidateCache();
+        }
+        await loadAll();
+      },
+    });
   }
 
   async function loadAll() {
@@ -526,7 +522,7 @@ window.dashboard = (function () {
         <div><dt>API base</dt><dd class="mono" style="font-size:var(--text-label-small); overflow-wrap:anywhere;">${esc(apiBase)}</dd></div>
         <div><dt>Data loaded</dt><dd>${anyData ? 'Models, datasets and jobs' : 'No records returned'}</dd></div>
       </dl>
-      ${dot === 'offline' ? '<button class="btn btn-outline btn-sm" type="button" style="margin-top:var(--space-3);" onclick="dashboard.refresh()"><i class="fas fa-rotate"></i> Retry connection</button>' : ''}
+      ${dot === 'offline' ? '<button class="btn btn-outline btn-sm" type="button" style="margin-top:var(--space-3);" onclick="dashboard.refresh(this)"><i class="fas fa-rotate"></i> Retry connection</button>' : ''}
     `;
   }
 

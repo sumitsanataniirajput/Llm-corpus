@@ -33,7 +33,7 @@ window.compute = (function () {
           <p class="section-subtitle">Workers registered with your account and the capabilities this browser reports.</p>
         </div>
         <div class="page-header-actions">
-          <button class="btn btn-outline" type="button" onclick="compute.loadWorkers()">
+          <button class="btn btn-outline" type="button" onclick="compute.loadWorkers(this)">
             <i class="fas fa-rotate"></i> Refresh workers
           </button>
         </div>
@@ -58,7 +58,15 @@ window.compute = (function () {
     renderLocalInfo();
   }
 
-  async function loadWorkers() {
+  async function loadWorkers(sourceButton) {
+    return window.CORPUS_ACTIONS.refresh({
+      name: 'Refresh compute workers',
+      element: sourceButton || null,
+      run: loadWorkersData,
+    });
+  }
+
+  async function loadWorkersData() {
     const container = document.getElementById('compute-workers');
     try {
       const token = await state.getAccessToken();

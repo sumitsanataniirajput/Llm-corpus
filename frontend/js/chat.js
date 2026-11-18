@@ -414,6 +414,9 @@ window.chat = (function () {
       persistSessions();
       renderMessages();
       renderConversationList();
+      // The reply is visible above; this confirms the backend answered at all,
+      // and is deduplicated so a streamed duplicate cannot double-notify.
+      ui.toast('Chat response received!', 'success', 1800);
     } catch (err) {
       const message = 'Error: ' + (err && err.message ? err.message : 'Generation failed');
       session.messages.push({ role: 'ai', text: message, at: new Date().toISOString(), error: true });
