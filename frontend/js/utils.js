@@ -46,35 +46,112 @@ window.CORPUS_UTILS = (function () {
     return d.toLocaleDateString();
   }
 
-  // Show toast notification with deduplication for identical error messages
-  // Prevents repeated identical error notifications (e.g. "Backend Unreachable" spam)
-  let lastToastKey = null;
-  let lastToastTime = 0;
-  const TOAST_DEDUP_WINDOW_MS = 5000;
+  // Show a toast. Deduplication lives in CORPUS_ACTIONS.notify() so it applies
+  // to every notification in the app, including the ones that never pass
+  // through ui.toast(). This renderer only has to paint and clean up.
+  const ICONS = {
+    success: 'check-circle',
+    error: 'exclamation-circle',
+    warning: 'triangle-exclamation',
+    progress: 'circle-notch fa-spin',
+    info: 'info-circle',
+  };
+  const MAX_VISIBLE_TOASTS = 4;
+  const liveToasts = new Map();       // key → { el, timer }
+
+  function dismissToast(key, immediate) {
+    const entry = liveToasts.get(key);
+    if (!entry) return;
+    liveToasts.delete(key);
+    if (entry.timer) clearTimeout(entry.timer);
+    const el = entry.el;
+    if (!el || !el.parentNode) return;
+    if (immediate) {
+      el.remove();
+      return;
+    }
+    el.classList.add('is-leaving');
+    setTimeout(() => el.remove(), 220);
+  }
 
   function toast(message, type = 'info', duration = 4000) {
     const container = document.getElementById('toast-container');
-    if (!container) return;
+    if (!container) return null;
+    const kind = ICONS[type] ? type : 'info';
+    const text = String(message == null ? '' : message);
 
-    // Deduplicate identical error toasts within the window
-    if (type === 'error') {
-      const key = type + ':' + message;
-      const now = Date.now();
-      if (lastToastKey === key && now - lastToastTime < TOAST_DEDUP_WINDOW_MS) {
-        return; // Skip duplicate error toast
-      }
-      lastToastKey = key;
-      lastToastTime = now;
+    // One live toast per message+type: a repeated poll or a double submit must
+    // not stack identical banners.
+    const key = kind + ':' + text;
+    if (liveToasts.has(key)) {
+      const existing = liveToasts.get(key);
+      if (existing.timer) clearTimeout(existing.timer);
+      existing.timer = duration > 0 ? setTimeout(() => dismissToast(key), duration) : null;
+      return key;
     }
 
     const el = document.createElement('div');
-    el.className = 'toast ' + type;
-    el.innerHTML = '<i class="fas fa-' + (type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle') + '"></i><span>' + escapeHtml(message) + '</span>';
+    el.className = 'toast ' + kind;
+    el.setAttribute('role', kind === 'error' || kind === 'warning' ? 'alert' : 'status');
+    el.innerHTML = '<i class="fas fa-' + ICONS[kind] + '" aria-hidden="true"></i><span>' +
+      escapeHtml(text) + '</span>' +
+      '<button class="toast-close" type="button" aria-label="Dismiss notification">&times;</button>';
+    el.querySelector('.toast-close').addEventListener('click', () => dismissToast(key));
     container.appendChild(el);
-    setTimeout(() => {
-      el.style.opacity = '0';
-      setTimeout(() => el.remove(), 300);
-    }, duration);
+    // A burst of toasts must not cover the page on a phone.
+    const overflow = container.querySelectorAll('.toast:not(.is-leaving)');
+    if (overflow.length > MAX_VISIBLE_TOASTS) {
+      const oldest = overflow[0];
+      oldest.classList.add('is-leaving');
+      setTimeout(() => oldest.remove(), 220);
+    }
+
+    let timer = null;
+    if (duration > 0) timer = setTimeout(() => dismissToast(key), duration);
+    liveToasts.set(key, { el: el, timer: timer });
+    return key;
+  }
+
+  /** Long-running progress banner with a real percentage (never a fake one). */
+  function progressToast(id, message, percent) {
+    const container = document.getElementById('toast-container');
+    if (!container) return { update: function () {}, close: function () {} };
+    const key = 'progress:' + id;
+    let entry = liveToasts.get(key);
+    if (!entry) {
+      const el = document.createElement('div');
+      el.className = 'toast progress';
+      el.setAttribute('role', 'status');
+      el.innerHTML = '<i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i>' +
+        '<span class="toast-progress-copy"></span>' +
+        '<span class="toast-progress-track"><span class="toast-progress-fill"></span></span>';
+      container.appendChild(el);
+      entry = { el: el, timer: null };
+      liveToasts.set(key, entry);
+    }
+    const copy = entry.el.querySelector('.toast-progress-copy');
+    const fill = entry.el.querySelector('.toast-progress-fill');
+    if (copy) copy.textContent = String(message == null ? '' : message);
+    const pct = typeof percent === 'number' && isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+    if (fill) {
+      fill.style.width = (pct == null ? 35 : pct) + '%';
+      entry.el.classList.toggle('is-indeterminate', pct == null);
+    }
+    return {
+      update: function (nextMessage, nextPercent) {
+        if (copy) copy.textContent = String(nextMessage == null ? '' : nextMessage);
+        const next = typeof nextPercent === 'number' && isFinite(nextPercent) ? Math.max(0, Math.min(100, nextPercent)) : null;
+        if (fill) {
+          fill.style.width = (next == null ? 35 : next) + '%';
+          entry.el.classList.toggle('is-indeterminate', next == null);
+        }
+      },
+      close: function () { dismissToast(key); },
+    };
+  }
+
+  function dismissAllToasts() {
+    Array.from(liveToasts.keys()).forEach(key => dismissToast(key, true));
   }
 
   // Escape HTML
@@ -160,6 +237,9 @@ window.CORPUS_UTILS = (function () {
     formatDuration,
     formatDate,
     toast,
+    progressToast,
+    dismissToast,
+    dismissAllToasts,
     escapeHtml,
     asDate,
     debounce,

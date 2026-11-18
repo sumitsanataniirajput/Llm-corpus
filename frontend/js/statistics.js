@@ -44,7 +44,7 @@ window.statistics = (function () {
           <p class="section-subtitle">Measured values from your model records, training jobs and metric rows — no simulated curves.</p>
         </div>
         <div class="page-header-actions">
-          <button class="btn btn-outline" type="button" onclick="statistics.reload()">
+          <button class="btn btn-outline" type="button" onclick="statistics.reload(this)">
             <i class="fas fa-rotate"></i> Refresh
           </button>
         </div>
@@ -117,7 +117,15 @@ window.statistics = (function () {
     await reload();
   }
 
-  async function reload() {
+  async function reload(sourceButton) {
+    return window.CORPUS_ACTIONS.refresh({
+      name: 'Refresh statistics',
+      element: sourceButton || null,
+      run: reloadData,
+    });
+  }
+
+  async function reloadData() {
     const token = await state.getAccessToken();
     const results = await Promise.allSettled([
       window.CORPUS_API.listModels(token),

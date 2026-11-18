@@ -149,6 +149,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+# The instant this process took ownership of the in-process job runner. A job
+# whose row has not been touched since then cannot belong to this process.
+PROCESS_STARTED_AT = datetime.datetime.now(datetime.timezone.utc)
+
+
 # Startup — validate configuration only. No automatic table creation.
 @app.on_event("startup")
 async def startup():
@@ -166,6 +171,21 @@ async def startup():
             "Missing required configuration: %s. "
             "Some features may be unavailable.", ", ".join(missing)
         )
+
+    # Jobs run inside this process, so anything still "running" from a previous
+    # process can never finish. Give it a real terminal state instead of letting
+    # the UI (and the database) report progress forever.
+    try:
+        from app.services.training_worker import reconcile_orphaned_jobs
+        recovered = await reconcile_orphaned_jobs(PROCESS_STARTED_AT)
+        if recovered:
+            logger.warning(
+                "Marked %d interrupted training job(s) as failed: %s",
+                len(recovered),
+                ", ".join(recovered),
+            )
+    except Exception:
+        logger.exception("Could not reconcile interrupted training jobs")
 
     logger.info("CORPUS ULTIMATE API started (no automatic database migration)")
 

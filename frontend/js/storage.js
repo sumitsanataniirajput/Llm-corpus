@@ -170,7 +170,7 @@ window.storage = (function () {
           <td>${file.size ? esc(CORPUS_UTILS.formatBytes(file.size)) : '—'}</td>
           <td>${esc(CORPUS_UTILS.formatDate(file.updated_at || file.created_at))}</td>
           <td style="white-space:nowrap;">
-            <button class="btn btn-outline btn-sm" type="button" onclick="storage.downloadFile('${esc(id)}')" title="Download object">
+            <button class="btn btn-outline btn-sm" type="button" data-storage-download="${esc(id)}" onclick="storage.downloadFile('${esc(id)}', this)" title="Download object">
               <i class="fas fa-download"></i>
             </button>
           </td>
@@ -179,18 +179,34 @@ window.storage = (function () {
     }).join('');
   }
 
-  async function downloadFile(id) {
-    try {
-      const token = await state.getAccessToken();
-      const data = await window.CORPUS_API.downloadStorageObject(id, token);
-      if (data && data.url) {
+  async function downloadFile(id, sourceButton) {
+    const button = sourceButton || document.querySelector('[data-storage-download="' + id + '"]');
+    const outcome = await window.CORPUS_ACTIONS.run({
+      name: 'Download object',
+      key: 'storage:download:' + id,
+      element: button,
+      label: 'Preparing…',
+      success: 'File downloaded successfully!',
+      failure: 'This object could not be downloaded.',
+      notifyFailure: false,
+      run: async function () {
+        const token = await state.getAccessToken();
+        const data = await window.CORPUS_API.downloadStorageObject(id, token);
+        if (!data || !data.url) {
+          // No URL means no download: never claim success here.
+          const err = new Error('The backend did not return a download URL for this object.');
+          err.noUrl = true;
+          throw err;
+        }
         window.open(data.url, '_blank', 'noopener');
-        return;
-      }
-      ui.toast('The backend did not return a download URL for this object.', 'warning');
-    } catch (err) {
-      ui.toast(err.message || 'Download unavailable for this object', 'error');
+        return data;
+      },
+    });
+    if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
+      const norl = outcome.error && outcome.error.noUrl;
+      ui.toast(outcome.message, norl ? 'warning' : 'error');
     }
+    return outcome;
   }
 
   return { render, loadFiles, downloadFile };

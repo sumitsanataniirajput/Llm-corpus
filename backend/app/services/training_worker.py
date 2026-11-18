@@ -116,6 +116,58 @@ async def stop_and_wait_for_job(job_id: str, timeout: float = 5.0) -> bool:
         return not is_job_running(job_id)
 
 
+ORPHANED_JOB_MESSAGE = (
+    "The backend restarted before this job finished, so the worker that owned it "
+    "is gone. The job was marked failed instead of reporting progress forever."
+)
+
+
+async def reconcile_orphaned_jobs(started_at=None) -> list:
+    """Fail jobs left mid-flight by a previous process.
+
+    A training job runs inside this process. If the process is replaced
+    (deploy, crash, OOM kill) while a job is queued/running/paused, its row keeps
+    saying "running" forever: every client shows a task that can never finish,
+    the monitor polls a job nobody owns, and the user never learns it died.
+    Anything not updated since this process started cannot belong to it, so it
+    is given a real terminal state (and an explanatory event) at startup.
+
+    Non-destructive: rows are updated, never deleted, and a job updated after
+    `started_at` is left alone.
+    """
+    if started_at is None:
+        started_at = datetime.now(timezone.utc)
+
+    factory = get_session_factory()
+    recovered = []
+    async with factory() as db:
+        rows = await db.execute(
+            text(
+                """
+                UPDATE public.training_jobs
+                SET status = 'failed', updated_at = now(), completed_at = now()
+                WHERE status IN ('queued', 'preparing', 'running', 'pausing', 'paused', 'stopping')
+                  AND updated_at < :started_at
+                RETURNING id
+                """
+            ),
+            {"started_at": started_at},
+        )
+        recovered = [row[0] for row in rows.fetchall()]
+        for job_id in recovered:
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO public.training_job_events (job_id, event, data)
+                    VALUES (:job_id, 'failed', CAST(:data AS jsonb))
+                    """
+                ),
+                {"job_id": job_id, "data": json.dumps({"error": ORPHANED_JOB_MESSAGE, "recovered": True})},
+            )
+        await db.commit()
+    return recovered
+
+
 def _check_not_stopped(job_id: str):
     if not job_id:
         return

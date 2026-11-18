@@ -60,7 +60,7 @@ window.settings = (function () {
           </div>
         </div>
         <div class="row-tight">
-          <button class="btn btn-outline btn-sm" type="button" onclick="settings.checkBackendHealth()">
+          <button class="btn btn-outline btn-sm" type="button" onclick="settings.checkBackendHealth(this)">
             <i class="fas fa-rotate"></i> Recheck backend
           </button>
           <span class="chip mono" style="max-width:100%;">${esc(apiBase)}</span>
@@ -123,7 +123,7 @@ window.settings = (function () {
             <h4>Export workspace metadata</h4>
             <p>Downloads a JSON file with your models, datasets and training job records as returned by the API.</p>
           </div>
-          <button class="btn btn-outline btn-sm" type="button" onclick="settings.exportData()">
+          <button class="btn btn-outline btn-sm" type="button" data-settings-action="export" onclick="settings.exportData(this)">
             <i class="fas fa-download"></i> Export JSON
           </button>
         </div>
@@ -159,16 +159,18 @@ window.settings = (function () {
     document.querySelectorAll('.segmented button').forEach(btn => {
       btn.classList.toggle('active', btn.textContent.trim().toLowerCase() === theme);
     });
-    ui.toast('Theme set to ' + theme, 'success');
+    // Applied locally and persisted — this is a real success, not an assumption.
+    ui.toast('Theme saved successfully — ' + theme + ' appearance.', 'success');
   }
 
-  async function checkBackendHealth() {
+  async function checkBackendHealth(sourceButton) {
     const indicator = document.getElementById('settings-backend-indicator');
     const text = document.getElementById('settings-backend-text');
     const detail = document.getElementById('settings-backend-detail');
     if (!text) return;
 
     text.textContent = 'Checking backend…';
+    if (sourceButton) ui.setButtonLoading(sourceButton, true, 'Checking…');
     try {
       const result = await window.CORPUS_API.health();
       const setDot = (color) => { if (indicator) indicator.style.color = color; };
@@ -200,6 +202,8 @@ window.settings = (function () {
       text.textContent = 'Backend check failed';
       if (detail) detail.textContent = err.message || 'Unexpected error.';
       state.setConnection('disconnected');
+    } finally {
+      if (sourceButton) ui.setButtonLoading(sourceButton, false);
     }
   }
 
@@ -221,7 +225,7 @@ window.settings = (function () {
             <div class="api-key-value">${esc(key.prefix || '')}${key.prefix ? '…' : ''}</div>
             <div class="field-hint" style="margin:0;">Created ${esc(CORPUS_UTILS.formatDate(key.created_at))}</div>
           </div>
-          <button class="btn btn-danger btn-sm" type="button" onclick="settings.revokeKey('${esc(key.id)}')">Revoke</button>
+          <button class="btn btn-danger btn-sm" type="button" data-api-key="${esc(key.id)}" onclick="settings.revokeKey('${esc(key.id)}', this)">Revoke</button>
         </div>
       `).join('');
     } catch (err) {
@@ -257,41 +261,67 @@ window.settings = (function () {
       return false;
     }
     const submit = document.querySelector('#settings-key-form button[type="submit"]');
-    ui.setButtonLoading(submit, true);
-    try {
-      const token = await state.getAccessToken();
-      const data = await window.CORPUS_API.createApiKey({ name: name }, token);
-      const resultEl = document.getElementById('settings-key-result');
-      if (resultEl) {
-        resultEl.innerHTML = '<i class="fas fa-key"></i><span><strong>Copy this key now — it is shown only once:</strong><br>' + esc(data.key || '') + '</span>';
-        resultEl.style.display = 'flex';
-      }
-      if (input) input.value = '';
-      ui.toast('API key created', 'success');
-      await loadApiKeys();
-    } catch (err) {
-      ui.toast(err.message || 'Failed to create API key', 'error');
-    } finally {
-      ui.setButtonLoading(submit, false);
-    }
+    await window.CORPUS_ACTIONS.run({
+      name: 'Create API key',
+      key: 'settings:create-key',
+      element: submit,
+      label: 'Creating…',
+      success: 'API key created successfully! Copy it now — it is shown only once.',
+      failure: 'The API key could not be created.',
+      run: async function () {
+        const token = await state.getAccessToken();
+        return window.CORPUS_API.createApiKey({ name: name }, token);
+      },
+      onSuccess: async function (data) {
+        const resultEl = document.getElementById('settings-key-result');
+        if (resultEl) {
+          resultEl.innerHTML = '<i class="fas fa-key"></i><span><strong>Copy this key now — it is shown only once:</strong><br>' + esc(data.key || '') + '</span>';
+          resultEl.style.display = 'flex';
+        }
+        if (input) input.value = '';
+        await loadApiKeys();
+      },
+    });
     return false;
   }
 
-  async function revokeKey(id) {
-    ui.confirm('Revoke API key', 'This immediately invalidates the key. Continue?', async () => {
-      try {
-        const token = await state.getAccessToken();
-        await window.CORPUS_API.revokeApiKey(id, token);
-        ui.toast('API key revoked', 'success');
-        await loadApiKeys();
-      } catch (err) {
-        ui.toast(err.message || 'Revoke failed', 'error');
-      }
+  async function revokeKey(id, sourceButton) {
+    ui.confirm('Revoke API key', 'This immediately invalidates the key. Continue?', function () {
+      return window.CORPUS_ACTIONS.run({
+        name: 'Revoke API key',
+        key: 'settings:revoke-key:' + id,
+        element: sourceButton || document.querySelector('[data-api-key="' + id + '"]'),
+        label: 'Revoking…',
+        success: 'API key revoked successfully!',
+        failure: 'The API key could not be revoked.',
+        run: async function () {
+          const token = await state.getAccessToken();
+          return window.CORPUS_API.revokeApiKey(id, token);
+        },
+        onSuccess: async function () {
+          await loadApiKeys();
+        },
+      });
     });
   }
 
   // Real client-side export of the metadata the API returns.
-  async function exportData() {
+  async function exportData(sourceButton) {
+    const button = sourceButton || document.querySelector('[data-settings-action="export"]');
+    await window.CORPUS_ACTIONS.run({
+      name: 'Export workspace metadata',
+      key: 'settings:export',
+      element: button,
+      label: 'Exporting…',
+      success: 'Export completed successfully!',
+      failure: 'The export could not be completed.',
+      run: async function () {
+        return downloadExport();
+      },
+    });
+  }
+
+  async function downloadExport() {
     try {
       const token = await state.getAccessToken();
       const results = await Promise.allSettled([
@@ -320,9 +350,9 @@ window.settings = (function () {
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      ui.toast('Workspace metadata exported', 'success');
+      return payload;
     } catch (err) {
-      ui.toast(err.message || 'Export failed', 'error');
+      throw new Error(err && err.message ? err.message : 'Export failed');
     }
   }
 

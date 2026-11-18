@@ -64,7 +64,7 @@ window.training = (function () {
           <p class="section-subtitle">Pick a model and one of your uploaded datasets, tune the configuration, then start a real backend job.</p>
         </div>
         <div class="page-header-actions">
-          <button class="btn btn-outline" type="button" onclick="training.loadJobs()">
+          <button class="btn btn-outline" type="button" onclick="training.loadJobs(this)">
             <i class="fas fa-rotate"></i> Refresh jobs
           </button>
         </div>
@@ -658,7 +658,20 @@ window.training = (function () {
 
   /* ---------------- Jobs ---------------- */
 
-  async function loadJobs() {
+  async function loadJobs(sourceButton) {
+    if (sourceButton) {
+      // The refresh control says what it is doing and comes back afterwards.
+      window.CORPUS_ACTIONS.refresh({
+        name: 'Refresh training jobs',
+        element: sourceButton,
+        run: function () { return loadJobsData(); },
+      });
+      return;
+    }
+    return loadJobsData();
+  }
+
+  async function loadJobsData() {
     let token;
     try {
       token = await state.getAccessToken();
@@ -852,50 +865,73 @@ window.training = (function () {
 
     const startBtn = document.getElementById('t-start');
     startInFlight = true;
-    ui.setButtonLoading(startBtn, true);
-    try {
-      const token = await state.getAccessToken();
-      const data = await window.CORPUS_API.createTrainingJob(config, token);
-      const job = data && data.job ? data.job : data;
-      if (!job || !job.id) {
-        throw new Error('The backend did not return a training job.');
-      }
-      state.addTrainingJob(job);
-      state.setActiveJob(job);
-      wsJobId = job.id;
-      reportedFailureJobId = null;
-      seenSteps = new Set();
-      metricSeries = { steps: [], loss: [], throughput: [] };
-      ui.toast('Training job queued', 'success');
-      log('Job ' + job.id + ' created — status: ' + job.status);
-      log('Dataset: ' + (dataset.name || dataset.id) + ' (' + dataset.id + ')');
-      updateControls(job);
-      updateMonitorStatus(job);
-      await loadJobs();
-      connectJobStream(job.id);
-    } catch (err) {
-      const message = err && err.message ? err.message : 'Failed to start training';
+    // REQUESTED: the button says what is happening and cannot be pressed twice.
+    // The backend accepting the job is not completion — the operation stays in
+    // the operation centre until the worker reports a real terminal state.
+    const model = modelsCache.find(m => m.id === check.modelId);
+    const outcome = await window.CORPUS_ACTIONS.run({
+      name: 'Start training' + (model ? ' on ' + (model.name || model.id) : ''),
+      key: 'training:start',
+      element: startBtn,
+      label: 'Starting…',
+      success: 'Training job submitted — the worker will report progress here.',
+      failure: 'Training could not be started.',
+      notifyFailure: false,
+      run: async function () {
+        const token = await state.getAccessToken();
+        const data = await window.CORPUS_API.createTrainingJob(config, token);
+        const job = data && data.job ? data.job : data;
+        if (!job || !job.id) {
+          throw new Error('The backend did not return a training job.');
+        }
+        return job;
+      },
+      onSuccess: async function (job) {
+        state.addTrainingJob(job);
+        state.setActiveJob(job);
+        wsJobId = job.id;
+        reportedFailureJobId = null;
+        seenSteps = new Set();
+        metricSeries = { steps: [], loss: [], throughput: [] };
+        window.CORPUS_ACTIONS.syncJob(job, { name: jobOperationName(job) });
+        log('Job ' + job.id + ' created — status: ' + job.status);
+        log('Dataset: ' + (dataset.name || dataset.id) + ' (' + dataset.id + ')');
+        updateControls(job);
+        updateMonitorStatus(job);
+        await loadJobs();
+        connectJobStream(job.id);
+      },
+    });
+
+    startInFlight = false;
+    if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
+      const message = outcome.message || 'Failed to start training';
       showFormError(message);
-      ui.toast(message, 'error');
       log('Error: ' + message, 'error');
-    } finally {
-      startInFlight = false;
-      ui.setButtonLoading(startBtn, false);
-      updateStartButtonState();
-      updateControls(state.getTrainingJob(wsJobId) || null);
     }
+    updateStartButtonState();
+    updateControls(state.getTrainingJob(wsJobId) || null);
   }
 
   async function runControl(btnId, action, label) {
     const jobId = wsJobId;
     if (!jobId) return;
     const btn = document.getElementById(btnId);
-    // Pause/Resume change backend state: a double tap must send one request.
-    return ui.guard(btn, async () => {
-      ui.setButtonLoading(btn, true);
-      try {
+    // Pause/Resume/Stop change backend state: one press = one request, the
+    // control reports the work, and it is restored whatever the outcome.
+    const outcome = await window.CORPUS_ACTIONS.run({
+      name: label + ' training',
+      key: 'training:' + btnId + ':' + jobId,
+      element: btn,
+      label: label + '…',
+      success: label + ' signal accepted — the worker applies it on its next step.',
+      failure: label + ' failed.',
+      notifyFailure: false,
+      run: async function () {
         const token = await state.getAccessToken();
-        const response = await action(jobId, token);
+        return action(jobId, token);
+      },
+      onSuccess: function (response) {
         if (response && response.status) {
           const current = state.getTrainingJob(jobId) || { id: jobId };
           state.updateTrainingJob(jobId, { ...current, status: response.status });
@@ -906,15 +942,17 @@ window.training = (function () {
         }
         log(label + ' signal accepted for job ' + jobId +
           (response && response.status ? ' — status: ' + response.status : ''));
-      } catch (err) {
+      },
+      onFailure: function (err) {
         if (ui.isAborted && ui.isAborted(err)) return;
-        ui.toast(err.message || (label + ' failed'), 'error');
-        log(label + ' failed: ' + (err.message || 'unknown error'), 'error');
-      } finally {
-        ui.setButtonLoading(btn, false);
-        updateControls(state.getTrainingJob(jobId) || null);
-      }
+        log(label + ' failed: ' + ((err && err.message) || 'unknown error'), 'error');
+      },
     });
+    if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
+      ui.toast(outcome.message || (label + ' failed'), 'error');
+    }
+    updateControls(state.getTrainingJob(jobId) || null);
+    return outcome;
   }
 
   function pauseTraining() {
@@ -927,14 +965,22 @@ window.training = (function () {
 
   function stopTraining() {
     if (!wsJobId) return;
-    ui.confirm('Stop training', 'Stop this training job? The worker saves a checkpoint before it exits.', async () => {
+    ui.confirm('Stop training', 'Stop this training job? The worker saves a checkpoint before it exits.', function () {
       const btn = document.getElementById('t-stop');
-      return ui.guard(btn, async () => {
-        ui.setButtonLoading(btn, true);
-        try {
-          const jobId = wsJobId;
+      const jobId = wsJobId;
+      return window.CORPUS_ACTIONS.run({
+        name: 'Stop training',
+        key: 'training:stop:' + jobId,
+        element: btn,
+        label: 'Stopping…',
+        success: 'Stop signal accepted — the worker saves a checkpoint and exits.',
+        failure: 'Stop failed.',
+        notifyFailure: false,
+        run: async function () {
           const token = await state.getAccessToken();
-          const response = await window.CORPUS_API.stopTrainingJob(jobId, token);
+          return window.CORPUS_API.stopTrainingJob(jobId, token);
+        },
+        onSuccess: function (response) {
           if (response && response.status) {
             const current = state.getTrainingJob(jobId) || { id: jobId };
             state.updateTrainingJob(jobId, { ...current, status: response.status });
@@ -945,13 +991,13 @@ window.training = (function () {
           }
           log('Stop signal accepted for job ' + jobId +
             (response && response.status ? ' — status: ' + response.status : ''));
-        } catch (err) {
-          if (ui.isAborted && ui.isAborted(err)) return;
-          ui.toast(err.message || 'Stop failed', 'error');
-        } finally {
-          ui.setButtonLoading(btn, false);
-          updateControls(state.getTrainingJob(wsJobId) || null);
+        },
+      }).then(function (outcome) {
+        if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
+          ui.toast(outcome.message || 'Stop failed', 'error');
         }
+        updateControls(state.getTrainingJob(jobId) || null);
+        return outcome;
       });
     });
   }
@@ -974,7 +1020,43 @@ window.training = (function () {
     if (stopEl) stopEl.disabled = !(status === 'running' || status === 'paused' || status === 'queued' || status === 'pausing');
   }
 
+  function jobOperationName(job) {
+    if (!job) return 'Training job';
+    const model = modelsCache.find(m => m.id === job.model_id);
+    const dataset = datasetsCache.find(d => d.id === job.dataset_id);
+    return 'Training ' + (model ? (model.name || model.id) : (job.model_id || 'job')) +
+      (dataset ? ' on ' + (dataset.name || dataset.id) : '');
+  }
+
+  /**
+   * Reconcile the tracked operation with whatever the backend says. Called from
+   * every status source (create response, WebSocket event, polling fallback),
+   * so the operation centre, the toast and the monitor can never disagree, and
+   * a terminal state is announced exactly once.
+   */
+  function syncJobOperation(job, options) {
+    if (!window.CORPUS_ACTIONS || !job || !job.id || !job.status) return null;
+    if (!(options && options.force) && !window.CORPUS_ACTIONS.isJobTracked(job.id)) return null;
+
+    const opts = Object.assign({ name: jobOperationName(job) }, options || {});
+    if (job.status === 'completed') {
+      const lastLoss = metricSeries.loss.length ? metricSeries.loss[metricSeries.loss.length - 1] : null;
+      const lastStep = metricSeries.steps.length ? metricSeries.steps[metricSeries.steps.length - 1] : null;
+      opts.result = jobOperationName(job) + ' completed successfully!' +
+        (lastLoss != null ? ' Final loss ' + Number(lastLoss).toFixed(4) : '') +
+        (lastStep != null ? ' at step ' + lastStep + '.' : '');
+    } else if (job.status === 'failed') {
+      // The precise backend error is announced by reportJobFailure(), once.
+      opts.notify = false;
+      opts.error = job.error || 'The backend reported this training job as failed.';
+    } else if (job.status === 'cancelled' || job.status === 'canceled') {
+      opts.result = 'Training job cancelled.';
+    }
+    return window.CORPUS_ACTIONS.syncJob(job, opts);
+  }
+
   function updateMonitorStatus(job) {
+    if (job) syncJobOperation(job);
     const container = document.getElementById('t-monitor-status');
     if (!container) return;
     if (!job) {
@@ -1162,6 +1244,11 @@ window.training = (function () {
       disconnectJobStream();
       loadJobs();
       if (job.model_id) loadCheckpoints(job.model_id);
+      // A terminal state that arrives over the socket must be reported exactly
+      // like one that arrives by polling.
+      if (payload.status === 'failed') {
+        reportJobFailure(jobId, payload.error);
+      }
     }
   }
 

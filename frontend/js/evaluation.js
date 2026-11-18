@@ -64,7 +64,7 @@ window.evaluation = (function () {
             ${activeModel ? '“' + esc(activeModel.name || activeModel.id) + '”' : 'the selected model'} and shows the raw replies.
             Scoring is manual — the backend has no automated grader.
           </p>
-          <button class="btn btn-primary" type="button" onclick="evaluation.runSmokeTest()" ${activeModel ? '' : 'disabled title="Select a model first"'}>
+          <button class="btn btn-primary" type="button" data-eval-smoke onclick="evaluation.runSmokeTest(this)" ${activeModel ? '' : 'disabled title="Select a model first"'}>
             <i class="fas fa-play"></i> Run smoke test
           </button>
           ${activeModel ? '' : '<p class="field-hint" style="margin-top:var(--space-2);">Select a model on the Models page to enable this.</p>'}
@@ -198,7 +198,7 @@ window.evaluation = (function () {
     `).join('');
   }
 
-  async function runSmokeTest() {
+  async function runSmokeTest(sourceButton) {
     const activeModel = state.getActiveModel();
     if (!activeModel) {
       ui.toast('Select a model before running the smoke test.', 'error');
@@ -208,8 +208,18 @@ window.evaluation = (function () {
     if (!container) return;
     container.innerHTML = '<p class="field-hint"><i class="fas fa-circle-notch fa-spin"></i> Sending prompts to the inference API…</p>';
 
+    const button = sourceButton || document.querySelector('[data-eval-smoke]');
+    const operation = window.CORPUS_ACTIONS.beginOperation({
+      kind: 'evaluation',
+      name: 'Evaluation smoke test — ' + (activeModel.name || activeModel.id),
+      state: window.CORPUS_ACTIONS.STATES.RUNNING,
+      progress: 0,
+    });
+    if (button) window.CORPUS_ACTIONS.beginButton(button, 'Evaluating…');
+
     const token = await state.getAccessToken();
     const results = [];
+    let completed = 0;
     for (const prompt of SMOKE_PROMPTS) {
       try {
         const response = await window.CORPUS_API.infer(activeModel.id, {
@@ -224,6 +234,30 @@ window.evaluation = (function () {
       } catch (err) {
         results.push({ prompt, reply: null, error: err && err.message ? err.message : 'Request failed' });
       }
+      completed += 1;
+      // Real progress: prompts answered out of prompts sent.
+      window.CORPUS_ACTIONS.updateOperation(operation.id, {
+        progress: Math.round((completed / SMOKE_PROMPTS.length) * 100),
+        result: completed + ' of ' + SMOKE_PROMPTS.length + ' prompts answered.',
+      });
+    }
+    if (button) window.CORPUS_ACTIONS.endButton(button);
+
+    const failures = results.filter(item => item.error).length;
+    if (failures === results.length) {
+      window.CORPUS_ACTIONS.finishOperation(operation.id, window.CORPUS_ACTIONS.STATES.FAILED, {
+        error: (results[0] && results[0].error) || 'Every prompt failed.',
+      });
+    } else if (failures > 0) {
+      window.CORPUS_ACTIONS.finishOperation(operation.id, window.CORPUS_ACTIONS.STATES.FAILED, {
+        error: failures + ' of ' + results.length + ' prompts failed — see the output above.',
+        notify: false,
+      });
+      ui.toast(failures + ' of ' + results.length + ' prompts failed — see the output above.', 'warning', 7000);
+    } else {
+      window.CORPUS_ACTIONS.finishOperation(operation.id, window.CORPUS_ACTIONS.STATES.COMPLETED, {
+        result: 'Evaluation completed successfully! ' + results.length + ' prompts answered.',
+      });
     }
 
     container.innerHTML = '<div class="eval-output">' + results.map(item => `

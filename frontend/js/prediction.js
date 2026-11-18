@@ -124,30 +124,37 @@ window.prediction = (function () {
     const button = document.getElementById('pred-run');
     const resultsContainer = document.getElementById('pred-results');
 
-    ui.setButtonLoading(button, true);
     if (resultsContainer) {
       resultsContainer.innerHTML = '<div class="card"><p class="field-hint" style="margin:0;"><i class="fas fa-circle-notch fa-spin"></i> Asking the backend for the next-token distribution…</p></div>';
     }
 
-    try {
-      const token = await state.getAccessToken();
-      const result = await window.CORPUS_API.nextToken(activeModel.id, {
-        text: text,
-        temperature: temperature,
-        top_k: 10,
-        top_p: 0.9,
-        max_tokens: 1,
-      }, token);
-      displayPrediction(result || {});
-    } catch (err) {
-      if (resultsContainer) {
-        resultsContainer.innerHTML = '<div class="card"><div class="form-alert error" style="margin:0;"><i class="fas fa-triangle-exclamation"></i><span>' +
-          esc(err.message || 'Prediction failed') + '</span></div></div>';
-      }
-      ui.toast(err.message || 'Prediction failed', 'error');
-    } finally {
-      ui.setButtonLoading(button, false);
-    }
+    await window.CORPUS_ACTIONS.run({
+      name: 'Run prediction',
+      key: 'prediction:run',
+      element: button,
+      label: 'Predicting…',
+      success: 'Prediction generated successfully!',
+      failure: 'Prediction failed.',
+      run: async function () {
+        const token = await state.getAccessToken();
+        return window.CORPUS_API.nextToken(activeModel.id, {
+          text: text,
+          temperature: temperature,
+          top_k: 10,
+          top_p: 0.9,
+          max_tokens: 1,
+        }, token);
+      },
+      onSuccess: function (result) {
+        displayPrediction(result || {});
+      },
+      onFailure: function (err) {
+        if (resultsContainer) {
+          resultsContainer.innerHTML = '<div class="card"><div class="form-alert error" style="margin:0;"><i class="fas fa-triangle-exclamation"></i><span>' +
+            esc((err && err.message) || 'Prediction failed') + '</span></div></div>';
+        }
+      },
+    });
   }
 
   function displayPrediction(result) {

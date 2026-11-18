@@ -284,7 +284,7 @@ window.datasets = (function () {
           <p class="section-subtitle">Upload training text to private storage, inspect what the backend stored, and send a dataset straight to training.</p>
         </div>
         <div class="page-header-actions">
-          <button class="btn btn-outline" type="button" onclick="datasets.loadDatasets()">
+          <button class="btn btn-outline" type="button" onclick="datasets.loadDatasets(this)">
             <i class="fas fa-rotate"></i> Refresh
           </button>
           <button class="btn btn-primary" type="button" onclick="datasets.showUpload()">
@@ -508,7 +508,18 @@ window.datasets = (function () {
     if (progress) progress.innerHTML = '';
   }
 
-  async function loadDatasets() {
+  async function loadDatasets(sourceButton) {
+    if (sourceButton) {
+      return window.CORPUS_ACTIONS.refresh({
+        name: 'Refresh datasets',
+        element: sourceButton,
+        run: loadDatasetsData,
+      });
+    }
+    return loadDatasetsData();
+  }
+
+  async function loadDatasetsData() {
     const container = document.getElementById('datasets-library');
     if (container && !(state.getDatasets() || []).length) container.innerHTML = ui.skeletonCards(2);
     try {
@@ -611,13 +622,13 @@ window.datasets = (function () {
         </div>
         <div class="dataset-actions">
           ${d.has_file ? '' : `<button class="btn btn-primary btn-sm" type="button" onclick="datasets.uploadFileFor('${esc(d.id)}')" title="Attach the missing file"><i class="fas fa-upload"></i> Upload file</button>`}
-          <button class="btn btn-outline btn-sm" type="button" onclick="datasets.previewDataset('${esc(d.id)}')" ${d.has_file ? '' : 'disabled title="Upload a file first"'}>
+          <button class="btn btn-outline btn-sm" type="button" onclick="datasets.previewDataset('${esc(d.id)}', this)" ${d.has_file ? '' : 'disabled title="Upload a file first"'}>
             <i class="fas fa-eye"></i> Preview
           </button>
           <button class="btn btn-outline btn-sm" type="button" onclick="datasets.useDataset('${esc(d.id)}')" ${d.has_file ? '' : 'disabled title="Upload a file first"'}>
             <i class="fas fa-flask"></i> Use for training
           </button>
-          <button class="btn btn-danger btn-sm" type="button" onclick="datasets.deleteDataset('${esc(d.id)}')" title="Delete dataset">
+          <button class="btn btn-danger btn-sm" type="button" onclick="datasets.deleteDataset('${esc(d.id)}', this)" title="Delete dataset">
             <i class="fas fa-trash"></i>
           </button>
         </div>
@@ -694,14 +705,43 @@ window.datasets = (function () {
     }
 
     uploading = true;
-    await persistPendingQueue(baseName);
     const uploadBtn = document.getElementById('datasets-upload-btn');
-    ui.setButtonLoading(uploadBtn, true);
+    const operationLabel = files.length === 1
+      ? 'Upload dataset ' + files[0].name
+      : 'Upload ' + files.length + ' datasets';
+    const pendingCount = queue.filter(item => item.state !== 'done').length || 1;
+    const operation = window.CORPUS_ACTIONS.beginOperation({
+      kind: 'upload',
+      name: operationLabel,
+      state: window.CORPUS_ACTIONS.STATES.PROCESSING,
+      progress: 0,
+    });
+    const banner = CORPUS_UTILS.progressToast
+      ? CORPUS_UTILS.progressToast(operation.id, 'Preparing the upload…', 0)
+      : null;
+    let completedFiles = 0;
+    const reportProgress = (message, filePercent) => {
+      const overall = Math.round(((completedFiles + (Math.max(0, Math.min(100, filePercent || 0)) / 100)) / pendingCount) * 100);
+      if (banner) banner.update(message, overall);
+      window.CORPUS_ACTIONS.updateOperation(operation.id, { progress: overall, result: message });
+    };
+
+    ui.setButtonLoading(uploadBtn, true, 'Uploading…');
     let successCount = 0;
     let failedCount = 0;
     let lastDatasetId = null;
+    let lastFailure = null;
 
-    for (let index = 0; index < queue.length; index += 1) {
+    // Persisting the queue is part of the action: if it fails the button must
+    // still come back and the user must be told, instead of a dead Upload
+    // control and an unhandled rejection.
+    try {
+      await persistPendingQueue(baseName);
+    } catch (queueErr) {
+      lastFailure = queueErr;
+    }
+
+    if (!lastFailure) for (let index = 0; index < queue.length; index += 1) {
       const item = queue[index];
       if (item.state === 'done') {
         successCount += 1;
@@ -717,6 +757,7 @@ window.datasets = (function () {
       queue[index].progress = 0;
       queue[index].message = item.datasetId ? 'Retrying upload…' : 'Creating dataset record…';
       updateProgress(index);
+      reportProgress(files.length === 1 ? queue[index].message : datasetName + ': ' + queue[index].message, 0);
 
       try {
         const token = await state.getAccessToken();
@@ -763,10 +804,13 @@ window.datasets = (function () {
             const tusUpload = await uploadWithTus(file, datasetId, queue[index].uploadSession, (percent) => {
               queue[index].progress = percent;
               updateProgress(index);
+              reportProgress('Uploading ' + file.name + '…', percent);
             });
             queue[index].storageUploaded = true;
             queue[index].progress = 99;
             queue[index].message = 'Upload transferred. Verifying and registering dataset…';
+            updateProgress(index);
+            reportProgress('Verifying the stored file with the backend…', 99);
             await persistPendingQueue(baseName);
             await window.CORPUS_API.completeDatasetUpload(datasetId, {
               storage_path: queue[index].uploadSession.storage_path,
@@ -788,6 +832,7 @@ window.datasets = (function () {
             if (percent == null) return;
             queue[index].progress = percent;
             updateProgress(index);
+            reportProgress('Uploading ' + file.name + '…', percent);
           });
         }
 
@@ -795,6 +840,8 @@ window.datasets = (function () {
         queue[index].progress = 100;
         queue[index].message = 'Stored and registered.';
         updateProgress(index);
+        completedFiles += 1;
+        reportProgress((files.length === 1 ? 'Stored and registered.' : datasetName + ': stored and registered.'), 100);
         await persistPendingQueue(baseName);
         successCount += 1;
         lastDatasetId = datasetId;
@@ -802,40 +849,62 @@ window.datasets = (function () {
         queue[index].state = 'failed';
         queue[index].message = err && err.message ? err.message : 'Upload failed';
         updateProgress(index);
-        await persistPendingQueue(baseName);
+        if (!lastFailure) lastFailure = err;
+        completedFiles += 1;
+        await persistPendingQueue(baseName).catch(() => {});
         failedCount += 1;
       }
     }
 
     uploading = false;
     ui.setButtonLoading(uploadBtn, false);
+    if (banner) banner.close();
 
-    if (failedCount === 0 && successCount > 0) {
-      ui.toast(successCount + ' dataset' + (successCount === 1 ? '' : 's') + ' uploaded', 'success');
-      const area = document.getElementById('datasets-upload-area');
-      if (area) area.style.display = 'none';
-      const input = document.getElementById('datasets-file');
-      if (input) input.value = '';
-      if (nameInput) nameInput.value = '';
-      queue = [];
-      await persistPendingQueue('');
-      renderQueue();
-      const progress = document.getElementById('datasets-progress');
-      if (progress) progress.innerHTML = '';
-    } else if (successCount > 0) {
-      queue = queue.filter(item => item.state !== 'done');
-      await persistPendingQueue(baseName);
-      renderQueue();
-      renderProgress();
-      ui.toast(successCount + ' uploaded, ' + failedCount + ' failed — fix or retry below.', 'warning');
-    } else {
-      renderQueue();
-      ui.toast('Upload failed — see the progress list for details.', 'error');
+    try {
+      if (failedCount === 0 && successCount > 0) {
+        const area = document.getElementById('datasets-upload-area');
+        if (area) area.style.display = 'none';
+        const input = document.getElementById('datasets-file');
+        if (input) input.value = '';
+        if (nameInput) nameInput.value = '';
+        queue = [];
+        await persistPendingQueue('');
+        renderQueue();
+        const progress = document.getElementById('datasets-progress');
+        if (progress) progress.innerHTML = '';
+        window.CORPUS_ACTIONS.finishOperation(operation.id, window.CORPUS_ACTIONS.STATES.COMPLETED, {
+          result: successCount === 1
+            ? '1 dataset uploaded successfully!'
+            : successCount + ' datasets uploaded successfully!',
+        });
+      } else if (successCount > 0) {
+        queue = queue.filter(item => item.state !== 'done');
+        await persistPendingQueue(baseName);
+        renderQueue();
+        renderProgress();
+        window.CORPUS_ACTIONS.finishOperation(operation.id, window.CORPUS_ACTIONS.STATES.FAILED, {
+          error: successCount + ' uploaded, ' + failedCount + ' failed — fix or retry below.',
+          notify: false,
+        });
+        ui.toast(successCount + ' uploaded, ' + failedCount + ' failed — fix or retry below.', 'warning', 7000);
+      } else {
+        renderQueue();
+        const detail = (lastFailure && lastFailure.message) || 'Upload failed — see the progress list for details.';
+        window.CORPUS_ACTIONS.finishOperation(operation.id, window.CORPUS_ACTIONS.STATES.FAILED, {
+          error: detail,
+        });
+      }
+
+      // Refresh from the backend so file metadata and status are authoritative.
+      await loadDatasets();
+      notifyDatasetsChanged(lastDatasetId);
+    } catch (postErr) {
+      // Anything that fails after the bytes landed must not leave the
+      // operation looking unfinished.
+      window.CORPUS_ACTIONS.finishOperation(operation.id, window.CORPUS_ACTIONS.STATES.FAILED, {
+        error: postErr && postErr.message ? postErr.message : 'The upload finished but the dataset list could not be refreshed.',
+      });
     }
-
-    // Refresh from the backend so file metadata and status are authoritative.
-    await loadDatasets();
-    notifyDatasetsChanged(lastDatasetId);
   }
 
   function notifyDatasetsChanged(datasetId) {
@@ -862,28 +931,55 @@ window.datasets = (function () {
         ui.toast(invalid, 'error');
         return;
       }
-      ui.toast('Uploading ' + file.name + '…', 'info', 1500);
-      try {
-        const token = await state.getAccessToken();
-        await window.CORPUS_API.uploadDatasetFile(datasetId, file, token);
-        ui.toast('Dataset file uploaded', 'success');
-        await loadDatasets();
-        notifyDatasetsChanged(datasetId);
-      } catch (err) {
-        ui.toast(err.message || 'Upload failed', 'error');
-        await loadDatasets();
-      }
+      const banner = CORPUS_UTILS.progressToast
+        ? CORPUS_UTILS.progressToast('dataset-file-' + datasetId, 'Uploading ' + file.name + '…', null)
+        : null;
+      const outcome = await window.CORPUS_ACTIONS.run({
+        name: 'Upload file to ' + (dataset.name || datasetId),
+        key: 'datasets:file:' + datasetId,
+        label: 'Uploading…',
+        success: 'Dataset file uploaded successfully!',
+        failure: 'The dataset file could not be uploaded.',
+        run: async function () {
+          const token = await state.getAccessToken();
+          return window.CORPUS_API.uploadDatasetFile(datasetId, file, token);
+        },
+        onSuccess: async function () {
+          await loadDatasets();
+          notifyDatasetsChanged(datasetId);
+        },
+        onFailure: async function () {
+          // A failed attach leaves the record without a file; show its real
+          // status instead of pretending nothing happened.
+          await loadDatasets();
+        },
+      });
+      if (banner) banner.close();
+      return outcome;
     };
     input.click();
   }
 
-  async function previewDataset(id) {
+  async function previewDataset(id, sourceButton) {
     const dataset = state.getDataset(id);
     if (!dataset) return;
-    ui.toast('Loading preview…', 'info', 1200);
-    try {
-      const token = await state.getAccessToken();
-      const preview = await window.CORPUS_API.previewDataset(id, token);
+    await window.CORPUS_ACTIONS.run({
+      name: 'Preview dataset',
+      key: 'datasets:preview:' + id,
+      element: sourceButton || null,
+      label: 'Loading…',
+      success: 'Preview loaded successfully!',
+      failure: 'The preview could not be loaded.',
+      run: async function () {
+        const token = await state.getAccessToken();
+        return window.CORPUS_API.previewDataset(id, token);
+      },
+      onSuccess: function (preview) { showPreview(dataset, preview); },
+    });
+  }
+
+  function showPreview(dataset, preview) {
+    {
       const body = esc(preview.preview || '').replace(/\n/g, '<br>');
       const meta = [
         preview.file_name ? 'File: ' + esc(preview.file_name) : null,
@@ -903,8 +999,6 @@ window.datasets = (function () {
       } else {
         ui.toast('Preview: ' + (preview.preview || '').slice(0, 200), 'info', 8000);
       }
-    } catch (err) {
-      ui.toast(err.message || 'Preview failed', 'error');
     }
   }
 
@@ -920,23 +1014,30 @@ window.datasets = (function () {
     router.navigate('training');
   }
 
-  async function deleteDataset(id) {
+  async function deleteDataset(id, sourceButton) {
     const dataset = state.getDataset(id);
     const label = dataset ? '"' + (dataset.name || dataset.id) + '"' : 'this dataset';
-    ui.confirm('Delete dataset', 'Permanently delete ' + label + ' and its stored file? This cannot be undone.', async () => {
-      try {
-        const token = await state.getAccessToken();
-        await window.CORPUS_API.deleteDataset(id, token);
-        if (state.removeDataset) state.removeDataset(id);
-        if (state.getPendingDatasetId && state.getPendingDatasetId() === id && state.clearPendingDatasetId) {
-          state.clearPendingDatasetId();
-        }
-        ui.toast('Dataset deleted', 'success');
-        await loadDatasets();
-        notifyDatasetsChanged(null);
-      } catch (err) {
-        ui.toast(err.message || 'Delete failed', 'error');
-      }
+    ui.confirm('Delete dataset', 'Permanently delete ' + label + ' and its stored file? This cannot be undone.', function () {
+      return window.CORPUS_ACTIONS.run({
+        name: 'Delete dataset ' + (dataset && (dataset.name || dataset.id) ? (dataset.name || dataset.id) : ''),
+        key: 'datasets:delete:' + id,
+        element: sourceButton || document.querySelector('[data-delete-dataset="' + id + '"]'),
+        label: 'Deleting…',
+        success: 'Dataset deleted successfully!',
+        failure: 'The dataset could not be deleted.',
+        run: async function () {
+          const token = await state.getAccessToken();
+          return window.CORPUS_API.deleteDataset(id, token);
+        },
+        onSuccess: async function () {
+          if (state.removeDataset) state.removeDataset(id);
+          if (state.getPendingDatasetId && state.getPendingDatasetId() === id && state.clearPendingDatasetId) {
+            state.clearPendingDatasetId();
+          }
+          await loadDatasets();
+          notifyDatasetsChanged(null);
+        },
+      });
     });
   }
 
