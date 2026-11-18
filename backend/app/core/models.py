@@ -201,6 +201,54 @@ class EvaluationRun(Base):
     )
 
 
+class TrainingDevice(Base):
+    """A device that may contribute compute to this account (migration 008)."""
+    __tablename__ = "training_devices"
+
+    id = Column(String, primary_key=True, default=lambda: "dev_" + uuid.uuid4().hex[:10])
+    owner_id = Column(UUID(as_uuid=True), nullable=False)
+    name = Column(String, nullable=False)
+    device_type = Column(String, nullable=True)
+    platform = Column(String, nullable=True)
+    capabilities = Column(JSONB, nullable=False, default=dict)
+    # online | busy | paused | offline
+    status = Column(String, nullable=False, default="offline")
+    last_heartbeat = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_training_devices_owner_id", "owner_id"),
+    )
+
+
+class TrainingDeviceTask(Base):
+    """Lease-backed unit of work handed to one device (migration 008)."""
+    __tablename__ = "training_device_tasks"
+
+    id = Column(String, primary_key=True, default=lambda: "task_" + uuid.uuid4().hex[:10])
+    owner_id = Column(UUID(as_uuid=True), nullable=False)
+    device_id = Column(String, ForeignKey("training_devices.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(String, ForeignKey("training_jobs.id", ondelete="CASCADE"), nullable=True)
+    # train | preprocess
+    kind = Column(String, nullable=False, default="train")
+    # assigned | running | completed | failed | expired
+    status = Column(String, nullable=False, default="assigned")
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    progress_percent = Column(Float, nullable=False, default=0.0)
+    shard_index = Column(BigInteger, nullable=True)
+    shard_count = Column(BigInteger, nullable=True)
+    detail = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_training_device_tasks_owner_id", "owner_id"),
+        Index("ix_training_device_tasks_device_id", "device_id"),
+        Index("ix_training_device_tasks_job_id", "job_id"),
+    )
+
+
 class Checkpoint(Base):
     """Model checkpoint; ownership is inherited from its parent model.
 
