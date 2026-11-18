@@ -320,3 +320,35 @@ async def test_metadata_write_failure_removes_the_uploaded_object(http, storage,
     stored = [d for d in listed.json() if d["id"] == dataset["id"]][0]
     assert stored["status"] == "failed"
     assert stored["has_file"] is False
+
+
+@pytest.mark.asyncio
+async def test_dataset_text_range_streams_real_stored_text_in_shards(http):
+    ds = await _create_dataset(http)
+    body = "".join(f"line {index} of the device corpus\n" for index in range(200))
+    await _upload(http, ds["id"], content=body.encode())
+
+    first = await http.get(f"/api/v1/datasets/{ds['id']}/text?offset=0&limit=500")
+    assert first.status_code == 200, first.text
+    chunk = first.json()
+    assert chunk["text"] == body[:500]
+    assert chunk["total_characters"] == len(body)
+    assert chunk["returned_characters"] == 500
+    assert chunk["complete"] is False
+    assert chunk["next_offset"] == 500
+
+    collected = chunk["text"]
+    offset = chunk["next_offset"]
+    while offset is not None:
+        page = (await http.get(f"/api/v1/datasets/{ds['id']}/text?offset={offset}&limit=500")).json()
+        collected += page["text"]
+        offset = page["next_offset"]
+    assert collected == body, "shards reassemble the exact stored text"
+
+
+@pytest.mark.asyncio
+async def test_dataset_text_range_is_owner_only_and_needs_a_file(http, http_as_other):
+    ds = await _create_dataset(http)
+    assert (await http.get(f"/api/v1/datasets/{ds['id']}/text")).status_code == 400
+    await _upload(http, ds["id"])
+    assert (await http_as_other.get(f"/api/v1/datasets/{ds['id']}/text")).status_code == 403

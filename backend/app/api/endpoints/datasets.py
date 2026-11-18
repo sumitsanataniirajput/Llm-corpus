@@ -582,6 +582,89 @@ async def preview_dataset(
     }
 
 
+# Extracted text for a dataset, cached in-process so a device that streams its
+# shard in several ranged requests does not download the object each time.
+_TextCacheEntry = Dict[str, Any]
+_TEXT_CACHE: Dict[str, _TextCacheEntry] = {}
+_TEXT_CACHE_MAX_ENTRIES = 4
+_TEXT_CACHE_MAX_CHARS = 8_000_000
+
+
+def _cache_text(key: str, text_data: str) -> None:
+    if len(text_data) > _TEXT_CACHE_MAX_CHARS:
+        return
+    while len(_TEXT_CACHE) >= _TEXT_CACHE_MAX_ENTRIES:
+        _TEXT_CACHE.pop(next(iter(_TEXT_CACHE)))
+    _TEXT_CACHE[key] = {"text": text_data}
+
+
+@router.get("/{dataset_id}/text", tags=["datasets"])
+async def dataset_text_range(
+    dataset_id: str,
+    offset: int = Query(0, ge=0, description="Character offset into the extracted text"),
+    limit: int = Query(200_000, ge=1, le=200_000, description="Maximum characters to return"),
+    user=Depends(require_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Return a character range of the dataset's real stored text.
+
+    Device workers use this to tokenize a shard they own without downloading the
+    whole file and without ever touching storage credentials. The response says
+    exactly how much text exists and where the next shard starts, so a client can
+    stream a dataset in bounded chunks.
+    """
+    owner_id = uuid.UUID(user["user_id"])
+    ds = (await db.execute(select(Dataset).where(Dataset.id == dataset_id))).scalar_one_or_none()
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if ds.owner_id != owner_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    file_row = await latest_file_for_dataset(db, dataset_id, owner_id)
+    if not file_row:
+        raise HTTPException(
+            status_code=400,
+            detail="This dataset has no uploaded file yet. Upload a file in Dataset Manager first.",
+        )
+
+    cache_key = f"{dataset_id}:{file_row['storage_path']}"
+    cached = _TEXT_CACHE.get(cache_key)
+    if cached is not None:
+        text_data = cached["text"]
+    else:
+        storage = _storage_client()
+        try:
+            bucket_api = storage.storage.from_(settings.STORAGE_BUCKET)
+            raw = await asyncio.to_thread(bucket_api.download, file_row["storage_path"])
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not read the stored dataset file: {str(exc)[:300]}")
+        if isinstance(raw, dict):
+            raw = raw.get("data", b"")
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8", errors="replace")
+        if not raw:
+            raise HTTPException(status_code=400, detail="The stored dataset file is empty or could not be downloaded.")
+        try:
+            text_data = extract_text(raw, file_row["file_name"])
+        except DatasetTextError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _cache_text(cache_key, text_data)
+
+    total = len(text_data)
+    chunk = text_data[offset:offset + limit]
+    next_offset = offset + len(chunk)
+    return {
+        "dataset_id": dataset_id,
+        "file_name": file_row["file_name"],
+        "offset": offset,
+        "limit": limit,
+        "total_characters": total,
+        "returned_characters": len(chunk),
+        "next_offset": next_offset if next_offset < total else None,
+        "complete": next_offset >= total,
+        "text": chunk,
+    }
+
+
 @router.post("/{dataset_id}/preprocess", tags=["datasets"])
 async def preprocess_dataset(dataset_id: str, config: dict, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     owner_id = uuid.UUID(user["user_id"])
