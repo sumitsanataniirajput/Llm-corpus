@@ -80,6 +80,8 @@ window.datasets = (function () {
           name: item.name,
           size: item.size,
           datasetId: item.datasetId || null,
+          uploadSession: item.uploadSession || null,
+          storageUploaded: !!item.storageUploaded,
           state: item.state === 'done' ? 'done' : 'ready',
           message: item.state === 'done' ? 'Already uploaded.' : 'Restored from this device. Ready to upload.',
         })),
@@ -137,6 +139,8 @@ window.datasets = (function () {
           name: item.name || file.name,
           size: Number(item.size || file.size || 0),
           datasetId: item.datasetId || null,
+          uploadSession: item.uploadSession || null,
+          storageUploaded: !!item.storageUploaded,
           state: done ? 'done' : 'ready',
           progress: done ? 100 : 0,
           message: done ? 'Already uploaded.' : 'Restored from this device. Ready to upload.',
@@ -164,7 +168,75 @@ window.datasets = (function () {
   }
 
   function maxSize() {
-    return (window.CORPUS_CONFIG && window.CORPUS_CONFIG.MAX_FILE_SIZE) || 104857600;
+    return Number((window.CORPUS_CONFIG && window.CORPUS_CONFIG.MAX_FILE_SIZE) || 0);
+  }
+
+  let tusClientPromise = null;
+
+  function ensureTusClient() {
+    if (window.tus && typeof window.tus.Upload === 'function') return Promise.resolve(window.tus);
+    if (tusClientPromise) return tusClientPromise;
+    tusClientPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js';
+      script.async = true;
+      script.onload = () => {
+        if (window.tus && typeof window.tus.Upload === 'function') resolve(window.tus);
+        else reject(new Error('The resumable upload library did not load correctly.'));
+      };
+      script.onerror = () => reject(new Error('Could not load the resumable upload library. Check your connection and retry.'));
+      document.head.appendChild(script);
+    }).catch(err => {
+      tusClientPromise = null;
+      throw err;
+    });
+    return tusClientPromise;
+  }
+
+  async function uploadWithTus(file, datasetId, session, onProgress) {
+    const tus = await ensureTusClient();
+    const cfg = window.CORPUS_CONFIG || {};
+    const projectMatch = String(cfg.SUPABASE_URL || '').match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i);
+    if (!projectMatch || !cfg.SUPABASE_ANON_KEY) {
+      throw new Error('Supabase Storage configuration is missing for resumable uploads.');
+    }
+    const projectId = projectMatch[1];
+    return new Promise((resolve, reject) => {
+      const upload = new tus.Upload(file, {
+        endpoint: 'https://' + projectId + '.storage.supabase.co/storage/v1/upload/resumable',
+        retryDelays: [0, 3000, 5000, 10000, 20000],
+        headers: {
+          apikey: cfg.SUPABASE_ANON_KEY,
+          'x-signature': session.token,
+        },
+        metadata: {
+          bucketName: session.bucket || 'corpus-storage',
+          objectName: session.storage_path,
+          contentType: file.type || 'text/plain',
+          cacheControl: '3600',
+        },
+        chunkSize: 6 * 1024 * 1024,
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: false,
+        fingerprint: () => Promise.resolve([
+          'corpus-upload',
+          datasetId,
+          session.storage_path,
+          file.name,
+          file.size,
+          file.lastModified || 0,
+        ].join(':')),
+        onError: (error) => reject(error instanceof Error ? error : new Error(String(error))),
+        onProgress: (uploaded, total) => {
+          if (onProgress && total > 0) onProgress(Math.min(99, Math.round((uploaded / total) * 99)));
+        },
+        onSuccess: () => resolve(upload),
+      });
+      upload.findPreviousUploads().then(previous => {
+        if (previous && previous.length) upload.resumeFromPreviousUpload(previous[0]);
+        upload.start();
+      }).catch(reject);
+    });
   }
 
   function formatsLabel() {
@@ -235,7 +307,7 @@ window.datasets = (function () {
         <div class="drop-zone" id="datasets-drop" role="group" aria-label="Upload dataset files">
           <i class="fas fa-file-import" aria-hidden="true"></i>
           <strong id="datasets-drop-title">Choose training files</strong>
-          <span class="drop-zone-meta" id="datasets-drop-meta">${esc(formatsLabel())} · up to ${esc(CORPUS_UTILS.formatBytes(maxSize()))} per file</span>
+          <span class="drop-zone-meta" id="datasets-drop-meta">${esc(formatsLabel())} · no app-level size cap · files over 6 MB use resumable Storage uploads</span>
           <label class="drop-zone-picker-label" for="datasets-file">Select files from your device</label>
           <input type="file" id="datasets-file" name="datasets-file" class="drop-zone-input"
                  multiple accept="${esc(acceptAttr())}"
@@ -558,8 +630,9 @@ window.datasets = (function () {
     if (formats().indexOf(ext) === -1) {
       return 'Unsupported format "' + ext + '". Supported: ' + formatsLabel() + '.';
     }
-    if (file.size > maxSize()) {
-      return 'File too large (max ' + CORPUS_UTILS.formatBytes(maxSize()) + ').';
+    const limit = maxSize();
+    if (limit > 0 && file.size > limit) {
+      return 'File too large (max ' + CORPUS_UTILS.formatBytes(limit) + ').';
     }
     if (!file.size) {
       return 'That file is empty.';
@@ -661,14 +734,61 @@ window.datasets = (function () {
           await persistPendingQueue(baseName);
         }
 
-        queue[index].message = 'Uploading bytes…';
+        queue[index].message = file.size > Number(window.CORPUS_CONFIG.STANDARD_UPLOAD_THRESHOLD || (6 * 1024 * 1024))
+          ? 'Preparing a resumable direct-to-Storage upload…'
+          : 'Uploading bytes…';
         updateProgress(index);
 
-        await window.CORPUS_API.uploadDatasetFileWithProgress(datasetId, file, token, (percent) => {
-          if (percent == null) return;
-          queue[index].progress = percent;
-          updateProgress(index);
-        });
+        if (file.size > Number(window.CORPUS_CONFIG.STANDARD_UPLOAD_THRESHOLD || (6 * 1024 * 1024))) {
+          if (!queue[index].uploadSession) {
+            const session = await window.CORPUS_API.createDatasetUploadSession(datasetId, {
+              file_name: file.name,
+              content_type: file.type || 'text/plain',
+            }, token);
+            if (!session || !session.storage_path || !session.token) {
+              throw new Error('The backend did not return a valid resumable upload session.');
+            }
+            queue[index].uploadSession = {
+              bucket: session.bucket,
+              storage_path: session.storage_path,
+              token: session.token,
+            };
+            await persistPendingQueue(baseName);
+          }
+
+          if (!queue[index].storageUploaded) {
+            queue[index].message = 'Uploading directly to private Storage in resumable 6 MB chunks…';
+            updateProgress(index);
+            const tusUpload = await uploadWithTus(file, datasetId, queue[index].uploadSession, (percent) => {
+              queue[index].progress = percent;
+              updateProgress(index);
+            });
+            queue[index].storageUploaded = true;
+            queue[index].progress = 99;
+            queue[index].message = 'Upload transferred. Verifying and registering dataset…';
+            await persistPendingQueue(baseName);
+            await window.CORPUS_API.completeDatasetUpload(datasetId, {
+              storage_path: queue[index].uploadSession.storage_path,
+              file_name: file.name,
+            }, token);
+            if (tusUpload && typeof tusUpload.removeFingerprint === 'function') {
+              try { await tusUpload.removeFingerprint(); } catch (ignore) { /* best effort */ }
+            }
+          } else {
+            queue[index].message = 'Verifying and registering the completed Storage upload…';
+            updateProgress(index);
+            await window.CORPUS_API.completeDatasetUpload(datasetId, {
+              storage_path: queue[index].uploadSession.storage_path,
+              file_name: file.name,
+            }, token);
+          }
+        } else {
+          await window.CORPUS_API.uploadDatasetFileWithProgress(datasetId, file, token, (percent) => {
+            if (percent == null) return;
+            queue[index].progress = percent;
+            updateProgress(index);
+          });
+        }
 
         queue[index].state = 'done';
         queue[index].progress = 100;
