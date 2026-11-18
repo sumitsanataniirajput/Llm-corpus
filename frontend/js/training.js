@@ -700,11 +700,24 @@ window.training = (function () {
 
     updateMonitorStatus(selected);
     updateControls(selected);
-    await refreshJob(selected.id, true);
 
-    if (window.CORPUS_API.listTrainingLogs) {
+    // Opening this page used to cost four sequential round trips (job refresh,
+    // event history, checkpoints, then the model's checkpoints again). They are
+    // independent reads, so they run together and the page settles in one
+    // backend latency instead of four.
+    const historyPromise = window.CORPUS_API.listTrainingLogs && !isActiveStatus(selected.status)
+      ? window.CORPUS_API.listTrainingLogs(selected.id, token, { limit: 200 })
+      : Promise.resolve(null);
+    await Promise.all([
+      refreshJob(selected.id, true),
+      historyPromise,
+      selected.model_id ? loadCheckpoints(selected.model_id) : Promise.resolve(),
+    ]);
+
+    if (historyPromise) {
       try {
-        const events = await window.CORPUS_API.listTrainingLogs(selected.id, token);
+        // Already resolved above; awaiting it again costs nothing.
+        const events = await historyPromise;
         (events || []).forEach(entry => {
           if (!entry || !entry.event) return;
           if (entry.event === 'started') {
@@ -720,7 +733,6 @@ window.training = (function () {
       }
     }
 
-    if (selected.model_id) await loadCheckpoints(selected.model_id);
     const latest = state.getTrainingJob(selected.id) || selected;
     if (isActiveStatus(latest.status) && !startInFlight) {
       connectJobStream(selected.id);

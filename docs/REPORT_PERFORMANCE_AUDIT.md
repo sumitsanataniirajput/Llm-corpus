@@ -108,40 +108,76 @@ collection queries run in 8–28 ms with 300/200/150 rows).
 
 ## 4. Before / after (executed measurements)
 
-Same machine, same fixtures, jsdom + real PostgreSQL.
+Measured on the **same merged codebase**: `main` at `4247572` vs this branch,
+same machine and fixtures. `main` had no probe, so the probe files were copied
+into a `main` worktree to measure it under identical conditions.
 
-| Scenario | Before | After |
+| Scenario | `main` | this branch |
 |---|---|---|
-| Navigation cycle, 120 ms latency — average | 155 ms | **103 ms** |
-| Navigation cycle, 120 ms latency — worst page | 420 ms | **254 ms** |
-| Navigation cycle, 1200 ms latency — average | 1170 ms | **728 ms** |
-| API requests per cycle (14 pages) | 30 | **9** |
-| API requests on an immediate repeat cycle | 30 | **4** |
-| Models page, 300 models | 1089 ms / 1587 ms CPU | **178 ms / 285 ms CPU** |
-| Datasets page, 500 datasets | 858 ms / 1175 ms CPU | **104 ms / 186 ms CPU** |
-| DOM nodes after a full cycle | 19 435 | **1 094** |
-| Click during a pending navigation | swallowed (route stays on the first page) | **lands on the clicked page** |
-| Leftover timers after a full cycle | 3 | **0** |
-| Chart updates for 60 metric events | 120 (2 per event, animated) | **≤ 4** |
-| Training log DOM | unbounded | **≤ 300 lines** |
-| `GET /datasets/` with 300 rows | not previously measurable | **28 ms** |
-| `GET /models/` 200 · `GET /training/` 150 | not previously measurable | **10 ms · 8 ms** |
-| Metrics payload, 600-step run | 75 KB per poll | **25 KB** (newest 200) |
+| Navigation average, 120 ms latency | 167 ms | **136 ms** |
+| Navigation average / worst, 1200 ms latency | 1256 / 4871 ms | **823 / 2459 ms** |
+| Training page, 1200 ms latency | 4843 ms | **2459 ms** |
+| API calls per cycle (14 pages) | 24 | **11** |
+| API calls on a repeat cycle | 24 | **5** |
+| Models page, 300 models | 1112 ms | **205 ms** |
+| Datasets page, 500 datasets | — | **158 ms** |
+| CPU per cycle (500 datasets / 300 models / 100 jobs) | 3431 ms | **1389 ms** |
+| DOM nodes after a cycle | 4067 (19 427 at 500 datasets) | **1095** |
+| Click during a pending navigation | swallowed | **honoured** |
+| Chart updates for 60 metric events | 60+, animated | **≤ 4** |
+| Metrics payload, 600-step run | 75 KB | **25 KB** |
 
-Honest caveat: jsdom's layout/parse is far slower than Chrome's, so absolute
-milliseconds overstate production. The request counts, the DOM sizes, the
+The Training page change is worth naming separately: opening it cost four
+sequential round trips (job refresh → event history → checkpoints → the model's
+checkpoints again). The independent reads now run together, so it costs one
+backend latency instead of four — the single largest remaining stall.
+
+Honest caveat: jsdom's parse/layout is far slower than Chrome's, so absolute
+milliseconds overstate production. Request counts, DOM sizes, the
 swallowed-click result and the ratios are the load-bearing evidence. **No
 Android device measurement has been taken** — that requires the deploy.
-
----
 
 ## 5. Tests executed
 
 | Suite | Result |
 |---|---|
-| `npm test` (frontend, jsdom + scripts) | **99 / 99 passed** (was 87; +12 new performance regressions) |
-| `pytest` (backend, real PostgreSQL) | **74 / 74 passed** (was 71; +3 measured performance tests) |
+| `pytest` (backend, real PostgreSQL) | **80 / 80 passed** — green |
 | `node --check frontend/js/*.js` | clean |
+| `npm test` (frontend) | **91 / 102 pass; 11 failures that already exist on `main`** (see §5a) |
+
+### 5a. Pre-existing failures on `main` (not introduced here)
+
+`main` at `4247572` was measured directly in a worktree with the same harness:
+
+| File | `main` | this branch |
+|---|---|---|
+| `dataset-upload.test.mjs` | 8 pass / 5 fail | identical |
+| `datasets-diagnostics.test.mjs` | 5 pass / 2 fail | identical |
+| `app-boot.test.mjs` | 7 pass / 1 fail | identical |
+| `responsive-layout.test.mjs` | 12 pass / 1 fail | identical |
+| `training-dataset-selector.test.mjs` | 12 pass / 2 fail **+ the process never exits** | identical results, **hang fixed** |
+
+All eleven assert the file-picker contract (`.drop-zone > input[type=file]`
+overlay, "tap anywhere opens the picker exactly once") that the commit
+`4247572` deliberately removed — it switched to a visible native input with a
+tappable label. Two more (`training-dataset-selector` tests 12 and 14) assert
+that a failed job re-enables **Start** and that a completed job restores its
+last metrics into the monitor; both fail on `main` too.
+
+They were left untouched here on purpose: reconciling them means choosing the
+picker's contract again, and the last time that contract changed it was for a
+real Android device behaviour that jsdom cannot verify. That is a separate,
+device-checked task. What *was* fixed because the cause was mechanical and
+verifiable:
+
+* `backend/tests/test_model_deletion.py` — the worker now passes a fourth
+  argument (the live-metric publisher) to `_train_sync`; two fakes did not
+  accept it, so those tests raised `TypeError` inside the worker instead of
+  testing cleanup. Backend went from 78/80 to **80/80**.
+* `frontend/tests/training-dataset-selector.test.mjs` — every jsdom window is
+  now closed (and the Training page disposed) in an `after()` hook. An open
+  window kept the recursive 5 s poll timer armed, so Node never exited once
+  that file's tests finished. `npm test` now terminates instead of hanging.
 
 New regression coverage (`frontend/tests/performance.test.mjs`):
 1. a click during a slow page load still navigates to the clicked page;
@@ -161,7 +197,8 @@ Backend (`backend/tests/test_api_performance.py`): collection latency/payload
 budgets with 300 datasets, metric windowing (600 → 200 newest, ordering
 preserved), log windowing.
 
-Required interaction table from the brief, against the automated evidence:
+Required interaction table from the brief (evidence is the automated suites plus
+the probe; the picker row is called out honestly):
 
 | Interaction | Evidence |
 |---|---|

@@ -78,23 +78,32 @@ npm test                                    # 99 tests (frontend incl. performan
 cd backend && pytest                        # 74 tests (incl. test_api_performance.py)
 ```
 
-## 6. Measured before/after (jsdom + Node, same machine, same fixtures)
+## 6. Measured before/after
 
-| Scenario | Before | After |
+Measured on **the same merged codebase**: `main` at `4247572` versus this branch,
+same machine, same fixtures, `scripts/perf-probe.mjs`. `main` had no probe, so the
+same probe files were copied into a worktree of `main` to measure it.
+
+| Scenario | `main` | this branch |
 |---|---|---|
-| Navigation cycle, 120 ms backend latency (avg / worst) | 155 / 420 ms | 103 / 254 ms |
-| Navigation cycle, 1200 ms backend latency (avg / worst) | 1170 / 2462 ms | 728 / 2414 ms |
-| API requests per cycle (first / repeat) | 30 / 30 | 9 / 4 |
-| Models page, 300 models | 1089 ms, 1587 ms CPU | 178 ms, 285 ms CPU |
-| Datasets page, 500 datasets | 858 ms, 1175 ms CPU | 104 ms, 186 ms CPU |
-| DOM nodes after a full cycle | 19 435 | 1 094 |
-| Click during a pending navigation | swallowed (stays on the first page) | honoured (lands on the clicked page) |
-| Leftover timers/intervals after the cycle | 3 / 0 | 0 / 0 |
-| Backend `GET /datasets/` (300 rows) | not measured before (no harness) | 28 ms |
-| Backend metrics payload (600 steps) | 75 KB every poll | 25 KB (newest 200) |
+| Navigation cycle, 120 ms backend latency — average | 167 ms | **136 ms** |
+| Navigation cycle, 1200 ms backend latency — average / worst | 1256 / 4871 ms | **823 / 2459 ms** |
+| Training page alone, 1200 ms latency (4 sequential round trips → 2) | 4843 ms | **2459 ms** |
+| API requests per cycle (14 pages) | 24 | **11–12** |
+| API requests on an immediate repeat cycle | 24 | **5–6** |
+| Models page, 300 models | 1112 ms | **205 ms** |
+| Datasets page, 500 datasets | (part of 1112 ms worst) | **158 ms** |
+| CPU time for one cycle, 500/300/100 rows | 3431 ms | **1389 ms** |
+| DOM nodes after a full cycle | 4067 (19 427 with 500 datasets) | **1095** |
+| Click during a pending navigation | swallowed (`#/models`) | **honoured (`#/datasets`)** |
+| Leftover timers after the cycle | 0 | **0** |
+| Chart updates for 60 metric events | 1 per event, animated | **≤ 4** |
+| Training log DOM | unbounded | **≤ 300 lines** |
+| Backend `GET /datasets/` (300 rows), `/models/` (200), `/training/` (150) | not measurable | **28 / 10 / 8 ms** |
+| Metrics payload, 600-step run | 75 KB per poll | **25 KB** (newest 200) |
 
-jsdom is considerably slower than a real browser at layout, so the absolute
-milliseconds overstate production; the ratios and the request counts are the
-meaningful part. Real-device numbers must be read from `CORPUS_PERF` on the
-deployed build — until that has been done on a phone, no claim about Android is
-made in this repository.
+jsdom's parse/layout is much slower than a real browser's, so absolute
+milliseconds overstate production. The request counts, the DOM sizes, the
+swallowed-click result and the ratios are the load-bearing evidence. **No
+Android device or real-browser measurement has been taken** — that needs the
+deploy; read `CORPUS_PERF` on the deployed build.
