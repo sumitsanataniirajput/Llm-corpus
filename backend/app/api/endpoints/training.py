@@ -359,6 +359,15 @@ async def stop_job(job_id: str, user=Depends(require_user), db: AsyncSession = D
     if job.status in TERMINAL_STATUSES:
         return {"ok": True, "status": job.status, "signaled": False}
     if job.status == "stopping":
+        # A previous server process may have died after persisting "stopping".
+        # Re-signal and wait briefly. If no local worker remains, reconcile the
+        # stale status to "stopped" instead of leaving the UI stuck forever.
+        finished = await training_worker.stop_and_wait_for_job(job_id, timeout=5.0)
+        if finished:
+            job.status = "stopped"
+            job.updated_at = datetime.now(timezone.utc)
+            await db.commit()
+            return {"ok": True, "status": "stopped", "signaled": True, "recovered": True}
         return {"ok": True, "status": "stopping", "signaled": True}
 
     signaled = training_worker.request_job_stop(job_id)
