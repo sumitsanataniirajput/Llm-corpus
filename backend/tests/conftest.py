@@ -43,8 +43,18 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-a-default-value")
 os.environ.setdefault("WORKER_AUTH_SECRET", "test-worker-secret-not-default")
 os.environ.setdefault("STORAGE_BUCKET", "corpus-storage")
+# Deterministic 32-byte key (hex) so credential-encryption tests exercise the real
+# AES-256-GCM path. It is a test value and exists only in this process.
+os.environ.setdefault(
+    "CREDENTIAL_ENCRYPTION_KEY",
+    "8f2c1d4b6a9e3f7051c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e",
+)
 os.environ.setdefault("ALLOWED_HOSTS", '["*"]')
 os.environ.setdefault("LOG_LEVEL", "WARNING")
+# The middleware limit is per client IP and the whole suite shares one, so raise it
+# from the environment: a monkeypatch would be undone by any test that calls
+# monkeypatch.undo(), which is exactly the fragility this avoids.
+os.environ.setdefault("RATE_LIMIT_REQUESTS_PER_MINUTE", "1000000")
 
 # ---------------------------------------------------------------------------
 # Stub third-party packages that are irrelevant to this test slice

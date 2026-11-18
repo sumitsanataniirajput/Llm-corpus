@@ -48,6 +48,14 @@ window.router = (function () {
     'cloud-storage': 'storage',
     experiments: 'experiments',
     settings: 'settings',
+    'ai-teachers': 'teachers',
+    'provider-management': 'teachers',
+    'teacher-selection': 'teacherSelection',
+    'knowledge-distillation': 'distillation',
+    'dataset-review': 'distillation',
+    'student-models': 'students',
+    'training-intelligence': 'intelligence',
+    'api-usage': 'budgets',
   };
 
   // Route → script that registers the module. Used to recover from a module
@@ -70,6 +78,14 @@ window.router = (function () {
     'cloud-storage': 'js/storage.js',
     experiments: 'js/experiments.js',
     settings: 'js/settings.js',
+    'ai-teachers': 'js/teachers.js',
+    'provider-management': 'js/teachers.js',
+    'teacher-selection': 'js/teacher-selection.js',
+    'knowledge-distillation': 'js/distillation.js',
+    'dataset-review': 'js/distillation.js',
+    'student-models': 'js/students.js',
+    'training-intelligence': 'js/intelligence.js',
+    'api-usage': 'js/budgets.js',
   };
 
   // One recovery attempt per route per page load: retrying in a loop would only
@@ -182,6 +198,14 @@ window.router = (function () {
     experiments: renderExperiments,
     settings: renderSettings,
     auth: renderAuth,
+    'ai-teachers': renderTeachers,
+    'provider-management': renderTeachers,
+    'teacher-selection': renderTeacherSelection,
+    'knowledge-distillation': renderDistillation,
+    'dataset-review': renderDistillation,
+    'student-models': renderStudents,
+    'training-intelligence': renderIntelligence,
+    'api-usage': renderBudgets,
   };
 
   function init() {
@@ -205,6 +229,14 @@ window.router = (function () {
       { route: 'multi-device', label: 'Multi-Device Training', icon: 'fa-network-wired' },
       { route: 'cloud-storage', label: 'Cloud Storage', icon: 'fa-cloud' },
       { route: 'experiments', label: 'Experiments', icon: 'fa-flask' },
+      { route: 'ai-teachers', label: 'AI Teacher Network', icon: 'fa-graduation-cap' },
+      { route: 'provider-management', label: 'Provider Management', icon: 'fa-key' },
+      { route: 'teacher-selection', label: 'Teacher Selection', icon: 'fa-users-gear' },
+      { route: 'knowledge-distillation', label: 'Knowledge Distillation', icon: 'fa-droplet' },
+      { route: 'dataset-review', label: 'Dataset Quality Review', icon: 'fa-list-check' },
+      { route: 'student-models', label: 'Student Model Studio', icon: 'fa-graduation-cap' },
+      { route: 'training-intelligence', label: 'Training Intelligence', icon: 'fa-gauge-high' },
+      { route: 'api-usage', label: 'API Usage & Budgets', icon: 'fa-wallet' },
       { route: 'settings', label: 'Settings', icon: 'fa-cog' },
     ];
 
@@ -265,9 +297,14 @@ window.router = (function () {
         return 'dashboard';
       }
       let route = hash.replace(/^#\/?/, '');
-      route = route.trim();
-      if (!route || !routes[route]) return 'dashboard';
-      return route;
+      route = route.trim().replace(/\/+$/, '');
+      if (!route) return 'dashboard';
+      if (routes[route]) return route;
+      // Deep links carry an id for a page to read (e.g. #/dataset-review/<id>):
+      // the router resolves the page and the page parses the id from the hash.
+      const base = route.split('/')[0];
+      if (base && routes[base]) return base;
+      return 'dashboard';
     } catch (err) {
       window.CORPUS_APP.recordError('router.getRouteFromHash', err.message, err);
       return 'dashboard';
@@ -489,6 +526,10 @@ window.router = (function () {
             'Evaluation': 'evaluation', 'Compute': 'compute', 'Cloud Storage': 'cloud-storage',
             'Device Compute': 'device-compute', 'Multi-Device Training': 'multi-device',
             'Experiments': 'experiments', 'Settings': 'settings',
+            'AI Teacher Network': 'ai-teachers', 'Provider Management': 'provider-management',
+            'Teacher Selection': 'teacher-selection', 'Knowledge Distillation': 'knowledge-distillation',
+            'Dataset Quality Review': 'dataset-review', 'Student Model Studio': 'student-models',
+            'Training Intelligence': 'training-intelligence', 'API Usage & Budgets': 'api-usage',
           };
           item.classList.toggle('active', known[label.textContent] === route);
         }
@@ -608,6 +649,31 @@ window.router = (function () {
 
   async function renderSettings() {
     return renderModulePage('settings', 'Settings', 'fa-cog', 'renderSettings');
+  }
+
+  function renderTeachers(route) {
+    return renderModulePage(route, 'AI Teacher Network', 'fa-graduation-cap', 'renderTeachers');
+  }
+
+  async function renderTeacherSelection() {
+    return renderModulePage('teacher-selection', 'Teacher Selection', 'fa-users-gear', 'renderTeacherSelection');
+  }
+
+  function renderDistillation(route) {
+    const label = route === 'dataset-review' ? 'Dataset Quality Review' : 'Knowledge Distillation';
+    return renderModulePage(route, label, 'fa-droplet', 'renderDistillation');
+  }
+
+  async function renderStudents() {
+    return renderModulePage('student-models', 'Student Model Studio', 'fa-graduation-cap', 'renderStudents');
+  }
+
+  async function renderIntelligence() {
+    return renderModulePage('training-intelligence', 'Training Intelligence', 'fa-gauge-high', 'renderIntelligence');
+  }
+
+  async function renderBudgets() {
+    return renderModulePage('api-usage', 'API Usage & Budgets', 'fa-wallet', 'renderBudgets');
   }
 
   async function renderAuth() {

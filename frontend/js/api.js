@@ -1008,6 +1008,214 @@ window.CORPUS_API = (function () {
     });
   }
 
+  /* ---------------------------------------------------------------------
+     AI Teacher Network, distillation, student studio and telemetry.
+
+     Every helper below hits an owner-scoped endpoint. API keys are only ever
+     sent *to* the server (create/rotate); nothing here reads one back, because
+     the backend never returns one.
+     --------------------------------------------------------------------- */
+
+  async function listProviderTypes() {
+    return request('/api/v1/teachers/types');
+  }
+
+  async function getCredentialStatus() {
+    return request('/api/v1/teachers/credential-status');
+  }
+
+  async function listProviders(token) {
+    return request('/api/v1/teachers/providers', { token, noCache: true });
+  }
+
+  async function createProvider(payload, token) {
+    return request('/api/v1/teachers/providers', { method: 'POST', token, body: payload });
+  }
+
+  async function updateProvider(providerId, payload, token) {
+    return request('/api/v1/teachers/providers/' + encodeURIComponent(providerId),
+      { method: 'PATCH', token, body: payload });
+  }
+
+  async function deleteProvider(providerId, token) {
+    return request('/api/v1/teachers/providers/' + encodeURIComponent(providerId),
+      { method: 'DELETE', token });
+  }
+
+  async function testProvider(providerId, token) {
+    return request('/api/v1/teachers/providers/' + encodeURIComponent(providerId) + '/test',
+      { method: 'POST', token });
+  }
+
+  async function discoverTeacherModels(providerId, token) {
+    return request('/api/v1/teachers/providers/' + encodeURIComponent(providerId) + '/discover',
+      { method: 'POST', token });
+  }
+
+  async function listTeacherModels(token) {
+    return request('/api/v1/teachers/models', { token, noCache: true });
+  }
+
+  async function addTeacherModel(providerId, payload, token) {
+    return request('/api/v1/teachers/providers/' + encodeURIComponent(providerId) + '/models',
+      { method: 'POST', token, body: payload });
+  }
+
+  async function updateTeacherModel(modelRowId, payload, token) {
+    return request('/api/v1/teachers/models/' + encodeURIComponent(modelRowId),
+      { method: 'PATCH', token, body: payload });
+  }
+
+  async function deleteTeacherModel(modelRowId, token) {
+    return request('/api/v1/teachers/models/' + encodeURIComponent(modelRowId),
+      { method: 'DELETE', token });
+  }
+
+  async function getTeacherUsage(token) {
+    return request('/api/v1/teachers/usage', { token, noCache: true });
+  }
+
+  async function setProviderBudget(providerId, budget, token) {
+    return request('/api/v1/teachers/providers/' + encodeURIComponent(providerId) + '/budget',
+      { method: 'PUT', token, body: budget });
+  }
+
+  async function getDistillationOptions() {
+    return request('/api/v1/distillation/options');
+  }
+
+  async function previewDistillationSource(params) {
+    const query = new URLSearchParams(params || {}).toString();
+    return request('/api/v1/distillation/source-preview' + (query ? '?' + query : ''));
+  }
+
+  async function createDistillationJob(payload, token) {
+    return request('/api/v1/distillation/jobs', { method: 'POST', token, body: payload });
+  }
+
+  async function listDistillationJobs(token) {
+    return request('/api/v1/distillation/jobs', { token, noCache: true });
+  }
+
+  async function getDistillationJob(jobId, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId), { token, noCache: true });
+  }
+
+  async function startDistillationJob(jobId, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/start',
+      { method: 'POST', token });
+  }
+
+  async function cancelDistillationJob(jobId, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/cancel',
+      { method: 'POST', token });
+  }
+
+  async function deleteDistillationJob(jobId, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId),
+      { method: 'DELETE', token });
+  }
+
+  async function listDistillationRecords(jobId, filters, token) {
+    const query = new URLSearchParams(filters || {}).toString();
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/records'
+      + (query ? '?' + query : ''), { token, noCache: true });
+  }
+
+  async function updateDistillationRecord(recordId, payload, token) {
+    return request('/api/v1/distillation/records/' + encodeURIComponent(recordId),
+      { method: 'PATCH', token, body: payload });
+  }
+
+  async function deleteDistillationRecord(recordId, token) {
+    return request('/api/v1/distillation/records/' + encodeURIComponent(recordId),
+      { method: 'DELETE', token });
+  }
+
+  async function bulkReviewDistillationRecords(jobId, payload, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/records/bulk',
+      { method: 'POST', token, body: payload });
+  }
+
+  async function getDistillationSummary(jobId, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/summary',
+      { token, noCache: true });
+  }
+
+  async function listDistillationEvaluations(jobId, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/evaluations',
+      { token, noCache: true });
+  }
+
+  // The export endpoint is authenticated with a bearer token, so it is fetched
+  // with the normal request path and turned into a downloadable blob rather than
+  // linked directly (a plain <a href> would be a 401).
+  async function downloadDistillationExport(jobId, format, split, token) {
+    const query = new URLSearchParams({ format: format || 'chat_jsonl', split: split || 'all' }).toString();
+    const response = await fetch(
+      BASE + '/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/export?' + query,
+      { headers: token ? { Authorization: 'Bearer ' + token } : {} }
+    );
+    if (!response.ok) {
+      let detail = 'Export failed (' + response.status + ')';
+      try {
+        const body = await response.json();
+        if (body && body.detail) detail = body.detail;
+      } catch (err) { /* keep the status line */ }
+      throw new Error(detail);
+    }
+    return {
+      text: await response.text(),
+      recordCount: Number(response.headers.get('X-Record-Count') || 0),
+      skippedCount: Number(response.headers.get('X-Skipped-Count') || 0),
+      filename: jobId + '_' + (format || 'chat_jsonl') + '_' + (split || 'all') + '.jsonl',
+    };
+  }
+
+  async function convertDistillationJob(jobId, payload, token) {
+    return request('/api/v1/distillation/jobs/' + encodeURIComponent(jobId) + '/convert',
+      { method: 'POST', token, body: payload });
+  }
+
+  async function getStudentSystem(token) {
+    return request('/api/v1/students/system', { token });
+  }
+
+  async function inspectStudentModel(payload, token) {
+    return request('/api/v1/students/inspect', { method: 'POST', token, body: payload });
+  }
+
+  async function planLoraAdapters(payload, token) {
+    return request('/api/v1/students/lora-plan', { method: 'POST', token, body: payload });
+  }
+
+  async function listStudentModels(token) {
+    return request('/api/v1/students/models', { token, noCache: true });
+  }
+
+  async function listStudentConfigs(token) {
+    return request('/api/v1/students/configs', { token, noCache: true });
+  }
+
+  async function createStudentConfig(payload, token) {
+    return request('/api/v1/students/configs', { method: 'POST', token, body: payload });
+  }
+
+  async function deleteStudentConfig(configId, token) {
+    return request('/api/v1/students/configs/' + encodeURIComponent(configId),
+      { method: 'DELETE', token });
+  }
+
+  async function getTrainingIntelligence(jobId, token) {
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/intelligence',
+      { token, noCache: true });
+  }
+
+  async function getTrainingTelemetry(jobId, token) {
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/telemetry',
+      { token, noCache: true });
+  }
+
   return {
     request,
     // Cache control for pages and diagnostics: a manual "Refresh" passes
@@ -1037,6 +1245,17 @@ window.CORPUS_API = (function () {
     getSettings, updateSettings,
     listApiKeys, createApiKey, revokeApiKey,
     health,
+    listProviderTypes, getCredentialStatus, listProviders, createProvider, updateProvider,
+    deleteProvider, testProvider, discoverTeacherModels, listTeacherModels, addTeacherModel,
+    updateTeacherModel, deleteTeacherModel, getTeacherUsage, setProviderBudget,
+    getDistillationOptions, previewDistillationSource, createDistillationJob,
+    listDistillationJobs, getDistillationJob, startDistillationJob, cancelDistillationJob,
+    deleteDistillationJob, listDistillationRecords, updateDistillationRecord,
+    deleteDistillationRecord, bulkReviewDistillationRecords, getDistillationSummary,
+    listDistillationEvaluations, downloadDistillationExport, convertDistillationJob,
+    getStudentSystem, inspectStudentModel, planLoraAdapters, listStudentModels,
+    listStudentConfigs, createStudentConfig, deleteStudentConfig,
+    getTrainingIntelligence, getTrainingTelemetry,
     connectWS, disconnectWS, onWSMessage, sendWS, subscribeTraining, connectTrainingWS,
   };
 })();

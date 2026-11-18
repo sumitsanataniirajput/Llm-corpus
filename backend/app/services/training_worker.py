@@ -22,6 +22,7 @@ from supabase import create_client
 
 from app.config import settings
 from app.core.database import get_session_factory
+from app.services.telemetry import collect_runtime_sample, persist_snapshot
 from app.services.text_extraction import DatasetTextError, extract_text
 from app.core.models import Dataset, Model, TrainingJob
 from corpus_engine.tokenizer.tokenizer import CorpusTokenizer
@@ -35,6 +36,10 @@ UNUSABLE_DATASET_STATUSES = {"failed", "deleted"}
 _CURRENT_JOB_ID: contextvars.ContextVar[str] = contextvars.ContextVar("_CURRENT_JOB_ID", default="")
 _JOB_CONTROLS_LOCK = threading.Lock()
 _JOB_CONTROLS = {}  # job_id -> {"cancel": threading.Event, "done": asyncio.Event, "loop": AbstractEventLoop}
+# Hardware telemetry is sampled at most this often per job, so a fast run cannot
+# flood the snapshot table with hundreds of near-identical rows.
+_TELEMETRY_MIN_INTERVAL = 10.0
+_LAST_TELEMETRY = {}  # job_id -> monotonic timestamp of the last persisted sample
 
 
 class TrainingStoppedError(Exception):
@@ -299,6 +304,7 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
     micro_batches_per_epoch = math.ceil(len(xs) / batch_size)
     steps_per_epoch = math.ceil(micro_batches_per_epoch / accum_steps)
     total_steps = max(1, steps_per_epoch * cfg["epochs"])
+    sequence_lengths = [len(chunk) for chunk in xs]
     _stage(
         on_metric,
         "initializing",
@@ -306,6 +312,25 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
         total_epochs=cfg["epochs"],
         completed_steps=0,
         processed_tokens=0,
+        # Measured by the tokenizer/loader that will actually be trained on.
+        # There is no held-out split in this engine, so val/test stay null
+        # instead of pretending a split exists.
+        dataset_analytics={
+            "records": len(xs),
+            "tokens": len(ids),
+            "train_tokens": len(ids),
+            "validation_tokens": None,
+            "test_tokens": None,
+            "avg_tokens_per_sample": round(sum(sequence_lengths) / len(sequence_lengths), 2),
+            "max_sample_length": max(sequence_lengths),
+            "min_sample_length": min(sequence_lengths),
+            "vocab_size": cfg["vocab_size"],
+            "context_length": context,
+            "stride": stride,
+            "tokenization_status": "tokenized",
+            "cleaning_status": "raw extracted text, no filtering applied",
+            "split": {"train": 1.0},
+        },
     )
     trainer = PyTorchTrainer(cfg, device="cpu")
     metrics = []
@@ -415,6 +440,98 @@ async def _persist_job_progress(db, job_id: str, payload: dict):
     })
 
 
+async def _telemetry_due(job_id: str) -> bool:
+    now = time.monotonic()
+    last = _LAST_TELEMETRY.get(job_id)
+    if last is not None and now - last < _TELEMETRY_MIN_INTERVAL:
+        return False
+    _LAST_TELEMETRY[job_id] = now
+    return True
+
+
+async def _sample_telemetry(factory, db, job_id: str, *, stage: str = "training",
+                            step=None, force: bool = False) -> None:
+    """Persist one hardware sample for this job (throttled unless forced)."""
+    if not force and not await _telemetry_due(job_id):
+        return
+    if force:
+        _LAST_TELEMETRY[job_id] = time.monotonic()
+    owner_id = (await db.execute(text(
+        "SELECT owner_id FROM public.training_jobs WHERE id = :job_id"
+    ), {"job_id": job_id})).scalar_one_or_none()
+    if owner_id is None:
+        return
+    try:
+        sample = collect_runtime_sample(stage=stage, step=step, worker_count=1)
+        await persist_snapshot(db, owner_id, job_id, sample)
+    except Exception:  # telemetry must never break training
+        logger.debug("Telemetry sample failed for %s", job_id, exc_info=True)
+
+
+async def _upsert_dataset_analytics(db, job_id: str, analytics: dict) -> None:
+    owner_id = (await db.execute(text(
+        "SELECT owner_id, dataset_id FROM public.training_jobs WHERE id = :job_id"
+    ), {"job_id": job_id})).mappings().first()
+    if owner_id is None:
+        return
+    existing = (await db.execute(text(
+        "SELECT id FROM public.training_dataset_analytics WHERE job_id = :job_id LIMIT 1"
+    ), {"job_id": job_id})).scalar_one_or_none()
+    if existing is not None:
+        await db.execute(text("""
+            UPDATE public.training_dataset_analytics
+            SET records = :records, tokens = :tokens, train_tokens = :train_tokens,
+                validation_tokens = :validation_tokens, test_tokens = :test_tokens,
+                avg_tokens_per_sample = :avg_tokens, max_sample_length = :max_len,
+                min_sample_length = :min_len, cleaning_status = :cleaning,
+                tokenization_status = :tokenization, split = CAST(:split AS jsonb),
+                updated_at = now()
+            WHERE id = :id
+        """), {
+            "id": existing, "records": analytics.get("records"), "tokens": analytics.get("tokens"),
+            "train_tokens": analytics.get("train_tokens"),
+            "validation_tokens": analytics.get("validation_tokens"),
+            "test_tokens": analytics.get("test_tokens"),
+            "avg_tokens": analytics.get("avg_tokens_per_sample"),
+            "max_len": analytics.get("max_sample_length"),
+            "min_len": analytics.get("min_sample_length"),
+            "cleaning": analytics.get("cleaning_status"),
+            "tokenization": analytics.get("tokenization_status"),
+            "split": json.dumps(analytics.get("split") or {}),
+        })
+        return
+    await db.execute(text("""
+        INSERT INTO public.training_dataset_analytics
+        (id, owner_id, job_id, dataset_id, records, accepted_records, rejected_records,
+         duplicate_records, tokens, train_tokens, validation_tokens, test_tokens,
+         avg_tokens_per_sample, max_sample_length, min_sample_length,
+         language_distribution, subject_distribution, source_distribution,
+         cleaning_status, tokenization_status, split, updated_at)
+        VALUES (gen_random_uuid(), :owner_id, :job_id, :dataset_id, :records, NULL, NULL, NULL,
+                :tokens, :train_tokens, :validation_tokens, :test_tokens,
+                :avg_tokens, :max_len, :min_len,
+                CAST(:languages AS jsonb), CAST(:subjects AS jsonb), CAST(:sources AS jsonb),
+                :cleaning, :tokenization, CAST(:split AS jsonb), now())
+    """), {
+        "owner_id": owner_id["owner_id"], "job_id": job_id, "dataset_id": owner_id["dataset_id"],
+        "records": analytics.get("records"), "tokens": analytics.get("tokens"),
+        "train_tokens": analytics.get("train_tokens"),
+        "validation_tokens": analytics.get("validation_tokens"),
+        "test_tokens": analytics.get("test_tokens"),
+        "avg_tokens": analytics.get("avg_tokens_per_sample"),
+        "max_len": analytics.get("max_sample_length"),
+        "min_len": analytics.get("min_sample_length"),
+        # Plain text extraction does not detect a language or a subject; the UI
+        # shows "unknown" rather than a fabricated label.
+        "languages": json.dumps({"unknown": int(analytics.get("records") or 0)}),
+        "subjects": json.dumps({"unknown": int(analytics.get("records") or 0)}),
+        "sources": json.dumps({"dataset_file": int(analytics.get("records") or 0)}),
+        "cleaning": analytics.get("cleaning_status"),
+        "tokenization": analytics.get("tokenization_status"),
+        "split": json.dumps(analytics.get("split") or {}),
+    })
+
+
 async def _persist_training_metric(factory, job_id: str, metric: dict):
     """Persist each genuine optimizer-step metric before the worker advances.
 
@@ -424,6 +541,12 @@ async def _persist_training_metric(factory, job_id: str, metric: dict):
     async with factory() as db:
         if metric.get("kind") == "stage":
             await _persist_job_progress(db, job_id, metric)
+            if metric.get("dataset_analytics"):
+                try:
+                    await _upsert_dataset_analytics(db, job_id, metric["dataset_analytics"])
+                except Exception:
+                    logger.debug("Dataset analytics write failed for %s", job_id, exc_info=True)
+            await _sample_telemetry(factory, db, job_id, stage=metric.get("stage") or "training")
             await db.commit()
             return
         await db.execute(text("""
@@ -438,6 +561,7 @@ async def _persist_training_metric(factory, job_id: str, metric: dict):
             "tokens_per_second": metric["tokens_per_second"],
         })
         await _persist_job_progress(db, job_id, metric)
+        await _sample_telemetry(factory, db, job_id, stage="training", step=metric.get("step"))
         await db.commit()
 
 
@@ -602,6 +726,13 @@ async def run_training_job(job_id: str, owner_id: str):
                 INSERT INTO public.training_job_events (job_id, event, data)
                 VALUES (:job_id, 'completed', CAST(:data AS jsonb))
             """), {"job_id": job_id, "data": json.dumps({"checkpoint_id": checkpoint_id, "tokens": token_count, "final_loss": metrics[-1]["loss"]})})
+            # A closing hardware sample, so the dashboard has a value for the
+            # moment the run actually finished.
+            try:
+                await _sample_telemetry(factory, db, job_id, stage="completed",
+                                        step=metrics[-1]["step"], force=True)
+            except Exception:
+                logger.debug("Final telemetry sample failed for %s", job_id, exc_info=True)
             await db.commit()
     except TrainingStoppedError:
         logger.info("Training job %s stopped", job_id)
@@ -638,5 +769,6 @@ async def run_training_job(job_id: str, owner_id: str):
         except Exception:
             logger.exception("Could not record training failure for %s", job_id)
     finally:
+        _LAST_TELEMETRY.pop(job_id, None)
         _CURRENT_JOB_ID.reset(token)
         _unregister_job_control(job_id, ctrl)

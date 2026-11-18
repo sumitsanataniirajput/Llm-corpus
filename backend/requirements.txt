@@ -24,6 +24,15 @@ torch==2.1.0
 # Hugging Face (tokenizers, transformers for interoperability)
 transformers==4.36.0
 tokenizers==0.15.2
+# Parameter-efficient fine-tuning (LoRA/QLoRA adapters) for pretrained LLMs.
+# QLoRA additionally needs bitsandbytes + CUDA; its availability is detected at
+# runtime and reported, never assumed.
+peft==0.7.1
+accelerate==0.25.0
+
+# Provider credential encryption (AES-256-GCM). python-jose[cryptography] pulls
+# this in, but the teacher network depends on it directly, so it is pinned here.
+cryptography==41.0.7
 
 # PDF extraction
 pypdf==4.0.1
@@ -39,5 +48,8 @@ python-multipart==0.0.6
 
 # Utilities
 python-dotenv==1.0.0
+# Host telemetry for the Training Intelligence dashboard (CPU/RAM/temperature/battery).
+# Missing sensors report null instead of a guessed value.
+psutil==5.9.8
 pytest==7.4.3
 pytest-asyncio==0.21.1
