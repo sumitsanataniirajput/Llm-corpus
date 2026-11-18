@@ -106,6 +106,19 @@ RAW_SQL_TABLES = [
     """
     ALTER TABLE models ADD COLUMN IF NOT EXISTS tokenizer_ref text
     """,
+    # Migration 007/008 columns and tables, applied idempotently so a reused
+    # test database file matches the ORM models.
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS stage text DEFAULT 'queued'",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS progress_percent double precision DEFAULT 0",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS total_steps bigint",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS completed_steps bigint DEFAULT 0",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS total_epochs integer",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS current_epoch integer DEFAULT 0",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS processed_tokens bigint DEFAULT 0",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS last_loss double precision",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS progress_updated_at timestamptz",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS failure_reason text",
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS deleted_at timestamptz",
     """
     ALTER TABLE evaluation_runs ALTER COLUMN status SET DEFAULT 'completed'
     """,

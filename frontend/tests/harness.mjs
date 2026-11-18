@@ -29,6 +29,8 @@ const MODULES = [
   'js/models.js',
   'js/training.js',
   'js/datasets.js',
+  'js/device-agent.js',
+  'js/devices.js',
 ];
 
 class ChartStub {
@@ -56,6 +58,45 @@ class WebSocketStub {
   close() { this.readyState = 3; this.closed = true; }
 }
 WebSocketStub.opened = [];
+
+/**
+ * Worker stub used by the device agent in tests.
+ *
+ * It speaks the real worker protocol (progress/result/benchmark messages) and
+ * counts tokens with a deliberately simple split, so the agent's streaming,
+ * progress reporting and completion logic run exactly as in production.
+ */
+class WorkerStub {
+  constructor(url) {
+    this.url = url;
+    this.posted = [];
+    this.terminated = false;
+    this.onmessage = null;
+    this.onerror = null;
+    WorkerStub.instances.push(this);
+  }
+  postMessage(payload) {
+    this.posted.push(payload);
+    const respond = (message) => {
+      if (this.terminated) return;
+      setTimeout(() => {
+        if (this.onmessage) this.onmessage({ data: message });
+      }, 0);
+    };
+    if (payload.type === 'tokenize') {
+      const tokens = String(payload.text || '').split(/\s+/).filter(Boolean).length;
+      respond({
+        type: 'progress', processedChars: String(payload.text || '').length,
+        totalChars: String(payload.text || '').length, tokens, elapsedMs: 1,
+      });
+      respond({ type: 'result', tokens, characters: String(payload.text || '').length, elapsedMs: 1, charactersPerSecond: 1000 });
+    } else if (payload.type === 'benchmark') {
+      respond({ type: 'benchmark', characters: 300000, tokens: 60000, elapsedMs: 100, charactersPerSecond: 3000000, tokensPerSecond: 600000 });
+    }
+  }
+  terminate() { this.terminated = true; }
+}
+WorkerStub.instances = [];
 
 class XHRStub {
   constructor() {
@@ -122,6 +163,8 @@ function createAppFromFiles(options) {
   XHRStub.nextResponder = null;
 
   window.Chart = ChartStub;
+  WorkerStub.instances = [];
+  window.CORPUS_WORKER_FACTORY = (url) => new WorkerStub(url);
   window.WebSocket = WebSocketStub;
   window.XMLHttpRequest = XHRStub;
   window.AOS = { refresh() {}, init() {} };
@@ -137,6 +180,12 @@ function createAppFromFiles(options) {
     datasets: options.datasets ? [...options.datasets] : [],
     models: options.models ? [...options.models] : [],
     jobs: options.jobs ? [...options.jobs] : [],
+    devices: options.devices ? [...options.devices] : [],
+    deviceTasks: options.deviceTasks ? [...options.deviceTasks] : [],
+    datasetText: 'datasetText' in options ? String(options.datasetText) : 'device corpus shard text\n'.repeat(40),
+    deleteJobHandler: options.deleteJobHandler || null,
+    jobLogs: options.jobLogs || [],
+    deviceCalls: [],
     checkpoints: options.checkpoints ? [...options.checkpoints] : [],
     health: options.health === undefined ? { status: 'ok' } : options.health,
     calls: [],
@@ -247,9 +296,210 @@ function createAppFromFiles(options) {
     if (/^\/api\/v1\/training\/[^/]+\/metrics$/.test(route)) {
       return jsonResponse(state.metrics || []);
     }
+    if (/^\/api\/v1\/training\/[^/]+\/logs$/.test(route)) {
+      return jsonResponse(state.jobLogs || []);
+    }
     if (/^\/api\/v1\/datasets\/[^/]+\/preview$/.test(route)) {
       return jsonResponse(state.preview);
     }
+    if (route === '/api/v1/datasets/x/text' || /^\/api\/v1\/datasets\/[^/]+\/text$/.test(route)) {
+      const text = String(state.datasetText);
+      const offset = Number(parsed.searchParams.get('offset') || 0);
+      const limit = Number(parsed.searchParams.get('limit') || 200000);
+      const chunk = text.slice(offset, offset + limit);
+      const next = offset + chunk.length;
+      return jsonResponse({
+        dataset_id: route.split('/')[5],
+        file_name: 'corpus.txt',
+        offset,
+        limit,
+        total_characters: text.length,
+        returned_characters: chunk.length,
+        next_offset: next < text.length ? next : null,
+        complete: next >= text.length,
+        text: chunk,
+      });
+    }
+
+    // ---------- devices ----------
+    state.deviceCalls.push({ method, route, body: opts.body ? JSON.parse(opts.body) : null });
+    if (route === '/api/v1/devices' && method === 'GET') {
+      return jsonResponse({ devices: [...state.devices], sweep: { devices_offline: 0, tasks_expired: 0 }, heartbeat_timeout_seconds: 75 });
+    }
+    if (route === '/api/v1/devices' && method === 'POST') {
+      const body = JSON.parse(opts.body || '{}');
+      const created = {
+        id: 'dev_' + (state.devices.length + 1),
+        name: body.name,
+        device_type: body.device_type,
+        platform: body.platform,
+        capabilities: body.capabilities || {},
+        status: 'online',
+        online: true,
+        last_heartbeat: new Date().toISOString(),
+        heartbeat_age_seconds: 1,
+        task: null,
+        job: null,
+      };
+      state.devices.push(created);
+      return jsonResponse(created);
+    }
+    if (/^\/api\/v1\/devices\/[^/]+\/heartbeat$/.test(route) && method === 'POST') {
+      const id = route.split('/')[4];
+      const device = state.devices.find((d) => d.id === id);
+      if (!device) return jsonResponse({ detail: 'Device not found' }, 404);
+      const body = JSON.parse(opts.body || '{}');
+      device.last_heartbeat = new Date().toISOString();
+      device.heartbeat_age_seconds = 0;
+      if (body.capabilities) device.capabilities = body.capabilities;
+      if (body.status) device.status = body.status;
+      const task = state.deviceTasks.find((t) => t.device_id === id && ['assigned', 'running'].includes(t.status));
+      device.task = task || null;
+      if (task && body.task_id === task.id && body.progress_percent != null) {
+        task.progress_percent = body.progress_percent;
+        task.status = 'running';
+      }
+      return jsonResponse(device);
+    }
+    if (/^\/api\/v1\/devices\/[^/]+$/.test(route) && method === 'PATCH') {
+      const id = route.split('/').pop();
+      const device = state.devices.find((d) => d.id === id);
+      if (!device) return jsonResponse({ detail: 'Device not found' }, 404);
+      const body = JSON.parse(opts.body || '{}');
+      if (body.status) device.status = body.status;
+      if (body.name) device.name = body.name;
+      if (body.status === 'paused') {
+        state.deviceTasks.forEach((t) => { if (t.device_id === id && ['assigned', 'running'].includes(t.status)) t.status = 'expired'; });
+        device.task = null;
+      }
+      return jsonResponse(device);
+    }
+    if (/^\/api\/v1\/devices\/[^/]+\/disconnect$/.test(route) && method === 'POST') {
+      const id = route.split('/')[4];
+      const device = state.devices.find((d) => d.id === id);
+      if (!device) return jsonResponse({ detail: 'Device not found' }, 404);
+      device.status = 'offline';
+      device.online = false;
+      const released = [];
+      state.deviceTasks.forEach((t) => {
+        if (t.device_id === id && ['assigned', 'running'].includes(t.status)) { t.status = 'expired'; released.push(t.id); }
+      });
+      device.task = null;
+      return jsonResponse({ ok: true, device_id: id, status: 'offline', released_tasks: released });
+    }
+    if (/^\/api\/v1\/devices\/[^/]+$/.test(route) && method === 'DELETE') {
+      const id = route.split('/').pop();
+      const index = state.devices.findIndex((d) => d.id === id);
+      if (index === -1) return jsonResponse({ detail: 'Device not found' }, 404);
+      state.devices.splice(index, 1);
+      state.deviceTasks = state.deviceTasks.filter((t) => t.device_id !== id);
+      return jsonResponse({ ok: true, device_id: id, removed: true });
+    }
+    if (/^\/api\/v1\/devices\/[^/]+\/assign$/.test(route) && method === 'POST') {
+      const id = route.split('/')[4];
+      const body = JSON.parse(opts.body || '{}');
+      if (!state.devices.find((d) => d.id === id)) return jsonResponse({ detail: 'Device not found' }, 404);
+      const job = state.jobs.find((j) => j.id === body.job_id);
+      if (!job) return jsonResponse({ detail: 'Training job not found' }, 404);
+      if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+        return jsonResponse({ detail: 'Job is already ' + job.status + '; nothing to assign.' }, 409);
+      }
+      const task = {
+        id: 'task_' + state.deviceTasks.length + 1,
+        device_id: id,
+        job_id: job.id,
+        kind: body.kind || 'train',
+        status: 'assigned',
+        progress_percent: 0,
+        shard_index: 0,
+        shard_count: null,
+        lease_expires_at: new Date(Date.now() + 90000).toISOString(),
+        detail: { mode: body.kind === 'preprocess' ? 'collaborative-preprocess' : 'parallel' },
+      };
+      state.deviceTasks.push(task);
+      return jsonResponse({ ok: true, task, job: { id: job.id, status: job.status, dataset_id: job.dataset_id, model_id: job.model_id } });
+    }
+    if (route === '/api/v1/devices/auto-assign' && method === 'POST') {
+      const body = JSON.parse(opts.body || '{}');
+      const assignments = (body.job_ids || []).map((jobId, index) => ({
+        job_id: jobId,
+        assigned: index < state.devices.length,
+        device_id: (state.devices[index] || {}).id || null,
+        reason: index < state.devices.length ? null : 'no device available',
+      }));
+      return jsonResponse({ assignments });
+    }
+    if (route === '/api/v1/devices/plan/collaborative' && method === 'POST') {
+      const body = JSON.parse(opts.body || '{}');
+      const job = state.jobs.find((j) => j.id === body.job_id);
+      if (!job) return jsonResponse({ detail: 'Training job not found' }, 404);
+      const devices = state.devices.filter((d) => !body.device_ids || body.device_ids.includes(d.id));
+      const tasks = devices.map((device, index) => {
+        const task = {
+          id: 'ptask_' + index,
+          device_id: device.id,
+          job_id: job.id,
+          kind: 'preprocess',
+          status: 'assigned',
+          progress_percent: 0,
+          shard_index: index,
+          shard_count: devices.length,
+          detail: { mode: 'collaborative-preprocess' },
+        };
+        state.deviceTasks.push(task);
+        return task;
+      });
+      return jsonResponse({
+        ok: true,
+        mode: 'collaborative-preprocess',
+        shard_count: devices.length,
+        tasks,
+        synchronisation: 'Gradient synchronisation is not implemented by this backend.',
+      });
+    }
+    if (/^\/api\/v1\/devices\/[^/]+\/tasks\/[^/]+\/progress$/.test(route) && method === 'POST') {
+      const parts = route.split('/');
+      const taskId = parts[6];
+      const task = state.deviceTasks.find((t) => t.id === taskId);
+      if (!task) return jsonResponse({ detail: 'Task not found' }, 404);
+      const body = JSON.parse(opts.body || '{}');
+      task.progress_percent = body.progress_percent;
+      task.status = 'running';
+      task.lease_expires_at = new Date(Date.now() + 90000).toISOString();
+      return jsonResponse({ ok: true, task });
+    }
+    if (/^\/api\/v1\/devices\/[^/]+\/tasks\/[^/]+\/complete$/.test(route) && method === 'POST') {
+      const parts = route.split('/');
+      const taskId = parts[6];
+      const task = state.deviceTasks.find((t) => t.id === taskId);
+      if (!task) return jsonResponse({ detail: 'Task not found' }, 404);
+      const body = JSON.parse(opts.body || '{}');
+      task.status = body.status === 'failed' ? 'failed' : 'completed';
+      task.progress_percent = task.status === 'completed' ? 100 : task.progress_percent;
+      task.detail = { ...task.detail, result: body.detail || {} };
+      task.lease_expires_at = null;
+      return jsonResponse({ ok: true, task, aggregate: null });
+    }
+    if (/^\/api\/v1\/devices\/jobs\/[^/]+\/tasks$/.test(route) && method === 'GET') {
+      const jobId = route.split('/')[5];
+      const tasks = state.deviceTasks.filter((t) => t.job_id === jobId).map((t) => {
+        const device = state.devices.find((d) => d.id === t.device_id);
+        return { ...t, device_name: device ? device.name : null };
+      });
+      return jsonResponse({ job: { id: jobId }, tasks });
+    }
+
+    if (/^\/api\/v1\/training\/[^/]+$/.test(route) && method === 'DELETE') {
+      const id = route.split('/').pop();
+      if (state.deleteJobHandler) {
+        return state.deleteJobHandler({ id, state, jsonResponse, hard: parsed.searchParams.get('hard') === 'true' });
+      }
+      const index = state.jobs.findIndex((j) => j.id === id);
+      if (index === -1) return jsonResponse({ detail: 'Job not found' }, 404);
+      state.jobs.splice(index, 1);
+      return jsonResponse({ ok: true, job_id: id, deleted: 'soft' });
+    }
+
     return jsonResponse({ detail: 'not found: ' + route }, 404);
   }
 
@@ -275,7 +525,7 @@ function createAppFromFiles(options) {
   window.state.setUser({ id: 'user-1', email: 'tester@example.com' });
   window.state.setAuthReady(true);
 
-  return { dom, window, doc: window.document, net: state, ChartStub, WebSocketStub, XHRStub };
+  return { dom, window, doc: window.document, net: state, ChartStub, WebSocketStub, XHRStub, WorkerStub };
 }
 
 export function datasetFixtures() {

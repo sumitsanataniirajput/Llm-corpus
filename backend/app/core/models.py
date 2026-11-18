@@ -79,10 +79,27 @@ class TrainingJob(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    # Real progress, written by the worker from the engine's own step counter
+    # (migration 007). Anything the engine cannot measure stays NULL so the UI
+    # can say "not available" instead of inventing a number.
+    stage = Column(String, nullable=True, default="queued")
+    progress_percent = Column(Float, nullable=True, default=0.0)
+    total_steps = Column(BigInteger, nullable=True)
+    completed_steps = Column(BigInteger, nullable=True, default=0)
+    total_epochs = Column(BigInteger, nullable=True)
+    current_epoch = Column(BigInteger, nullable=True, default=0)
+    processed_tokens = Column(BigInteger, nullable=True, default=0)
+    last_loss = Column(Float, nullable=True)
+    progress_updated_at = Column(DateTime(timezone=True), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    # Soft delete of the history record only; checkpoints/models/datasets keep
+    # their own rows and are never removed by deleting a job.
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_training_jobs_owner_id", "owner_id"),
         Index("ix_training_jobs_model_id", "model_id"),
+        Index("ix_training_jobs_owner_created_live", "owner_id", "created_at"),
     )
 
 
@@ -181,6 +198,54 @@ class EvaluationRun(Base):
     __table_args__ = (
         Index("ix_evaluation_runs_owner_id", "owner_id"),
         Index("ix_evaluation_runs_model_id", "model_id"),
+    )
+
+
+class TrainingDevice(Base):
+    """A device that may contribute compute to this account (migration 008)."""
+    __tablename__ = "training_devices"
+
+    id = Column(String, primary_key=True, default=lambda: "dev_" + uuid.uuid4().hex[:10])
+    owner_id = Column(UUID(as_uuid=True), nullable=False)
+    name = Column(String, nullable=False)
+    device_type = Column(String, nullable=True)
+    platform = Column(String, nullable=True)
+    capabilities = Column(JSONB, nullable=False, default=dict)
+    # online | busy | paused | offline
+    status = Column(String, nullable=False, default="offline")
+    last_heartbeat = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_training_devices_owner_id", "owner_id"),
+    )
+
+
+class TrainingDeviceTask(Base):
+    """Lease-backed unit of work handed to one device (migration 008)."""
+    __tablename__ = "training_device_tasks"
+
+    id = Column(String, primary_key=True, default=lambda: "task_" + uuid.uuid4().hex[:10])
+    owner_id = Column(UUID(as_uuid=True), nullable=False)
+    device_id = Column(String, ForeignKey("training_devices.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(String, ForeignKey("training_jobs.id", ondelete="CASCADE"), nullable=True)
+    # train | preprocess
+    kind = Column(String, nullable=False, default="train")
+    # assigned | running | completed | failed | expired
+    status = Column(String, nullable=False, default="assigned")
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    progress_percent = Column(Float, nullable=False, default=0.0)
+    shard_index = Column(BigInteger, nullable=True)
+    shard_count = Column(BigInteger, nullable=True)
+    detail = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_training_device_tasks_owner_id", "owner_id"),
+        Index("ix_training_device_tasks_device_id", "device_id"),
+        Index("ix_training_device_tasks_job_id", "job_id"),
     )
 
 

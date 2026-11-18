@@ -73,6 +73,12 @@ try:
 except Exception:
     pass
 
+try:
+    from app.api.endpoints import devices as devices_endpoints
+    api_router.include_router(devices_endpoints.router, prefix="/devices", tags=["devices"])
+except Exception:
+    pass
+
 # Health is in main.py
 
 __all__ = ["api_router"]

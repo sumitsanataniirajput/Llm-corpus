@@ -25,7 +25,9 @@ from app.api.endpoints.datasets import latest_file_for_dataset, UNUSABLE_STATUSE
 router = APIRouter()
 
 # Terminal training states — the progress socket closes once one is reached.
-TERMINAL_STATUSES = {"completed", "failed", "stopped", "cancelled"}
+TERMINAL_STATUSES = {"completed", "failed", "stopped", "cancelled", "interrupted"}
+# A job that is still owned by a live worker: its history cannot be deleted.
+ACTIVE_STATUSES = {"queued", "preparing", "running", "pausing", "paused", "stopping"}
 
 SELECT_DATASET_MESSAGE = "Select a dataset before starting training."
 
@@ -57,9 +59,24 @@ class JobOut(BaseModel):
     compute: str
     created_at: str
     updated_at: str
+    # Real progress from the worker (migration 007). None means "the engine has
+    # not reported this yet", which the UI shows as "not available".
+    stage: Optional[str] = None
+    progress_percent: Optional[float] = None
+    total_steps: Optional[int] = None
+    completed_steps: Optional[int] = None
+    total_epochs: Optional[int] = None
+    current_epoch: Optional[int] = None
+    processed_tokens: Optional[int] = None
+    last_loss: Optional[float] = None
+    failure_reason: Optional[str] = None
+    progress_updated_at: Optional[str] = None
 
 
 def _job_to_out(job: TrainingJob) -> JobOut:
+    def iso(value):
+        return value.isoformat() if value else None
+
     return JobOut(
         id=job.id,
         owner_id=str(job.owner_id),
@@ -70,6 +87,16 @@ def _job_to_out(job: TrainingJob) -> JobOut:
         compute=job.compute,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
+        stage=job.stage,
+        progress_percent=job.progress_percent,
+        total_steps=job.total_steps,
+        completed_steps=job.completed_steps,
+        total_epochs=job.total_epochs,
+        current_epoch=job.current_epoch,
+        processed_tokens=job.processed_tokens,
+        last_loss=job.last_loss,
+        failure_reason=job.failure_reason,
+        progress_updated_at=iso(job.progress_updated_at),
     )
 
 
@@ -137,7 +164,7 @@ async def list_jobs(user=Depends(require_user), db: AsyncSession = Depends(get_d
     owner_id = uuid.UUID(user["user_id"])
     result = await db.execute(
         select(TrainingJob)
-        .where(TrainingJob.owner_id == owner_id)
+        .where(TrainingJob.owner_id == owner_id, TrainingJob.deleted_at.is_(None))
         .order_by(TrainingJob.created_at.desc())
     )
     jobs = result.scalars().all()
@@ -283,7 +310,7 @@ async def get_job(job_id: str, user=Depends(require_user), db: AsyncSession = De
         select(TrainingJob).where(TrainingJob.id == job_id)
     )
     job = result.scalar_one_or_none()
-    if not job:
+    if not job or job.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
@@ -388,6 +415,59 @@ async def stop_job(job_id: str, user=Depends(require_user), db: AsyncSession = D
     return {"ok": True, "status": job.status, "signaled": signaled}
 
 
+@router.delete("/{job_id}", tags=["training"])
+async def delete_job(
+    job_id: str,
+    hard: bool = Query(default=False, description="Permanently remove the history row (default: soft delete)"),
+    user=Depends(require_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Remove one training job from the caller's history.
+
+    Ownership is enforced here in the API (and again by RLS in the database).
+
+    * Soft delete (default): the row is stamped ``deleted_at`` and disappears
+      from job lists. Metrics, events and checkpoints are kept.
+    * Hard delete (``?hard=true``): only for a job that is already finished;
+      the history rows cascade, and checkpoints are deliberately kept because
+      they belong to the model, not to the job record.
+
+    Never touches the model, the dataset, or any checkpoint. An active job must
+    be stopped first — deleting the history of a running job would orphan the
+    worker.
+    """
+    owner_id = uuid.UUID(user["user_id"])
+    job = await _get_owned_job(db, job_id, owner_id)
+
+    if job.deleted_at is not None:
+        return {"ok": True, "job_id": job_id, "already_deleted": True}
+
+    if job.status in ACTIVE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This job is '{job.status}'. Stop it before deleting its history — "
+                "a running job still owns a worker and its own records."
+            ),
+        )
+
+    if not hard:
+        job.deleted_at = datetime.now(timezone.utc)
+        job.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"ok": True, "job_id": job_id, "deleted": "soft"}
+
+    # Hard delete: only the job's own rows. Checkpoints are model artifacts and
+    # are intentionally preserved (their job_id reference is nullable).
+    await db.execute(text("DELETE FROM public.training_job_events WHERE job_id = :job_id"), {"job_id": job_id})
+    await db.execute(text("DELETE FROM public.training_metrics WHERE job_id = :job_id"), {"job_id": job_id})
+    await db.execute(text("UPDATE public.checkpoints SET job_id = NULL WHERE job_id = :job_id"), {"job_id": job_id})
+    await db.execute(text("DELETE FROM public.training_jobs WHERE id = :job_id AND owner_id = :owner_id"),
+                     {"job_id": job_id, "owner_id": owner_id})
+    await db.commit()
+    return {"ok": True, "job_id": job_id, "deleted": "hard"}
+
+
 @router.get("/{job_id}/metrics", response_model=List[dict], tags=["training"])
 async def list_metrics(
     job_id: str,
@@ -486,6 +566,7 @@ async def training_ws(
     await websocket.accept()
     last_step = 0
     last_status = None
+    last_progress = None
     subscription = "training." + job_id
     try:
         while True:
@@ -501,17 +582,48 @@ async def training_ws(
                     await websocket.close(code=1008)
                     return
 
+                progress_payload = {
+                    "job_id": job.id,
+                    "status": job.status,
+                    "stage": job.stage,
+                    "progress_percent": job.progress_percent,
+                    "completed_steps": job.completed_steps,
+                    "total_steps": job.total_steps,
+                    "current_epoch": job.current_epoch,
+                    "total_epochs": job.total_epochs,
+                    "processed_tokens": job.processed_tokens,
+                    "last_loss": job.last_loss,
+                    "failure_reason": job.failure_reason,
+                    "progress_updated_at": job.progress_updated_at.isoformat() if job.progress_updated_at else None,
+                }
+
                 if job.status != last_status:
                     last_status = job.status
                     await websocket.send_json({
                         "type": subscription, "event": "status",
                         "data": {
-                            "job_id": job.id,
-                            "status": job.status,
+                            **progress_payload,
                             "dataset_id": job.dataset_id,
                             "model_id": job.model_id,
                             "updated_at": job.updated_at.isoformat(),
                         },
+                    })
+
+                # Progress changes faster than the status: send it whenever the
+                # persisted row actually moved, so a reconnecting client and a
+                # live client see the same numbers.
+                progress_key = (
+                    job.stage,
+                    job.completed_steps,
+                    job.progress_percent,
+                    job.current_epoch,
+                    job.processed_tokens,
+                    job.last_loss,
+                )
+                if progress_key != last_progress:
+                    last_progress = progress_key
+                    await websocket.send_json({
+                        "type": subscription, "event": "progress", "data": progress_payload,
                     })
 
                 metrics_result = await db.execute(text("""
