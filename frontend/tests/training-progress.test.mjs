@@ -215,6 +215,32 @@ test('deleting a job asks for confirmation, calls the backend and refreshes the 
   assert.ok(!app.doc.querySelector('[data-delete-job="job_done02"]'), 'the row is gone');
 });
 
+test('a confirmed delete removes the card immediately and ignores a stale list response', async () => {
+  const fx = datasetFixtures();
+  const app = createApp({
+    ...fx,
+    jobs: [runningJob({ id: 'job_stale_delete', status: 'stopped', stage: 'interrupted', progress_percent: 0 })],
+    // Simulate a successful DELETE followed by a briefly stale collection read.
+    deleteJobHandler: ({ id, jsonResponse }) => jsonResponse({ ok: true, job_id: id, deleted: 'soft' }),
+  });
+  await app.window.training.render();
+  await tick(2);
+
+  const deleting = app.window.training.deleteJob(
+    'job_stale_delete',
+    app.doc.querySelector('[data-delete-job="job_stale_delete"]')
+  );
+  await tick(2);
+  app.doc.getElementById('confirm-ok').click();
+  await deleting;
+  await tick(2);
+
+  assert.equal(app.doc.querySelector('[data-job-row="job_stale_delete"]'), null,
+    'the confirmed-deleted card is removed even if the next list response is stale');
+  assert.equal((app.window.state.getTrainingJobs() || []).some(job => job.id === 'job_stale_delete'), false,
+    'the stale response cannot reinsert the deleted job into page state');
+});
+
 test('a 409 from the backend is shown as the reason, not as a generic failure', async () => {
   const fx = datasetFixtures();
   const app = createApp({
