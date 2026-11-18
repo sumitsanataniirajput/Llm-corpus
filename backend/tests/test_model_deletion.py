@@ -133,7 +133,7 @@ async def test_delete_trained_model_cleans_artifacts_and_preserves_datasets(http
     assert job_resp.status_code == 200, job_resp.text
     job = job_resp.json()
 
-    def fake_train(text_data, model_config, job_config):
+    def fake_train(text_data, model_config, job_config, on_metric=None):
         return (
             {"vocab_size": 64, "context_length": 32, "d_model": 32, "n_layers": 1,
              "n_heads": 4, "d_ff": 64, "learning_rate": 0.001, "epochs": 1},
@@ -242,7 +242,7 @@ async def test_delete_model_blocks_active_training_and_stops_worker_when_request
     entered_training = asyncio.Event()
     loop = asyncio.get_running_loop()
 
-    def slow_interruptible_train(text_data, model_config, job_config):
+    def slow_interruptible_train(text_data, model_config, job_config, on_metric=None):
         loop.call_soon_threadsafe(entered_training.set)
         for _ in range(100):
             training_worker._check_not_stopped(job_id)

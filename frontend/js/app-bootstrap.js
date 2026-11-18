@@ -267,6 +267,20 @@ window.CORPUS_BOOTSTRAP = (function () {
 
     // AOS is already loaded by index.html — initialise it once, cheaply, and
     // honour the user's reduced-motion preference.
+    // Instrumentation first: everything after this point is measured.
+    try {
+      if (window.CORPUS_PERF && typeof window.CORPUS_PERF.install === 'function') {
+        window.CORPUS_PERF.install();
+      }
+    } catch (e) { /* measurement is optional */ }
+
+    // Press feedback must be installed once, before the first click is possible.
+    try {
+      if (window.ui && typeof window.ui.installPressFeedback === 'function') {
+        window.ui.installPressFeedback();
+      }
+    } catch (e) { /* feedback is optional */ }
+
     try {
       if (typeof AOS !== 'undefined' && AOS && typeof AOS.init === 'function') {
         const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;

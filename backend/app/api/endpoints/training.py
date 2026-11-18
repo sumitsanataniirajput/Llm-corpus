@@ -389,23 +389,59 @@ async def stop_job(job_id: str, user=Depends(require_user), db: AsyncSession = D
 
 
 @router.get("/{job_id}/metrics", response_model=List[dict], tags=["training"])
-async def list_metrics(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+async def list_metrics(
+    job_id: str,
+    limit: Optional[int] = Query(default=None, ge=1, le=5000),
+    user=Depends(require_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Metrics for one job, oldest first.
+
+    ``limit`` returns only the newest ``limit`` steps (still oldest-first), which
+    is what a live chart shows. Without it the response is unchanged, so existing
+    clients keep working; a long run otherwise streams thousands of rows on every
+    poll and the phone has to parse them all.
+    """
     owner_id = uuid.UUID(user["user_id"])
     job = await _get_owned_job(db, job_id, owner_id)
     # Reference the job so ownership is checked before reading metrics.
     _ = job.id
-    result = await db.execute(text("""
-        SELECT step, loss, learning_rate, tokens_per_second, created_at
-        FROM public.training_metrics WHERE job_id = :job_id ORDER BY step ASC
-    """), {"job_id": job_id})
+    if limit:
+        result = await db.execute(text("""
+            SELECT * FROM (
+                SELECT step, loss, learning_rate, tokens_per_second, created_at
+                FROM public.training_metrics WHERE job_id = :job_id
+                ORDER BY step DESC LIMIT :limit
+            ) recent ORDER BY step ASC
+        """), {"job_id": job_id, "limit": limit})
+    else:
+        result = await db.execute(text("""
+            SELECT step, loss, learning_rate, tokens_per_second, created_at
+            FROM public.training_metrics WHERE job_id = :job_id ORDER BY step ASC
+        """), {"job_id": job_id})
     return [dict(row) for row in result.mappings().all()]
 
 
 @router.get("/{job_id}/logs", response_model=List[dict], tags=["training"])
-async def list_logs(job_id: str, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
+async def list_logs(
+    job_id: str,
+    limit: Optional[int] = Query(default=None, ge=1, le=5000),
+    user=Depends(require_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Job events, oldest first. ``limit`` returns only the newest events."""
     owner_id = uuid.UUID(user["user_id"])
     job = await _get_owned_job(db, job_id, owner_id)
     _ = job.id
+    if limit:
+        result = await db.execute(text("""
+            SELECT * FROM (
+                SELECT event, data, created_at
+                FROM public.training_job_events WHERE job_id = :job_id
+                ORDER BY created_at DESC LIMIT :limit
+            ) recent ORDER BY created_at ASC
+        """), {"job_id": job_id, "limit": limit})
+        return [dict(row) for row in result.mappings().all()]
     result = await db.execute(text("""
         SELECT event, data, created_at
         FROM public.training_job_events WHERE job_id = :job_id

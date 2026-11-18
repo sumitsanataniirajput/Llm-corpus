@@ -4,10 +4,31 @@
  * Covers the reported bug: "ValueError: Select a dataset before starting
  * training." because the job was POSTed with dataset_id = null.
  */
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createApp, datasetFixtures, tick } from './harness.mjs';
+import { createApp as createAppBase, datasetFixtures, tick } from './harness.mjs';
+
+// Every jsdom window must be closed when the file finishes. An open window keeps
+// the Training page's polling timer (5 s, recursive) armed, and Node then never
+// exits — the suite "hangs" after all tests have passed.
+const openApps = [];
+function createApp(options) {
+  const app = createAppBase(options);
+  openApps.push(app);
+  return app;
+}
+after(() => {
+  while (openApps.length) {
+    const app = openApps.pop();
+    try {
+      if (app.window.training && typeof app.window.training.dispose === 'function') {
+        app.window.training.dispose();
+      }
+      app.dom.window.close();
+    } catch (e) { /* already closed */ }
+  }
+});
 
 test('dataset selector lists name, file name, size and upload status', async () => {
   const fx = datasetFixtures();

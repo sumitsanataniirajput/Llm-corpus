@@ -160,6 +160,7 @@ window.models = (function () {
       state.setModels(list);
       renderModelList();
     } catch (err) {
+      if (ui.isAborted && ui.isAborted(err)) return;   // navigated away
       state.setModels([]);
       if (!container) {
         ui.toast(err.message || 'Failed to load models', 'error');
@@ -199,7 +200,9 @@ window.models = (function () {
       return;
     }
 
-    container.innerHTML = modelList.map(model => {
+    // Rendered in bounded pages: 300 models used to be one giant innerHTML that
+    // blocked the click that opened this page.
+    ui.renderPagedList(container, modelList, model => {
       const config = model.config || {};
       const hasArch = ['n_layers', 'n_heads', 'd_model', 'vocab_size', 'context_length'].some(key => config[key] != null);
       const params = hasArch ? CORPUS_UTILS.calculateParameters(config) : null;
@@ -211,7 +214,7 @@ window.models = (function () {
       if (config.context_length) meta.push({ icon: 'fa-text-width', text: CORPUS_UTILS.formatNumber(config.context_length) + ' ctx' });
       if (params) meta.push({ icon: 'fa-hashtag', text: CORPUS_UTILS.formatNumber(params) });
       return `
-        <article class="model-card" data-aos="fade-up">
+        <article class="model-card card-enter">
           <div class="model-header">
             <div class="model-info">
               <h3 title="${esc(model.name || 'Unnamed')}">${esc(model.name || 'Unnamed model')}</h3>
@@ -253,14 +256,13 @@ window.models = (function () {
           </div>
         </article>
       `;
-    }).join('');
+    }, { initial: 30, step: 30 });
 
-    container.querySelectorAll('[data-delete-model]').forEach(btn => {
-      btn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        deleteModel(btn.getAttribute('data-delete-model'));
-      });
+    // One delegated listener instead of one per card per render.
+    ui.delegate(container, '[data-delete-model]', 'click', (event, btn) => {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteModel(btn.getAttribute('data-delete-model'));
     });
   }
 

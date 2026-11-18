@@ -20,9 +20,15 @@ window.router = (function () {
   }
 
   let ignoreHashChange = false;
-  let isNavigating = false;
   let initialized = false;
   let currentRoute = null;
+  // A navigation sequence number, not a lock. The old code returned early while
+  // a page was loading (`if (isNavigating) return`), so every click made during
+  // a slow API call was silently dropped — the app felt frozen. Navigations now
+  // always start; only the newest one is allowed to paint.
+  let navSeq = 0;
+  let renderingRoute = null;
+  let currentPageController = null;
 
   // Route → page module. Modules may expose dispose() to release sockets/timers.
   const PAGE_MODULES = {
@@ -261,8 +267,22 @@ window.router = (function () {
   }
 
   async function navigate(route) {
-    if (isNavigating) return;
-    isNavigating = true;
+    if (!routes[route]) route = 'dashboard';
+    // Re-rendering the page that is already rendering is the only case we skip
+    // (a double tap on the same nav item).
+    if (route === renderingRoute) return;
+
+    const seq = ++navSeq;
+    renderingRoute = route;
+    const navStartedAt = (window.CORPUS_PERF && window.CORPUS_PERF.now) ? window.CORPUS_PERF.now() : 0;
+
+    // Abort whatever the page we are leaving still has in flight. Its requests
+    // are no longer useful and its late responses must not touch the DOM.
+    if (currentPageController) {
+      try { currentPageController.abort(); } catch (e) { /* no-op */ }
+    }
+    currentPageController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    if (window.CORPUS_APP) window.CORPUS_APP.getPageSignal = getPageSignal;
 
     try {
       if (!routes[route]) route = 'dashboard';
@@ -283,6 +303,7 @@ window.router = (function () {
           </div>
         `;
         window.state.setRoute(route);
+        renderingRoute = null;
         return;
       }
 
@@ -299,6 +320,7 @@ window.router = (function () {
       closeSidebar();
 
       const container = window.CORPUS_APP.requirePageContainer('router.navigate');
+      if (container) container.setAttribute('aria-busy', 'true');
 
       try {
         const renderer = routes[route];
@@ -307,6 +329,9 @@ window.router = (function () {
           await result;
         }
       } catch (err) {
+        // The page we left cannot paint an error over the page we opened.
+        if (seq !== navSeq) return;
+        if (err && err.aborted) return;
         window.CORPUS_APP.recordError('router.render.' + route, err.message, err);
         try {
           container.innerHTML = renderErrorPanel(route, err);
@@ -315,21 +340,40 @@ window.router = (function () {
         }
       }
 
+      // A newer navigation owns the page now: never overwrite it with this
+      // (older) page's state, scroll position or animation refresh.
+      if (seq !== navSeq) return;
+
+      if (container) container.removeAttribute('aria-busy');
+      if (navStartedAt && window.CORPUS_PERF) {
+        window.CORPUS_PERF.recordNavigation(route, window.CORPUS_PERF.now() - navStartedAt);
+        if (typeof window.CORPUS_PERF.markInteractive === 'function') window.CORPUS_PERF.markInteractive();
+      }
+
       try {
         window.state.setRoute(route);
       } catch (e) {}
 
-      try {
-        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-      } catch (e) { /* older browsers */ }
-
-      if (typeof AOS !== 'undefined' && AOS) {
-        try { AOS.refresh(); } catch (e) {}
-      }
+      // Scroll and animation refresh are visual work: do them in the next frame
+      // instead of synchronously inside the click handler.
+      const frame = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : (cb) => setTimeout(cb, 16);
+      frame(() => {
+        try { window.scrollTo({ top: 0, left: 0, behavior: 'auto' }); } catch (e) { /* older browsers */ }
+        if (typeof AOS !== 'undefined' && AOS) {
+          try { AOS.refresh(); } catch (e) { /* AOS is optional */ }
+        }
+      });
     } finally {
-      isNavigating = false;
+      if (seq === navSeq) renderingRoute = null;
       setTimeout(() => { ignoreHashChange = false; }, 100);
     }
+  }
+
+  /** AbortSignal for the page currently on screen (requests die on navigation). */
+  function getPageSignal() {
+    return currentPageController ? currentPageController.signal : null;
   }
 
   function lastRecordedScriptError() {

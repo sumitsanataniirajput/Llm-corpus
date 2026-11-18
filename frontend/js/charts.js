@@ -5,6 +5,19 @@
 window.charts = (function () {
   const instances = {};
 
+  // Chart.js is a deferred third-party script. If it failed to load (offline,
+  // CDN blocked, corporate proxy) the page must still work, just without charts.
+  function chartLib() {
+    if (typeof Chart !== 'undefined' && Chart) return Chart;
+    try {
+      if (window.CORPUS_APP && typeof window.CORPUS_APP.logDiagnostic === 'function') {
+        window.CORPUS_APP.logDiagnostic('charts: Chart.js is not available, skipping chart render');
+      }
+    } catch (e) { /* diagnostics are optional */ }
+    return null;
+  }
+
+
   const commonOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -28,7 +41,9 @@ window.charts = (function () {
       data: { labels, datasets },
       options: { ...commonOptions, ...options },
     };
-    instances[ctxId] = new Chart(ctx.getContext('2d'), cfg);
+    const Lib = chartLib();
+    if (!Lib) return null;
+    instances[ctxId] = new Lib(ctx.getContext('2d'), cfg);
     return instances[ctxId];
   }
 
@@ -41,17 +56,19 @@ window.charts = (function () {
       data: { labels, datasets },
       options: { ...commonOptions, ...options },
     };
-    instances[ctxId] = new Chart(ctx.getContext('2d'), cfg);
+    const Lib = chartLib();
+    if (!Lib) return null;
+    instances[ctxId] = new Lib(ctx.getContext('2d'), cfg);
     return instances[ctxId];
   }
 
-  function updateChart(ctxId, labels, datasets) {
+  function updateChart(ctxId, labels, datasets, options = {}) {
     const inst = instances[ctxId];
     if (!inst) return;
     inst.data.labels = labels;
     inst.data.datasets = datasets;
-    // Live metrics update frequently; skip animation to avoid repeated
-    // animation queues and main-thread work on mobile devices.
+    // Live metrics update frequently; skip the entry animation so a metric
+    // stream cannot queue one full re-layout/draw per event on mobile.
     inst.update('none');
   }
 
@@ -71,7 +88,9 @@ window.charts = (function () {
       data: { labels, datasets: [{ data, backgroundColor: ['#6750a4', '#7d5260', '#625b71', '#00b8a9'] }] },
       options: { ...commonOptions, ...options, cutout: '70%', plugins: { ...commonOptions.plugins, legend: { position: 'bottom', labels: { color: '#cac4d0' } } } },
     };
-    instances[ctxId] = new Chart(ctx.getContext('2d'), cfg);
+    const Lib = chartLib();
+    if (!Lib) return null;
+    instances[ctxId] = new Lib(ctx.getContext('2d'), cfg);
     return instances[ctxId];
   }
 
@@ -99,8 +118,19 @@ window.charts = (function () {
         plugins: { ...commonOptions.plugins, legend: { display: false } },
       },
     };
-    instances[ctxId] = new Chart(ctx.getContext('2d'), cfg);
+    const Lib = chartLib();
+    if (!Lib) return null;
+    instances[ctxId] = new Lib(ctx.getContext('2d'), cfg);
     return instances[ctxId];
+  }
+
+  /** Live chart instances (diagnostics + leak checks). Returns a copy. */
+  function instances_() {
+    return Object.assign({}, instances);
+  }
+
+  function destroyAll() {
+    Object.keys(instances).forEach((id) => destroyChart(id));
   }
 
   return {
@@ -108,6 +138,8 @@ window.charts = (function () {
     createBarChart,
     updateChart,
     destroyChart,
+    destroyAll,
+    instances: instances_,
     createDonutChart,
     createProbabilityChart,
   };

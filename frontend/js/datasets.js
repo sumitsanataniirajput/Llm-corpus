@@ -516,6 +516,7 @@ window.datasets = (function () {
       const data = await window.CORPUS_API.listDatasets(token);
       state.setDatasets(normalizeList(data));
     } catch (err) {
+      if (ui.isAborted && ui.isAborted(err)) return;   // navigated away
       state.setDatasets([]);
       if (container) {
         container.innerHTML = ui.emptyState({
@@ -590,13 +591,13 @@ window.datasets = (function () {
       return;
     }
 
-    container.innerHTML = visible.map(d => {
+    ui.renderPagedList(container, visible, d => {
       const status = statusLabel(d);
       const statusClass = d.status || (d.has_file ? 'uploaded' : 'pending');
       const size = d.file_size || d.size;
       const tokens = typeof d.token_count === 'number' ? d.token_count : null;
       return `
-      <article class="dataset-card" data-aos="fade-up">
+      <article class="dataset-card card-enter">
         <div class="dataset-header">
           <div class="dataset-title" title="${esc(d.name || 'Unnamed')}">${esc(d.name || 'Unnamed dataset')}</div>
           <span class="status-badge ${esc(statusClass)}">${esc(status)}</span>
@@ -622,7 +623,7 @@ window.datasets = (function () {
         </div>
       </article>
     `;
-    }).join('');
+    }, { initial: 40, step: 40 });
   }
 
   function validateFile(file) {

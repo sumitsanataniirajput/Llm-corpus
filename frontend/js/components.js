@@ -4,7 +4,18 @@
 
 window.ui = (function () {
   // Toast
+  // A request cancelled because the user navigated away is not a failure and
+  // must never surface as an error toast.
+  function isAborted(err) {
+    if (!err) return false;
+    if (err.aborted || err.code === 'ABORTED') return true;
+    const name = err.name || '';
+    return name === 'AbortError';
+  }
+
   function toast(message, type = 'info', duration = 4000) {
+    if (isAborted(message)) return;
+    if (message && message.aborted) return;
     CORPUS_UTILS.toast(message, type, duration);
   }
 
@@ -87,6 +98,125 @@ window.ui = (function () {
   function hideOffline() {
     const b = document.getElementById('offline-banner');
     if (b) b.classList.add('hidden');
+  }
+
+
+  /* ------------------------------------------------------------------------
+     Responsiveness helpers
+
+     A page with 300 models used to build one giant innerHTML string: the click
+     that opened the page blocked the main thread for the whole parse, and every
+     card carried data-aos, so AOS then observed hundreds of elements and did
+     scroll work on each frame. These helpers keep the same markup and the same
+     look while rendering in bounded chunks, delegating events from one listener
+     and giving the user instant feedback on press.
+     ------------------------------------------------------------------------ */
+
+  // Paged list rendering: only `initial` rows hit the DOM at once, the rest are
+  // one click away. Search/refresh always operate on the full data set.
+  function renderPagedList(target, items, rowHtml, options = {}) {
+    if (!target) return null;
+    const initial = options.initial || 40;
+    const step = options.step || 40;
+    const state = { shown: initial };
+
+    function paint() {
+      const visible = items.slice(0, state.shown);
+      const remaining = items.length - visible.length;
+      let html = visible.map(rowHtml).join('');
+      if (remaining > 0) {
+        html += '<div class="list-more"><button class="btn btn-outline" type="button" data-show-more="' +
+          Math.min(step, remaining) + '"><i class="fas fa-chevron-down"></i> Show ' +
+          Math.min(step, remaining) + ' more<span class="list-more-count"> (' + remaining + ' hidden)</span></button></div>';
+      }
+      target.innerHTML = html;
+    }
+
+    function showMore(count) {
+      state.shown = Math.min(items.length, state.shown + (count || step));
+      paint();
+      return state.shown;
+    }
+
+    delegate(target, '[data-show-more]', 'click', (event, btn) => {
+      event.preventDefault();
+      showMore(Number(btn.getAttribute('data-show-more')) || step);
+    });
+
+    paint();
+    return { paint, showMore, get shown() { return state.shown; } };
+  }
+
+  // One listener per container instead of one per row. Re-delegating the same
+  // selector/type replaces the previous handler, so repeated renders cannot
+  // stack listeners (the old code added a listener to every row on every render).
+  function delegate(root, selector, type, handler) {
+    if (!root) return null;
+    root.__corpusDelegates = root.__corpusDelegates || {};
+    const key = type + '::' + selector;
+    if (root.__corpusDelegates[key]) {
+      root.removeEventListener(type, root.__corpusDelegates[key]);
+    }
+    const listener = (event) => {
+      const match = event.target && event.target.closest ? event.target.closest(selector) : null;
+      if (match && root.contains(match)) handler(event, match);
+    };
+    root.__corpusDelegates[key] = listener;
+    root.addEventListener(type, listener);
+    return listener;
+  }
+
+  // Visual feedback on press, before any handler code runs. Pure CSS transform,
+  // so it costs nothing on the main thread.
+  function installPressFeedback() {
+    if (window.__corpusPressFeedback) return;
+    window.__corpusPressFeedback = true;
+    const TARGETS = '.btn, button, .nav-link, .sidebar-link, [role="button"], .tab, .chip';
+    const clear = (el) => { if (el && el.classList) el.classList.remove('is-pressed'); };
+    document.addEventListener('pointerdown', (event) => {
+      const el = event.target && event.target.closest ? event.target.closest(TARGETS) : null;
+      if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return;
+      el.classList.add('is-pressed');
+    }, { passive: true });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((name) => {
+      document.addEventListener(name, (event) => {
+        const el = event.target && event.target.closest ? event.target.closest(TARGETS) : null;
+        clear(el);
+      }, { passive: true });
+    });
+    // A press that starts on one button and ends elsewhere must not stay stuck.
+    document.addEventListener('pointerup', () => {
+      document.querySelectorAll('.is-pressed').forEach(clear);
+    }, { passive: true });
+  }
+
+  // Run `fn` at most once per element while it is in flight, and reflect the
+  // state on the element so a double tap cannot fire two requests.
+  const inFlight = new WeakMap();
+  function guard(element, fn) {
+    if (!element) return Promise.resolve().then(fn);
+    // Re-entry returns the same promise, so the action itself never runs twice.
+    if (inFlight.has(element)) return inFlight.get(element);
+    let promise;
+    try {
+      promise = Promise.resolve(fn());
+    } catch (err) {
+      promise = Promise.reject(err);
+    }
+    // Deliberately does not touch `disabled`: page code owns button state
+    // (updateControls, setButtonLoading) and restoring a stale value here would
+    // re-enable a button the page had just correctly disabled.
+    element.setAttribute('aria-busy', 'true');
+    promise = promise.finally(() => {
+      inFlight.delete(element);
+      element.removeAttribute('aria-busy');
+    });
+    inFlight.set(element, promise);
+    return promise;
+  }
+
+  function isBusy(element) {
+    return !!(element && inFlight.has(element));
   }
 
   // Set loading overlay
@@ -271,6 +401,11 @@ window.ui = (function () {
 
   return {
     toast,
+    renderPagedList,
+    delegate,
+    guard,
+    isBusy,
+    installPressFeedback,
     confirm,
     escapeHtml,
     copyText,
@@ -289,6 +424,7 @@ window.ui = (function () {
     showOffline,
     hideOffline,
     setLoading,
+    isAborted,
     updateNotificationBadge,
     statusBadge,
     modelConfigSummary,

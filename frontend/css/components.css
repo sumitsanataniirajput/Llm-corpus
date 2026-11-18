@@ -1080,3 +1080,85 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
 [data-theme="light"] .sticky-actions { background: rgba(255, 255, 255, 0.96); }
 
 .sticky-actions .btn { flex: 1; }
+
+/* ========================================
+   Interaction performance layer
+   ========================================
+   Instant press feedback + list entrance animations that cost the main thread
+   nothing: transform/opacity only, no layout, no JS observers. The list cards
+   used to carry data-aos, which made AOS observe every card and do work on
+   each scroll frame (visible jank on long dataset/model lists). */
+
+.btn.is-pressed,
+button.is-pressed,
+.nav-link.is-pressed,
+.sidebar-link.is-pressed,
+[role="button"].is-pressed,
+.tab.is-pressed,
+.chip.is-pressed {
+  transform: scale(0.97);
+  filter: brightness(0.94);
+  transition: transform 60ms ease-out, filter 60ms ease-out;
+}
+
+.btn[aria-busy="true"],
+button[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+.btn[aria-busy="true"]::after,
+button[aria-busy="true"]::after {
+  content: "";
+  width: 0.85em;
+  height: 0.85em;
+  margin-left: 0.5em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  vertical-align: -0.1em;
+  animation: corpus-spin 600ms linear infinite;
+}
+
+@keyframes corpus-spin {
+  to { transform: rotate(360deg); }
+}
+
+.card-enter {
+  animation: corpus-card-in 220ms ease-out both;
+  will-change: opacity, transform;
+}
+
+@keyframes corpus-card-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The page container reports busy work without blocking interaction. */
+#page-container[aria-busy="true"] {
+  cursor: progress;
+}
+
+.list-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+.list-more-count {
+  color: var(--color-text-variant);
+  font-size: var(--text-body-small);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-enter { animation: none; }
+  .btn[aria-busy="true"]::after { animation: none; }
+  .btn.is-pressed,
+  button.is-pressed,
+  .nav-link.is-pressed,
+  .sidebar-link.is-pressed,
+  [role="button"].is-pressed,
+  .tab.is-pressed,
+  .chip.is-pressed { transform: none; filter: brightness(0.9); }
+}
