@@ -275,7 +275,7 @@ window.training = (function () {
     if (datasetSelect) datasetSelect.addEventListener('change', onDatasetChange);
 
     renderCharts();
-    await Promise.all([loadModels(), refreshDatasets()]);
+    await Promise.all([loadModels(), refreshDatasets(), loadJobs()]);
 
     const pendingId = state.getPendingDatasetId ? state.getPendingDatasetId() : null;
     if (pendingId) applySelectedDataset(pendingId);
@@ -289,7 +289,6 @@ window.training = (function () {
       }
     }
 
-    await loadJobs();
     updateEstimate();
   }
 
@@ -304,8 +303,12 @@ window.training = (function () {
     const entry = document.createElement('div');
     entry.className = 'log-entry ' + (type || 'info');
     entry.innerHTML = '<span class="log-time">[' + time + ']</span><span>' + escapeHtml(message) + '</span>';
+    const keepPinnedToBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 48;
     panel.appendChild(entry);
-    panel.scrollTop = panel.scrollHeight;
+    // Bound the live DOM log to prevent long sessions from accumulating
+    // thousands of nodes and forcing repeated layout work on mobile browsers.
+    while (panel.children.length > 200) panel.removeChild(panel.firstElementChild);
+    if (keepPinnedToBottom) panel.scrollTop = panel.scrollHeight;
   }
 
   function clearLog() {
@@ -861,18 +864,29 @@ window.training = (function () {
   }
 
   async function runControl(btnId, action, label) {
-    if (!wsJobId) return;
+    const jobId = wsJobId;
+    if (!jobId) return;
     const btn = document.getElementById(btnId);
     ui.setButtonLoading(btn, true);
     try {
       const token = await state.getAccessToken();
-      await action(wsJobId, token);
-      log(label + ' requested for job ' + wsJobId);
+      const response = await action(jobId, token);
+      if (response && response.status) {
+        const current = state.getTrainingJob(jobId) || { id: jobId };
+        state.updateTrainingJob(jobId, { ...current, status: response.status });
+        const updated = state.getTrainingJob(jobId) || { ...current, status: response.status };
+        updateControls(updated);
+        updateMonitorStatus(updated);
+        updateMetricTiles();
+      }
+      log(label + ' signal accepted for job ' + jobId +
+        (response && response.status ? ' — status: ' + response.status : ''));
     } catch (err) {
       ui.toast(err.message || (label + ' failed'), 'error');
+      log(label + ' failed: ' + (err.message || 'unknown error'), 'error');
     } finally {
       ui.setButtonLoading(btn, false);
-      updateControls(state.getTrainingJob(wsJobId) || null);
+      updateControls(state.getTrainingJob(jobId) || null);
     }
   }
 
@@ -890,9 +904,19 @@ window.training = (function () {
       const btn = document.getElementById('t-stop');
       ui.setButtonLoading(btn, true);
       try {
+        const jobId = wsJobId;
         const token = await state.getAccessToken();
-        await window.CORPUS_API.stopTrainingJob(wsJobId, token);
-        log('Stop requested for job ' + wsJobId);
+        const response = await window.CORPUS_API.stopTrainingJob(jobId, token);
+        if (response && response.status) {
+          const current = state.getTrainingJob(jobId) || { id: jobId };
+          state.updateTrainingJob(jobId, { ...current, status: response.status });
+          const updated = state.getTrainingJob(jobId) || { ...current, status: response.status };
+          updateControls(updated);
+          updateMonitorStatus(updated);
+          updateMetricTiles();
+        }
+        log('Stop signal accepted for job ' + jobId +
+          (response && response.status ? ' — status: ' + response.status : ''));
       } catch (err) {
         ui.toast(err.message || 'Stop failed', 'error');
       } finally {
@@ -916,7 +940,7 @@ window.training = (function () {
     const active = isActiveStatus(status);
     startEl.disabled = startInFlight || active || !validateSelection().ok;
     if (pauseEl) pauseEl.disabled = status !== 'running';
-    if (resumeEl) resumeEl.disabled = status !== 'paused';
+    if (resumeEl) resumeEl.disabled = !(status === 'paused' || status === 'pausing');
     if (stopEl) stopEl.disabled = !(status === 'running' || status === 'paused' || status === 'queued' || status === 'pausing');
   }
 
@@ -977,10 +1001,27 @@ window.training = (function () {
           return;
         }
         log('Live stream error: ' + message, 'error');
+        if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
+      },
+      onClose: () => {
+        if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
       },
     }).then((socket) => {
       activeSocket = socket;
-      if (!socket) log('Live progress stream unavailable — using periodic refresh instead.', 'warn');
+      if (!socket) {
+        log('Live progress stream unavailable — using periodic refresh instead.', 'warn');
+        startPolling(jobId);
+        return;
+      }
+      // Keep the polling fallback only until the WebSocket is actually open.
+      // This avoids polling the same job while its live stream is healthy.
+      if (socket.readyState === 1) stopPolling();
+      else if (typeof socket.addEventListener === 'function') {
+        socket.addEventListener('open', () => stopPolling(), { once: true });
+        socket.addEventListener('error', () => {
+          if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
+        }, { once: true });
+      }
     });
   }
 
@@ -1171,6 +1212,10 @@ window.training = (function () {
   function dispose() {
     disconnectJobStream();
     stopPolling();
+    if (window.charts && typeof window.charts.destroyChart === 'function') {
+      window.charts.destroyChart('training-loss-chart');
+      window.charts.destroyChart('training-throughput-chart');
+    }
     chartInstances = {};
     startInFlight = false;
   }
