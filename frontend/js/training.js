@@ -29,7 +29,29 @@ window.training = (function () {
   let reportedFailureJobId = null;
 
   const DATASET_UNUSABLE_STATUSES = ['failed', 'deleted'];
-  const ACTIVE_STATUSES = ['queued', 'running', 'pausing', 'paused', 'stopping'];
+  const ACTIVE_STATUSES = ['queued', 'running', 'pausing', 'paused', 'stopping', 'preparing', 'finalizing'];
+  // Terminal states can have their history deleted; active ones must be stopped first.
+  const DELETABLE_STATUSES = ['completed', 'failed', 'cancelled', 'stopped', 'interrupted'];
+
+  // Human labels for the backend's real training stages.
+  const STAGE_LABELS = {
+    queued: 'Queued',
+    preparing: 'Preparing dataset',
+    tokenizing: 'Tokenizing',
+    loading_model: 'Loading model',
+    initializing: 'Initialising training',
+    training: 'Training',
+    saving_checkpoints: 'Saving checkpoints',
+    validating: 'Validating',
+    finalizing: 'Finalising',
+    completed: 'Completed',
+    paused: 'Paused',
+    interrupted: 'Interrupted',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+    stopping: 'Stopping',
+    pausing: 'Pausing',
+  };
 
   async function render() {
     const user = state.getUser();
@@ -226,6 +248,25 @@ window.training = (function () {
         <div class="monitor-status" id="t-monitor-status">
           <span class="status-badge cancelled"><i class="fas fa-circle"></i> Idle</span>
           <span class="field-hint" style="margin:0;">No job running. Start a job to stream progress here.</span>
+        </div>
+
+        <div class="job-progress-panel" id="t-progress-panel" aria-live="polite">
+          <div class="job-progress-head">
+            <span class="job-progress-stage" id="t-progress-stage">No stage reported yet</span>
+            <span class="job-progress-percent mono" id="t-progress-percent">—</span>
+          </div>
+          <div class="job-progress-track" id="t-progress-track" role="progressbar"
+               aria-valuemin="0" aria-valuemax="100" aria-valuetext="No progress reported yet">
+            <span id="t-progress-fill" style="width:0%"></span>
+          </div>
+          <div class="job-progress-meta">
+            <span id="t-progress-steps">Steps: not reported yet</span>
+            <span id="t-progress-epoch">Epoch: not reported yet</span>
+            <span id="t-progress-tokens">Tokens: not reported yet</span>
+            <span id="t-progress-speed">Speed: not measurable yet</span>
+            <span id="t-progress-eta">ETA: not available yet</span>
+          </div>
+          <p class="field-hint" id="t-progress-note" style="margin:0;">Progress is the share of the engine's optimizer steps that have completed. It is not a measure of how intelligent the model is.</p>
         </div>
 
         <div class="metric-strip" id="t-metrics">
@@ -768,16 +809,35 @@ window.training = (function () {
     container.innerHTML = jobs.slice(0, 8).map(job => {
       const datasetName = (datasetsCache.find(d => d.id === job.dataset_id) || {}).name;
       const modelName = (modelsCache.find(m => m.id === job.model_id) || {}).name;
+      const status = String(job.status || 'queued').toLowerCase();
+      const deletable = DELETABLE_STATUSES.indexOf(status) !== -1;
+      const percent = Number.isFinite(Number(job.progress_percent)) ? Number(job.progress_percent) : null;
+      const steps = job.total_steps
+        ? escapeHtml((job.completed_steps || 0) + ' / ' + job.total_steps + ' steps')
+        : null;
       return `
-        <div class="job-row">
+        <div class="job-row" data-job-row="${escapeHtml(job.id)}">
           <div class="job-row-main">
             ${ui.statusBadge(job.status || 'queued')}
             <span class="job-row-id mono">${escapeHtml(job.id)}</span>
+            <span class="job-row-stage">${escapeHtml(STAGE_LABELS[job.stage] || STAGE_LABELS[status] || 'Stage not reported')}</span>
           </div>
+          ${percent === null
+            ? '<div class="job-row-progress indeterminate" role="progressbar" aria-valuetext="Progress not measurable yet"><span></span></div>'
+            : `<div class="job-row-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent.toFixed(1)}" aria-valuetext="${percent.toFixed(1)} percent complete"><span style="width:${percent.toFixed(2)}%"></span></div>
+               <span class="job-row-percent mono">${percent.toFixed(1)}%${steps ? ' · ' + steps : ''}</span>`}
           <div class="job-row-meta">
             <span><i class="fas fa-cube"></i> ${escapeHtml(modelName || job.model_id || '—')}</span>
             <span><i class="fas fa-database"></i> ${escapeHtml(datasetName || job.dataset_id || 'no dataset')}</span>
             <span><i class="fas fa-clock"></i> ${escapeHtml(CORPUS_UTILS.formatDate(job.created_at))}</span>
+            ${job.failure_reason ? '<span class="text-warning"><i class="fas fa-triangle-exclamation"></i> ' + escapeHtml(job.failure_reason) + '</span>' : ''}
+          </div>
+          <div class="job-row-actions">
+            <button class="btn btn-ghost btn-sm" type="button" data-delete-job="${escapeHtml(job.id)}"
+              onclick="training.deleteJob('${escapeHtml(job.id)}', this)"
+              ${deletable ? '' : 'disabled title="Stop this job before deleting its history"'}>
+              <i class="fas fa-trash"></i> Delete
+            </button>
           </div>
         </div>
       `;
@@ -1055,8 +1115,168 @@ window.training = (function () {
     return window.CORPUS_ACTIONS.syncJob(job, opts);
   }
 
+  /* ---------------- Live progress (backend truth only) ---------------- */
+
+  function formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return null;
+    const totalSeconds = Math.round(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours) return hours + ' h ' + minutes + ' min';
+    if (minutes) return minutes + ' min ' + seconds + ' s';
+    return seconds + ' s';
+  }
+
+  /**
+   * ETA is shown only when it can be derived from real data: a backend start
+   * time plus a non-zero completed share. Otherwise it says so.
+   */
+  function estimateEta(job) {
+    if (!job || !job.started_at || ACTIVE_STATUSES.indexOf(String(job.status).toLowerCase()) === -1) return null;
+    const percent = Number(job.progress_percent);
+    if (!Number.isFinite(percent) || percent <= 0.5 || percent >= 100) return null;
+    const startedAt = new Date(job.started_at).getTime();
+    if (!Number.isFinite(startedAt)) return null;
+    const elapsed = Date.now() - startedAt;
+    if (elapsed <= 0) return null;
+    return (elapsed / percent) * (100 - percent);
+  }
+
+  function lastMeasuredSpeed() {
+    for (let index = metricSeries.throughput.length - 1; index >= 0; index -= 1) {
+      const value = metricSeries.throughput[index];
+      if (value !== null && value !== undefined) return Number(value);
+    }
+    return null;
+  }
+
+  function renderProgress(job) {
+    const panel = document.getElementById('t-progress-panel');
+    if (!panel) return;
+    const stageEl = document.getElementById('t-progress-stage');
+    const percentEl = document.getElementById('t-progress-percent');
+    const trackEl = document.getElementById('t-progress-track');
+    const fillEl = document.getElementById('t-progress-fill');
+    const stepsEl = document.getElementById('t-progress-steps');
+    const epochEl = document.getElementById('t-progress-epoch');
+    const tokensEl = document.getElementById('t-progress-tokens');
+    const speedEl = document.getElementById('t-progress-speed');
+    const etaEl = document.getElementById('t-progress-eta');
+    const noteEl = document.getElementById('t-progress-note');
+
+    if (!job) {
+      if (stageEl) stageEl.textContent = 'No job selected';
+      if (percentEl) percentEl.textContent = '—';
+      if (trackEl) {
+        trackEl.removeAttribute('aria-valuenow');
+        trackEl.setAttribute('aria-valuetext', 'No progress reported yet');
+      }
+      if (fillEl) fillEl.style.width = '0%';
+      if (stepsEl) stepsEl.textContent = 'Steps: not reported yet';
+      if (epochEl) epochEl.textContent = 'Epoch: not reported yet';
+      if (tokensEl) tokensEl.textContent = 'Tokens: not reported yet';
+      if (speedEl) speedEl.textContent = 'Speed: not measurable yet';
+      if (etaEl) etaEl.textContent = 'ETA: not available yet';
+      return;
+    }
+
+    const status = String(job.status || '').toLowerCase();
+    const rawPercent = job.progress_percent;
+    let percent = rawPercent === null || rawPercent === undefined || rawPercent === ''
+      ? null
+      : Number(rawPercent);
+    if (percent !== null && !Number.isFinite(percent)) percent = null;
+    if (status === 'completed') percent = 100;
+    if (percent !== null) percent = Math.max(0, Math.min(100, percent));
+
+    if (stageEl) {
+      stageEl.textContent = STAGE_LABELS[job.stage] || STAGE_LABELS[status] || 'Stage not reported';
+    }
+    if (percentEl) percentEl.textContent = percent === null ? '—' : percent.toFixed(1) + '%';
+    if (trackEl && fillEl) {
+      if (percent === null) {
+        trackEl.removeAttribute('aria-valuenow');
+        trackEl.setAttribute('aria-valuetext', 'Progress not measurable at this stage');
+        fillEl.style.width = '0%';
+        trackEl.classList.add('indeterminate');
+      } else {
+        trackEl.classList.remove('indeterminate');
+        trackEl.setAttribute('aria-valuenow', percent.toFixed(1));
+        trackEl.setAttribute('aria-valuetext', percent.toFixed(1) + ' percent complete');
+        fillEl.style.width = percent.toFixed(2) + '%';
+      }
+    }
+    if (stepsEl) {
+      stepsEl.textContent = job.total_steps
+        ? 'Steps: ' + Number(job.completed_steps || 0) + ' / ' + Number(job.total_steps)
+        : 'Steps: not reported yet';
+    }
+    if (epochEl) {
+      epochEl.textContent = job.total_epochs
+        ? 'Epoch: ' + Number(job.current_epoch || 0) + ' / ' + Number(job.total_epochs)
+        : 'Epoch: not reported yet';
+    }
+    if (tokensEl) {
+      tokensEl.textContent = Number.isFinite(Number(job.processed_tokens)) && Number(job.processed_tokens) > 0
+        ? 'Tokens: ' + Number(job.processed_tokens).toLocaleString()
+        : 'Tokens: not reported yet';
+    }
+    if (speedEl) {
+      const speed = lastMeasuredSpeed();
+      speedEl.textContent = speed !== null && Number.isFinite(speed)
+        ? 'Speed: ' + Math.round(speed).toLocaleString() + ' tokens/s'
+        : 'Speed: not measurable yet';
+    }
+    if (etaEl) {
+      if (status === 'completed') etaEl.textContent = 'ETA: finished';
+      else if (status === 'paused' || status === 'pausing') etaEl.textContent = 'ETA: paused';
+      else {
+        const remaining = estimateEta(job);
+        etaEl.textContent = remaining === null
+          ? 'ETA: not available yet'
+          : 'ETA: about ' + (formatDuration(remaining) || 'a moment');
+      }
+    }
+    if (noteEl) {
+      if (status === 'failed') {
+        noteEl.textContent = 'This job failed: ' + (job.failure_reason || 'the backend did not report a reason.');
+      } else if (status === 'interrupted') {
+        noteEl.textContent = 'This job was interrupted. It resumes from its last saved checkpoint. ' +
+          (job.failure_reason || '');
+      } else if (percent === null) {
+        noteEl.textContent = 'This stage cannot be measured in steps yet, so the bar stays indeterminate. It will fill as soon as the engine reports progress.';
+      } else {
+        noteEl.textContent = 'Progress is the share of the engine\'s optimizer steps that have completed. It is not a measure of how intelligent the model is.';
+      }
+    }
+  }
+
+  /** Update the panel from fresh backend fields; never invents a number. */
+  function applyProgress(jobId, payload) {
+    if (!payload) return;
+    const patch = {
+      progress_percent: payload.progress_percent,
+      stage: payload.stage,
+      completed_steps: payload.completed_steps,
+      total_steps: payload.total_steps,
+      current_epoch: payload.current_epoch,
+      total_epochs: payload.total_epochs,
+      processed_tokens: payload.processed_tokens,
+      last_loss: payload.last_loss,
+    };
+    Object.keys(patch).forEach((key) => {
+      if (patch[key] === undefined) delete patch[key];
+    });
+    state.updateTrainingJob(jobId, patch);
+    const job = state.getTrainingJob(jobId);
+    if (job) renderProgress(job);
+    updateMetricTiles();
+  }
+
   function updateMonitorStatus(job) {
     if (job) syncJobOperation(job);
+    renderProgress(job);
     const container = document.getElementById('t-monitor-status');
     if (!container) return;
     if (!job) {
@@ -1074,6 +1294,56 @@ window.training = (function () {
         ${dataset ? ' · ' + escapeHtml(dataset.name || dataset.id) : ''}
       </span>
     `;
+  }
+
+  /* ---------------- Delete job history ---------------- */
+
+  async function deleteJob(jobId, sourceButton) {
+    if (!jobId) return null;
+    const job = state.getTrainingJob(jobId) || (state.getTrainingJobs() || []).find(item => item.id === jobId) || {};
+    const status = String(job.status || '').toLowerCase();
+    if (DELETABLE_STATUSES.indexOf(status) === -1) {
+      ui.toast('Stop this job before deleting its history — an active job still owns its worker.', 'warning');
+      return null;
+    }
+
+    return new Promise((resolve) => {
+      ui.confirm(
+        'Delete training job',
+        'Remove job ' + jobId + ' from your history? The model, the dataset and any saved checkpoint are kept. ' +
+          'This only hides the job record from your list.',
+        () => {
+          resolve(window.CORPUS_ACTIONS.run({
+            name: 'Delete training job',
+            key: 'training:delete:' + jobId,
+            element: sourceButton || document.querySelector('[data-delete-job="' + jobId + '"]'),
+            label: 'Deleting…',
+            // The backend's own message is the useful one (409 for an active job).
+            notifyFailure: false,
+            run: async function () {
+              const token = await state.getAccessToken();
+              if (!token) throw new Error('Authentication required. Please sign in again.');
+              return window.CORPUS_API.deleteTrainingJob(jobId, token);
+            },
+            onSuccess: async function () {
+              state.setTrainingJobs((state.getTrainingJobs() || []).filter(item => item.id !== jobId));
+              if (wsJobId === jobId) wsJobId = null;
+              renderJobList();
+              await loadJobs();
+              ui.toast('Training job removed from your history.', 'success');
+            },
+            onFailure: function (err) {
+              const detail = err && err.data && err.data.detail;
+              const message = typeof detail === 'string' && detail
+                ? detail
+                : (err && err.message) || 'Could not delete the training job.';
+              log('Could not delete job ' + jobId + ': ' + message, 'error');
+              ui.toast(message, 'error');
+            },
+          }));
+        }
+      );
+    });
   }
 
   function reportJobFailure(jobId, message) {
@@ -1100,6 +1370,7 @@ window.training = (function () {
     startPolling(jobId);
     window.CORPUS_API.connectTrainingWS(jobId, {
       onMetric: (metric) => applyMetric(metric),
+      onProgress: (payload) => applyProgress(jobId, payload),
       onStatus: (payload) => applyStatus(jobId, payload),
       onComplete: (payload) => {
         log('Job ' + jobId + ' finished: ' + ((payload && payload.status) || 'completed'), 'success');
@@ -1233,6 +1504,14 @@ window.training = (function () {
       status: payload.status,
       dataset_id: payload.dataset_id,
       model_id: payload.model_id,
+      progress_percent: payload.progress_percent,
+      stage: payload.stage,
+      completed_steps: payload.completed_steps,
+      total_steps: payload.total_steps,
+      current_epoch: payload.current_epoch,
+      total_epochs: payload.total_epochs,
+      processed_tokens: payload.processed_tokens,
+      failure_reason: payload.failure_reason || payload.error,
     });
     const job = state.getTrainingJob(jobId) || { id: jobId, status: payload.status };
     updateControls(job);
@@ -1279,6 +1558,7 @@ window.training = (function () {
       state.updateTrainingJob(jobId, job);
       updateControls(job);
       updateMonitorStatus(job);
+      renderProgress(state.getTrainingJob(jobId) || job);
       if (!isActiveStatus(job.status)) {
         stopPolling();
         disconnectJobStream();
@@ -1393,6 +1673,10 @@ window.training = (function () {
     openDatasetManager,
     loadJobs,
     renderCharts,
+    deleteJob,
+    renderProgress,
+    applyProgress,
+    estimateEta,
     log,
     clearLog,
     updateEstimate,

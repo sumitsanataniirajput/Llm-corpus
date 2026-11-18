@@ -691,6 +691,23 @@ window.CORPUS_API = (function () {
     return request('/api/v1/training/' + encodeURIComponent(jobId) + '/stop', { method: 'POST', token });
   }
 
+  async function deleteTrainingJob(jobId, token, options = {}) {
+    // Removing history only. The backend refuses (409) while the job is active
+    // and keeps models, datasets and checkpoints, so the UI never needs to
+    // guess: it shows whatever the response says.
+    const qs = options && options.hard ? '?hard=true' : '';
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + qs, { method: 'DELETE', token });
+  }
+
+  async function datasetTextRange(datasetId, token, opts = {}) {
+    const params = new URLSearchParams();
+    params.set('offset', String(opts.offset || 0));
+    params.set('limit', String(opts.limit || 200000));
+    // Device workers read the real stored text: always ask the backend live.
+    return request('/api/v1/datasets/' + encodeURIComponent(datasetId) + '/text?' + params.toString(),
+      { token, noCache: true });
+  }
+
   async function listTrainingMetrics(jobId, token, opts = {}) {
     // `limit` asks the backend for only the newest N steps (still oldest-first):
     // a long run would otherwise stream its whole history on every poll.
@@ -705,6 +722,63 @@ window.CORPUS_API = (function () {
 
   async function listCheckpoints(modelId, token) {
     return request('/api/v1/training/checkpoints?model_id=' + encodeURIComponent(modelId), { token });
+  }
+
+  // ---------- Devices (multi-device training) ----------
+  async function listDevices(token) {
+    return request('/api/v1/devices/', { token, noCache: true });
+  }
+
+  async function registerDevice(payload, token) {
+    return request('/api/v1/devices/', { method: 'POST', token, body: payload });
+  }
+
+  async function deviceHeartbeat(deviceId, payload, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId) + '/heartbeat',
+      { method: 'POST', token, body: payload || {} });
+  }
+
+  async function updateDevice(deviceId, payload, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId), { method: 'PATCH', token, body: payload });
+  }
+
+  async function disconnectDevice(deviceId, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId) + '/disconnect', { method: 'POST', token });
+  }
+
+  async function deleteDevice(deviceId, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId), { method: 'DELETE', token });
+  }
+
+  async function assignDeviceTask(deviceId, payload, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId) + '/assign',
+      { method: 'POST', token, body: payload });
+  }
+
+  async function autoAssignDevices(jobIds, token) {
+    return request('/api/v1/devices/auto-assign', { method: 'POST', token, body: { job_ids: jobIds } });
+  }
+
+  async function planCollaborative(payload, token) {
+    return request('/api/v1/devices/plan/collaborative', { method: 'POST', token, body: payload });
+  }
+
+  async function listDeviceTasks(deviceId, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId) + '/tasks', { token, noCache: true });
+  }
+
+  async function listJobDeviceTasks(jobId, token) {
+    return request('/api/v1/devices/jobs/' + encodeURIComponent(jobId) + '/tasks', { token, noCache: true });
+  }
+
+  async function reportDeviceTaskProgress(deviceId, taskId, payload, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId) + '/tasks/' + encodeURIComponent(taskId) + '/progress',
+      { method: 'POST', token, body: payload });
+  }
+
+  async function completeDeviceTask(deviceId, taskId, payload, token) {
+    return request('/api/v1/devices/' + encodeURIComponent(deviceId) + '/tasks/' + encodeURIComponent(taskId) + '/complete',
+      { method: 'POST', token, body: payload || {} });
   }
 
   // Every checkpoint owned by the caller (no model filter).
@@ -909,6 +983,7 @@ window.CORPUS_API = (function () {
       const event = msg.event;
       const data = msg.data;
       if (event === 'status' && handlers.onStatus) handlers.onStatus(data);
+      else if (event === 'progress' && handlers.onProgress) handlers.onProgress(data);
       else if (event === 'metric' && handlers.onMetric) handlers.onMetric(data);
       else if (event === 'log' && handlers.onLog) handlers.onLog(data);
       else if (event === 'complete' && handlers.onComplete) handlers.onComplete(data);
@@ -928,6 +1003,7 @@ window.CORPUS_API = (function () {
       if (msg.event === 'metric' && handlers.onMetric) handlers.onMetric(msg.data);
       if (msg.event === 'log' && handlers.onLog) handlers.onLog(msg.data);
       if (msg.event === 'status' && handlers.onStatus) handlers.onStatus(msg.data);
+      if (msg.event === 'progress' && handlers.onProgress) handlers.onProgress(msg.data);
       if (msg.event === 'complete' && handlers.onComplete) handlers.onComplete(msg.data);
     });
   }
@@ -947,7 +1023,11 @@ window.CORPUS_API = (function () {
     createDatasetUploadSession, completeDatasetUpload, previewDataset, preprocessDataset,
     splitDataset, asDatasetList,
     listTrainingJobs, createTrainingJob, getTrainingJob, pauseTrainingJob,
-    resumeTrainingJob, stopTrainingJob, listTrainingMetrics, listTrainingLogs,
+    resumeTrainingJob, stopTrainingJob, deleteTrainingJob, listTrainingMetrics, listTrainingLogs,
+    datasetTextRange,
+    listDevices, registerDevice, deviceHeartbeat, updateDevice, disconnectDevice, deleteDevice,
+    assignDeviceTask, autoAssignDevices, planCollaborative, listDeviceTasks, listJobDeviceTasks,
+    reportDeviceTaskProgress, completeDeviceTask,
     listCheckpoints, listAllCheckpoints, saveCheckpoint, loadCheckpoint,
     infer, inferStream, tokenize, nextToken,
     listEvaluations, runEvaluation, getEvaluation,
