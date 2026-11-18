@@ -1085,9 +1085,16 @@ window.devices = (function () {
 
   /* --------------------------------------------------------------- routing */
 
-  async function render() {
-    const route = state.getRoute ? state.getRoute() : (location.hash || '').replace(/^#\/?/, '');
-    if (route === 'multi-device') return renderMultiDevice();
+  function currentRoute(hint) {
+    const candidates = [hint, (window.location.hash || '').replace(/^#\/?/, ''), state.getRoute ? state.getRoute() : ''];
+    for (const candidate of candidates) {
+      if (candidate === 'multi-device' || candidate === 'device-compute') return candidate;
+    }
+    return 'device-compute';
+  }
+
+  async function render(routeHint) {
+    if (currentRoute(routeHint) === 'multi-device') return renderMultiDevice();
     return renderDeviceCompute();
   }
 

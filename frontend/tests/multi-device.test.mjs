@@ -60,9 +60,11 @@ function job(overrides = {}) {
 }
 
 async function renderPage(app) {
-  // The module dispatches on the route, so set it exactly like the router does.
+  // The router passes the route to the page (state.setRoute happens later), and
+  // the hash already points at the route, exactly like a real navigation.
+  app.window.location.hash = '#/multi-device';
   app.window.state.setRoute('multi-device');
-  await app.window.devices.render();
+  await app.window.devices.render('multi-device');
   await tick(2);
 }
 
@@ -257,4 +259,24 @@ test('distributing active jobs calls auto-assign and reports which jobs were not
   const call = app.net.deviceCalls.find((item) => /\/auto-assign$/.test(item.route));
   assert.ok(call, 'auto-assign was called');
   assert.deepEqual(call.body.job_ids, ['job_q1', 'job_q2']);
+});
+
+test('the module renders the page the router asked for, not the last route in state', async () => {
+  const fx = datasetFixtures();
+  const app = createApp({ ...fx, devices: [device()] });
+
+  // state still says "training" (the router sets it after rendering) while the
+  // router asks for multi-device: the multi-device page must win.
+  app.window.state.setRoute('training');
+  await app.window.devices.render('multi-device');
+  await tick(2);
+  assert.ok(app.doc.getElementById('multi-device-root'), 'multi-device page rendered');
+  assert.equal(app.doc.getElementById('device-compute-root'), null);
+
+  app.window.devices.dispose();
+  app.window.location.hash = '#/device-compute';
+  await app.window.devices.render('device-compute');
+  await tick(2);
+  assert.ok(app.doc.getElementById('device-compute-root'), 'device compute page rendered');
+  assert.equal(app.doc.getElementById('multi-device-root'), null);
 });

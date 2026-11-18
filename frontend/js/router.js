@@ -534,7 +534,9 @@ window.router = (function () {
         page = await reloadPageModule(route);
       }
       if (page && typeof page.render === 'function') {
-        await page.render();
+        // The route is passed explicitly: state.setRoute() runs after the
+        // renderer, so a page must not have to guess which route it is on.
+        await page.render(route);
       } else {
         container.innerHTML = missingModulePanel(route, moduleName, iconClass);
       }
