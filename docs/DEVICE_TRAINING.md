@@ -139,7 +139,10 @@ is only offered because the aggregation is real and verified.
 
 **Leases.** Heartbeat timeout is 75 s, lease 90 s. A silent device is marked
 `offline` and its tasks become `expired`, so the same job or shard can be
-reassigned without double-counting (expired tasks are never aggregated).
+reassigned without double-counting (expired tasks are never aggregated). Re-planning
+a collaborative run expires the previous shards and gives the new plan its own
+`plan_id`, so results from two plans can never be mixed and a stale shard cannot
+block the aggregate.
 
 ---
 
@@ -185,15 +188,16 @@ bridge presence/absence and what it does and does not enable.
 
 Backend (`/tmp/venv/bin/python -m pytest -p no:warnings`):
 
-* 101 tests pass, 0 fail (83 before this branch).
+* 102 tests pass, 0 fail (83 before this branch).
 * New: `backend/tests/test_training_progress.py` (7) — real engine step total,
   monotonic percent, stage events without metric rows, failed reason, soft
   delete, hard delete keeping the checkpoint, 409 for active, 403 for another
   account.
-* New: `backend/tests/test_devices.py` (9) — register/heartbeat/list, lease
+* New: `backend/tests/test_devices.py` (10) — register/heartbeat/list, lease
   expiry after a dead heartbeat, reassignment, pause/resume/disconnect, remove
   keeps history, ownership isolation, auto-assign spread, collaborative shard
-  aggregation, lease renewal and late-progress rejection.
+  aggregation, lease renewal and late-progress rejection, and re-planning a
+  collaborative run (the superseded shards expire, so the new plan aggregates).
 * Extended: `backend/tests/test_datasets_api.py` — ranged text streaming
   reassembles the exact stored text; owner-only.
 

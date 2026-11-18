@@ -529,6 +529,28 @@ async def plan_collaborative(
     shard_count = body.shards or len(devices)
     shard_count = max(1, min(len(devices), shard_count))
 
+    # Re-planning must not leave the previous shard set alive: the coordinator
+    # aggregates only when every sibling is complete, so stale active shards
+    # would silently block the result. They are expired, never deleted.
+    superseded = await db.execute(
+        text("""
+            UPDATE public.training_device_tasks
+            SET status = 'expired',
+                lease_expires_at = NULL,
+                detail = coalesce(detail, '{}'::jsonb) || '{"superseded": true}'::jsonb,
+                updated_at = now()
+            WHERE job_id = :job_id AND kind = 'preprocess'
+              AND status IN ('assigned', 'running')
+            RETURNING id
+        """),
+        {"job_id": job.id},
+    )
+    superseded_ids = [row[0] for row in superseded.fetchall()]
+
+    # Every plan has its own id: results of a superseded plan can never be
+    # mixed into the current one.
+    plan_id = "plan_" + uuid.uuid4().hex[:10]
+
     created = []
     for index, device in enumerate(devices[:shard_count]):
         task = TrainingDeviceTask(
@@ -541,7 +563,12 @@ async def plan_collaborative(
             lease_expires_at=_now() + timedelta(seconds=DEFAULT_LEASE_SECONDS),
             shard_index=index,
             shard_count=shard_count,
-            detail={"mode": "collaborative-preprocess", "shard_index": index, "shard_count": shard_count},
+            detail={
+                "mode": "collaborative-preprocess",
+                "plan_id": plan_id,
+                "shard_index": index,
+                "shard_count": shard_count,
+            },
             created_at=_now(),
             updated_at=_now(),
         )
@@ -554,6 +581,8 @@ async def plan_collaborative(
     return {
         "ok": True,
         "mode": "collaborative-preprocess",
+        "plan_id": plan_id,
+        "superseded_tasks": superseded_ids,
         "synchronisation": (
             "Devices tokenize and count separate shards of one dataset; the coordinator "
             "aggregates the shard results. Model weight/gradient synchronisation is not "
@@ -697,14 +726,22 @@ async def complete_task(
 
     aggregate = None
     if task.kind == "preprocess" and task.job_id:
+        plan_id = (task.detail or {}).get("plan_id")
         siblings = (await db.execute(
             select(TrainingDeviceTask).where(
                 TrainingDeviceTask.job_id == task.job_id,
                 TrainingDeviceTask.kind == "preprocess",
             )
         )).scalars().all()
-        completed = [t for t in siblings if t.status == "completed"]
-        if completed and len(completed) == len(siblings):
+        # Only the shards of the same plan count. Shards from a superseded plan
+        # are ignored, and a shard of the current plan that expired still counts
+        # as missing work, so nothing partial is ever aggregated.
+        plan_tasks = [t for t in siblings if (t.detail or {}).get("plan_id") == plan_id]
+        if not plan_id:
+            plan_tasks = [t for t in siblings if not (t.detail or {}).get("plan_id")
+                          and not (t.detail or {}).get("superseded")]
+        completed = [t for t in plan_tasks if t.status == "completed"]
+        if completed and len(completed) == len(plan_tasks):
             tokens = 0
             for item in completed:
                 result = (item.detail or {}).get("result") or {}
@@ -712,6 +749,7 @@ async def complete_task(
                 if isinstance(value, (int, float)):
                     tokens += int(value)
             aggregate = {
+                "plan_id": plan_id,
                 "shards": len(completed),
                 "token_count": tokens,
                 "devices": sorted({item.device_id for item in completed}),

@@ -282,3 +282,29 @@ async def test_task_progress_renews_the_lease_and_rejects_finished_tasks(http, m
     late = await http.post(f"/api/v1/devices/{device['id']}/tasks/{task['id']}/progress",
                            json={"progress_percent": 99})
     assert late.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_re_planning_expires_the_previous_shards_instead_of_blocking_aggregation(http, monkeypatch):
+    a = await _register(http, name="Phone A")
+    b = await _register(http, name="Phone B")
+    model = await _create_model(http)
+    dataset = await _create_dataset_with_file(http)
+    job = await _create_queued_job(http, monkeypatch, model["id"], dataset["id"])
+
+    first = (await http.post("/api/v1/devices/plan/collaborative", json={
+        "job_id": job["id"], "device_ids": [a["id"], b["id"]],
+    })).json()
+    second = (await http.post("/api/v1/devices/plan/collaborative", json={
+        "job_id": job["id"], "device_ids": [a["id"], b["id"]],
+    })).json()
+
+    assert sorted(second["superseded_tasks"]) == sorted(t["id"] for t in first["tasks"])
+
+    done = []
+    for task in second["tasks"]:
+        done.append(await http.post(
+            f"/api/v1/devices/{task['device_id']}/tasks/{task['id']}/complete",
+            json={"detail": {"token_count": 50}},
+        ))
+    assert done[-1].json()["aggregate"]["token_count"] == 100, "the new plan aggregates normally"
