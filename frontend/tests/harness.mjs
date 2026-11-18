@@ -23,6 +23,7 @@ const MODULES = [
   'js/state.js',
   'js/api.js',
   'js/components.js',
+  'js/actions.js',
   'js/charts.js',
   'js/dashboard.js',
   'js/models.js',
@@ -182,6 +183,19 @@ function createAppFromFiles(options) {
         throw err;
       }
       return jsonResponse(state.health);
+    }
+    if (route === '/api/v1/models' && method === 'POST') {
+      const body = JSON.parse(opts.body || '{}');
+      const config = body.config || body;
+      const created = {
+        id: 'model_created_' + (state.models.length + 1),
+        name: config.name || body.name || 'New model',
+        version: '1',
+        status: 'idle',
+        config,
+      };
+      state.models.push(created);
+      return jsonResponse({ model: created }, 201);
     }
     if (route === '/api/v1/datasets' && method === 'POST') {
       const body = JSON.parse(opts.body);
