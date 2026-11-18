@@ -124,7 +124,104 @@ window.CORPUS_API = (function () {
     return data;
   }
 
+  // ---------- read cache + request de-duplication ------------------------
+  //
+  // Every page used to fetch everything on every visit (Dashboard alone made
+  // five calls, and Models/Training/Datasets repeated the same lists), so a
+  // cold Render backend turned each navigation into seconds of dead UI. Reads
+  // are now cached for a short TTL, identical concurrent reads share one
+  // request, and every mutation invalidates the cache so data never goes stale
+  // in a way the user cannot explain.
+  const responseCache = new Map();   // key -> { data, at }
+  const inFlightReads = new Map();   // key -> promise
+  const CACHE_MAX_ENTRIES = 40;
+
+  function cacheTtlMs() {
+    const configured = window.CORPUS_CONFIG && window.CORPUS_CONFIG.API_CACHE_TTL_MS;
+    return typeof configured === 'number' && configured >= 0 ? configured : 20000;
+  }
+
+  function cacheKey(endpoint) {
+    // Scope by user: a cached list must never be served to another account
+    // after sign-out/sign-in on the same browser tab.
+    const user = state.getUser ? state.getUser() : null;
+    return (user && user.id ? user.id : 'anon') + ' ' + endpoint;
+  }
+
+  function cloneData(data) {
+    if (Array.isArray(data)) return data.map((item) => (item && typeof item === 'object' ? { ...item } : item));
+    if (data && typeof data === 'object') return { ...data };
+    return data;
+  }
+
+  function cacheStats() {
+    return { entries: responseCache.size, inFlight: inFlightReads.size, ttlMs: cacheTtlMs() };
+  }
+
+  function invalidateCache() {
+    responseCache.clear();
+  }
+
   async function request(endpoint, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const cacheable = method === 'GET'
+      && !options.body
+      && !options.noCache
+      && endpoint !== '/api/v1/health'
+      && cacheTtlMs() > 0;
+
+    if (!cacheable) {
+      const promise = performRequest(endpoint, options);
+      if (method !== 'GET') {
+        // Any write can change any collection; drop the cache so the next read
+        // reflects it. Cheap (≤40 small entries) and never stale-by-accident.
+        promise.then(invalidateCache, invalidateCache);
+      }
+      return promise;
+    }
+
+    const key = cacheKey(endpoint);
+    const hit = responseCache.get(key);
+    if (hit && Date.now() - hit.at < cacheTtlMs()) {
+      return cloneData(hit.data);
+    }
+
+    const pending = inFlightReads.get(key);
+    if (pending) return pending;   // same read already on the wire
+
+    const promise = performRequest(endpoint, options)
+      .then((data) => {
+        responseCache.delete(key);          // refresh insertion order
+        responseCache.set(key, { data: cloneData(data), at: Date.now() });
+        while (responseCache.size > CACHE_MAX_ENTRIES) {
+          responseCache.delete(responseCache.keys().next().value);
+        }
+        return cloneData(data);
+      })
+      .finally(() => { inFlightReads.delete(key); });
+
+    inFlightReads.set(key, promise);
+    return promise;
+  }
+
+  async function performRequest(endpoint, options = {}) {
+    const perfStart = window.CORPUS_PERF ? window.CORPUS_PERF.now() : 0;
+    try {
+      const data = await performRequestInner(endpoint, options);
+      if (window.CORPUS_PERF) {
+        window.CORPUS_PERF.recordApi(endpoint, window.CORPUS_PERF.now() - perfStart, true, 200);
+      }
+      return data;
+    } catch (err) {
+      if (window.CORPUS_PERF && !(err && err.aborted)) {
+        // Only the route and the status are recorded: no headers, no bodies.
+        window.CORPUS_PERF.recordApi(endpoint, window.CORPUS_PERF.now() - perfStart, false, (err && err.status) || 0);
+      }
+      throw err;
+    }
+  }
+
+  async function performRequestInner(endpoint, options = {}) {
     // Skip protected requests if backend is known to be unavailable
     // (avoids repeated "Failed to fetch" spam and unnecessary token resolution)
     if (isBackendUnavailable() && endpoint !== '/api/v1/health') {
@@ -155,11 +252,40 @@ window.CORPUS_API = (function () {
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const fetchOpts = { ...opts, signal: controller.signal };
 
+    // A caller (a page being navigated away from, a search box, a superseded
+    // refresh) can cancel this request. Cancelling is not a backend failure, so
+    // it must never mark the API "unavailable" the way a network error does.
+    const externalSignal = options.signal
+      || (endpoint !== '/api/v1/health' && window.CORPUS_APP && typeof window.CORPUS_APP.getPageSignal === 'function'
+        ? window.CORPUS_APP.getPageSignal() : null);
+    let externallyAborted = false;
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        clearTimeout(timeoutId);
+        externallyAborted = true;
+        const aborted = new Error('Request cancelled.');
+        aborted.status = 0;
+        aborted.code = 'ABORTED';
+        aborted.aborted = true;
+        throw aborted;
+      }
+      const onAbort = () => { externallyAborted = true; controller.abort(); };
+      externalSignal.addEventListener('abort', onAbort, { once: true });
+    }
+
     let res;
     try {
       res = await fetch(url, fetchOpts);
     } catch (fetchErr) {
       clearTimeout(timeoutId);
+      if (externallyAborted) {
+        // The page moved on; this is not a backend problem.
+        const aborted = new Error('Request cancelled.');
+        aborted.status = 0;
+        aborted.code = 'ABORTED';
+        aborted.aborted = true;
+        throw aborted;
+      }
       // Mark backend as unavailable to prevent repeated failed requests
       setBackendUnavailable(BACKEND_UNAVAILABLE_WINDOW_MS);
 
@@ -289,8 +415,8 @@ window.CORPUS_API = (function () {
   }
 
   // ---------- Models ----------
-  async function listModels(token) {
-    return request('/api/v1/models/', { token });
+  async function listModels(token, opts = {}) {
+    return request('/api/v1/models/', { token, ...opts });
   }
 
   async function getModel(modelId, token) {
@@ -327,8 +453,8 @@ window.CORPUS_API = (function () {
   }
 
   // ---------- Datasets ----------
-  async function listDatasets(token) {
-    return request('/api/v1/datasets/', { token });
+  async function listDatasets(token, opts = {}) {
+    return request('/api/v1/datasets/', { token, ...opts });
   }
 
   async function getDataset(datasetId, token) {
@@ -462,11 +588,17 @@ window.CORPUS_API = (function () {
   async function uploadDatasetFile(datasetId, file, token) {
     const resolvedToken = token || (await state.getAccessToken());
     try {
-      return await uploadOnce(datasetId, file, resolvedToken, null);
+      const result = await uploadOnce(datasetId, file, resolvedToken, null);
+      invalidateCache();
+      return result;
     } catch (err) {
       if (err && err.status === 401) {
         const refreshed = await refreshSession();
-        if (refreshed) return uploadOnce(datasetId, file, refreshed, null);
+        if (refreshed) {
+          const retried = await uploadOnce(datasetId, file, refreshed, null);
+          invalidateCache();
+          return retried;
+        }
         throw authError(
           'The upload was rejected (401) and the session could not be refreshed. ' +
           'Sign in again, then retry — the dataset record is kept.',
@@ -483,7 +615,9 @@ window.CORPUS_API = (function () {
   async function uploadDatasetFileWithProgress(datasetId, file, token, onProgress) {
     const resolvedToken = token || (await state.getAccessToken());
     try {
-      return await uploadOnce(datasetId, file, resolvedToken, onProgress);
+      const result = await uploadOnce(datasetId, file, resolvedToken, onProgress);
+      invalidateCache();
+      return result;
     } catch (err) {
       if (err && err.status === 401) {
         // Long uploads outlive a short-lived access token: refresh once and
@@ -491,7 +625,9 @@ window.CORPUS_API = (function () {
         const refreshed = await refreshSession();
         if (refreshed) {
           if (onProgress) onProgress(0);
-          return uploadOnce(datasetId, file, refreshed, onProgress);
+          const retried = await uploadOnce(datasetId, file, refreshed, onProgress);
+          invalidateCache();
+          return retried;
         }
         throw authError(
           'The upload was rejected (401) and the session could not be refreshed. ' +
@@ -516,8 +652,8 @@ window.CORPUS_API = (function () {
   }
 
   // ---------- Training ----------
-  async function listTrainingJobs(token) {
-    return request('/api/v1/training/', { token });
+  async function listTrainingJobs(token, opts = {}) {
+    return request('/api/v1/training/', { token, ...opts });
   }
 
   async function createTrainingJob(config, token) {
@@ -525,7 +661,8 @@ window.CORPUS_API = (function () {
   }
 
   async function getTrainingJob(jobId, token) {
-    return request('/api/v1/training/' + encodeURIComponent(jobId), { token });
+    // Polled every 5 s: always read live status, never a cached copy.
+    return request('/api/v1/training/' + encodeURIComponent(jobId), { token, noCache: true });
   }
 
   async function pauseTrainingJob(jobId, token) {
@@ -540,12 +677,16 @@ window.CORPUS_API = (function () {
     return request('/api/v1/training/' + encodeURIComponent(jobId) + '/stop', { method: 'POST', token });
   }
 
-  async function listTrainingMetrics(jobId, token) {
-    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/metrics', { token });
+  async function listTrainingMetrics(jobId, token, opts = {}) {
+    // `limit` asks the backend for only the newest N steps (still oldest-first):
+    // a long run would otherwise stream its whole history on every poll.
+    const suffix = opts.limit ? '?limit=' + encodeURIComponent(opts.limit) : '';
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/metrics' + suffix, { token, noCache: true });
   }
 
-  async function listTrainingLogs(jobId, token) {
-    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/logs', { token });
+  async function listTrainingLogs(jobId, token, opts = {}) {
+    const suffix = opts.limit ? '?limit=' + encodeURIComponent(opts.limit) : '';
+    return request('/api/v1/training/' + encodeURIComponent(jobId) + '/logs' + suffix, { token, noCache: true });
   }
 
   async function listCheckpoints(modelId, token) {
@@ -779,6 +920,10 @@ window.CORPUS_API = (function () {
 
   return {
     request,
+    // Cache control for pages and diagnostics: a manual "Refresh" passes
+    // noCache, and mutations invalidate automatically.
+    invalidateCache,
+    cacheStats,
     me,
     verifySession,
     listModels, getModel, createModel, updateModel, deleteModel, cloneModel,

@@ -149,9 +149,22 @@ window.dashboard = (function () {
   async function refresh() {
     const btn = document.getElementById('dash-refresh');
     if (loading) return;
-    if (btn) btn.disabled = true;
-    await loadAll();
-    if (btn) btn.disabled = false;
+    if (btn) {
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+    }
+    // A manual refresh means "show me the truth", so bypass the read cache.
+    if (window.CORPUS_API && typeof window.CORPUS_API.invalidateCache === 'function') {
+      window.CORPUS_API.invalidateCache();
+    }
+    try {
+      await loadAll();
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+      }
+    }
   }
 
   async function loadAll() {

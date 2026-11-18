@@ -43,7 +43,7 @@ window.CORPUS_CONFIG = {
   // CSS/JS in index.html. Used to cache-bust a page module the router has to
   // re-request when one failed to register. Enforced by
   // frontend/tests/build-id.test.mjs.
-  BUILD_ID: '2026-11-16.7',
+  BUILD_ID: '2026-11-16.8',
 
   // Uploads get their own (much longer) timeout. REQUEST_TIMEOUT above applies
   // to small JSON calls; a 100 MB dataset on a phone needs minutes, and the old

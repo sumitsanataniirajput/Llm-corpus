@@ -22,6 +22,30 @@ window.CORPUS_APP = (function () {
     }
   })();
 
+  // Any "this data changed" event invalidates the short-lived read cache before
+  // the interested pages re-read it. Without this the pages would paint the
+  // cached (pre-upload / pre-delete) list and look wrong for up to the TTL.
+  const CACHE_CHANGE_EVENTS = [
+    'corpus:datasets-changed',
+    'corpus:models-changed',
+    'corpus:training-changed',
+    'corpus:checkpoints-changed',
+  ];
+
+  function wireCacheInvalidation() {
+    try {
+      CACHE_CHANGE_EVENTS.forEach((name) => {
+        window.addEventListener(name, () => {
+          if (window.CORPUS_API && typeof window.CORPUS_API.invalidateCache === 'function') {
+            window.CORPUS_API.invalidateCache();
+          }
+        });
+      });
+    } catch (e) {
+      // Event wiring must never break the application.
+    }
+  }
+
   function logDiagnostic(message, data) {
     const entry = {
       time: new Date().toISOString(),
@@ -43,6 +67,10 @@ window.CORPUS_APP = (function () {
       initialized: initialized,
       errorLog: errorLog.slice(),
       errorCount: errorLog.length,
+      // Real in-browser measurements (load, navigation, API, long tasks). Only
+      // aggregate numbers and route paths — never tokens or user data.
+      perf: (window.CORPUS_PERF && typeof window.CORPUS_PERF.snapshot === 'function')
+        ? window.CORPUS_PERF.snapshot() : null,
     };
   }
 
@@ -115,4 +143,6 @@ window.CORPUS_APP = (function () {
     isInitialized,
     debugMode,
   };
+  wireCacheInvalidation();
+
 })();
