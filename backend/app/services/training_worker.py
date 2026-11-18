@@ -44,6 +44,7 @@ def _register_job_control(job_id: str):
     loop = asyncio.get_running_loop()
     ctrl = {
         "cancel": threading.Event(),
+        "pause": threading.Event(),
         "done": asyncio.Event(),
         "loop": loop,
     }
@@ -77,6 +78,26 @@ def request_job_stop(job_id: str) -> bool:
         return True
 
 
+def request_job_pause(job_id: str) -> bool:
+    """Ask an active worker to pause at its next optimizer-step boundary."""
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+        if not ctrl or ctrl["done"].is_set() or ctrl["cancel"].is_set():
+            return False
+        ctrl["pause"].set()
+        return True
+
+
+def request_job_resume(job_id: str) -> bool:
+    """Release a paused worker so training can continue."""
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+        if not ctrl or ctrl["done"].is_set() or ctrl["cancel"].is_set():
+            return False
+        ctrl["pause"].clear()
+        return True
+
+
 async def stop_and_wait_for_job(job_id: str, timeout: float = 5.0) -> bool:
     """Signal an active in-process training job to stop and wait for exit.
 
@@ -102,6 +123,49 @@ def _check_not_stopped(job_id: str):
         ctrl = _JOB_CONTROLS.get(job_id)
         if ctrl and ctrl["cancel"].is_set():
             raise TrainingStoppedError("Training job was stopped.")
+
+
+async def _persist_worker_status(job_id: str, status: str):
+    """Persist a worker-observed pause/resume state for the live monitor."""
+    factory = get_session_factory()
+    async with factory() as db:
+        await db.execute(text("""
+            UPDATE public.training_jobs
+            SET status = :status, updated_at = now()
+            WHERE id = :job_id
+              AND status NOT IN ('completed', 'failed', 'stopped', 'cancelled', 'stopping')
+        """), {"job_id": job_id, "status": status})
+        await db.commit()
+
+
+def _set_worker_status_from_thread(job_id: str, status: str, ctrl: dict):
+    """Bridge a synchronous PyTorch callback back to the worker's async DB loop."""
+    future = asyncio.run_coroutine_threadsafe(
+        _persist_worker_status(job_id, status),
+        ctrl["loop"],
+    )
+    future.result(timeout=30)
+
+
+def _wait_if_paused(job_id: str):
+    """Block the training thread at an optimizer-step boundary until resumed."""
+    if not job_id:
+        return
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+    if not ctrl:
+        _check_not_stopped(job_id)
+        return
+    _check_not_stopped(job_id)
+    if not ctrl["pause"].is_set():
+        return
+
+    _set_worker_status_from_thread(job_id, "paused", ctrl)
+    while ctrl["pause"].is_set():
+        _check_not_stopped(job_id)
+        time.sleep(0.1)
+    _check_not_stopped(job_id)
+    _set_worker_status_from_thread(job_id, "running", ctrl)
 
 
 def _now():
@@ -167,7 +231,7 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
     processed_tokens = 0
     def report_optimizer_step(step_data):
         nonlocal processed_tokens
-        _check_not_stopped(current_job_id)
+        _wait_if_paused(current_job_id)
         processed_tokens += int(step_data.get("tokens") or (int(loader.batch_size or 1) * context))
         elapsed = max(time.monotonic() - started, 0.001)
         metric = {

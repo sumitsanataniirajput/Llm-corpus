@@ -19,6 +19,61 @@ async def _upload(http, dataset_id, content=b"hello corpus world\n" * 20, filena
 
 
 @pytest.mark.asyncio
+async def test_resumable_upload_session_and_finalize_registers_storage_object(http, storage):
+    dataset = await _create_dataset(http, name="Large corpus")
+    session_response = await http.post(
+        f"/api/v1/datasets/{dataset['id']}/upload-session",
+        json={"file_name": "large.jsonl", "content_type": "application/x-ndjson"},
+    )
+    assert session_response.status_code == 200, session_response.text
+    session = session_response.json()
+    assert session["bucket"] == settings.STORAGE_BUCKET
+    assert session["token"].startswith("test-signed-token-")
+    assert session["storage_path"].startswith(f"{USER_ID}/datasets/{dataset['id']}/")
+    assert session["storage_path"].endswith("_large.jsonl")
+
+    payload = b'{"instruction":"hello","output":"world"}\n' * 10
+    storage.put(settings.STORAGE_BUCKET, session["storage_path"], payload)
+    complete_response = await http.post(
+        f"/api/v1/datasets/{dataset['id']}/complete",
+        json={"storage_path": session["storage_path"], "file_name": "large.jsonl"},
+    )
+    assert complete_response.status_code == 200, complete_response.text
+    complete = complete_response.json()
+    assert complete["ok"] is True
+    assert complete["file_size"] == len(payload)
+    assert complete["dataset"]["status"] == "uploaded"
+    assert complete["dataset"]["has_file"] is True
+    assert complete["dataset"]["file_name"] == "large.jsonl"
+    assert complete["dataset"]["storage_path"] == session["storage_path"]
+
+
+@pytest.mark.asyncio
+async def test_resumable_upload_finalize_rejects_path_outside_dataset_owner(http):
+    dataset = await _create_dataset(http)
+    response = await http.post(
+        f"/api/v1/datasets/{dataset['id']}/complete",
+        json={
+            "storage_path": f"someone-else/datasets/{dataset['id']}/abc_corpus.txt",
+            "file_name": "corpus.txt",
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_legacy_multipart_route_has_a_small_memory_bound(http):
+    dataset = await _create_dataset(http)
+    content = b"x" * (settings.MAX_UPLOAD_SIZE + 1)
+    response = await http.post(
+        f"/api/v1/datasets/{dataset['id']}/upload",
+        files={"file": ("oversized.txt", content, "text/plain")},
+    )
+    assert response.status_code == 413
+    assert "resumable upload flow" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
 async def test_new_dataset_is_pending_and_has_no_file(http):
     dataset = await _create_dataset(http)
     assert dataset["status"] == "pending"

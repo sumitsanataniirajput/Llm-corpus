@@ -8,7 +8,7 @@ window.charts = (function () {
   const commonOptions = {
     responsive: true,
     maintainAspectRatio: false,
-    animation: { duration: 800, easing: 'easeInOutQuart' },
+    animation: false,
     plugins: {
       legend: { labels: { color: '#cac4d0', font: { family: 'Inter', size: 12 } } },
       title: { display: false },
@@ -50,7 +50,9 @@ window.charts = (function () {
     if (!inst) return;
     inst.data.labels = labels;
     inst.data.datasets = datasets;
-    inst.update();
+    // Live metrics update frequently; skip animation to avoid repeated
+    // animation queues and main-thread work on mobile devices.
+    inst.update('none');
   }
 
   function destroyChart(ctxId) {
