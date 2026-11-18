@@ -639,6 +639,20 @@ window.CORPUS_API = (function () {
     }
   }
 
+  async function createDatasetUploadSession(datasetId, payload, token) {
+    return request(
+      '/api/v1/datasets/' + encodeURIComponent(datasetId) + '/upload-session',
+      { method: 'POST', token, body: payload }
+    );
+  }
+
+  async function completeDatasetUpload(datasetId, payload, token) {
+    return request(
+      '/api/v1/datasets/' + encodeURIComponent(datasetId) + '/complete',
+      { method: 'POST', token, body: payload }
+    );
+  }
+
   async function previewDataset(datasetId, token, maxChars = 2000) {
     return request('/api/v1/datasets/' + encodeURIComponent(datasetId) + '/preview?max_chars=' + encodeURIComponent(maxChars), { token });
   }
@@ -929,7 +943,8 @@ window.CORPUS_API = (function () {
     listModels, getModel, createModel, updateModel, deleteModel, cloneModel,
     validateConfig, listModelVersions, exportModel,
     listDatasets, getDataset, createDataset, updateDataset, deleteDataset,
-    uploadDatasetFile, uploadDatasetFileWithProgress, previewDataset, preprocessDataset,
+    uploadDatasetFile, uploadDatasetFileWithProgress,
+    createDatasetUploadSession, completeDatasetUpload, previewDataset, preprocessDataset,
     splitDataset, asDatasetList,
     listTrainingJobs, createTrainingJob, getTrainingJob, pauseTrainingJob,
     resumeTrainingJob, stopTrainingJob, listTrainingMetrics, listTrainingLogs,

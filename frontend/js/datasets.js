@@ -80,6 +80,8 @@ window.datasets = (function () {
           name: item.name,
           size: item.size,
           datasetId: item.datasetId || null,
+          uploadSession: item.uploadSession || null,
+          storageUploaded: !!item.storageUploaded,
           state: item.state === 'done' ? 'done' : 'ready',
           message: item.state === 'done' ? 'Already uploaded.' : 'Restored from this device. Ready to upload.',
         })),
@@ -137,6 +139,8 @@ window.datasets = (function () {
           name: item.name || file.name,
           size: Number(item.size || file.size || 0),
           datasetId: item.datasetId || null,
+          uploadSession: item.uploadSession || null,
+          storageUploaded: !!item.storageUploaded,
           state: done ? 'done' : 'ready',
           progress: done ? 100 : 0,
           message: done ? 'Already uploaded.' : 'Restored from this device. Ready to upload.',
@@ -164,7 +168,75 @@ window.datasets = (function () {
   }
 
   function maxSize() {
-    return (window.CORPUS_CONFIG && window.CORPUS_CONFIG.MAX_FILE_SIZE) || 104857600;
+    return Number((window.CORPUS_CONFIG && window.CORPUS_CONFIG.MAX_FILE_SIZE) || 0);
+  }
+
+  let tusClientPromise = null;
+
+  function ensureTusClient() {
+    if (window.tus && typeof window.tus.Upload === 'function') return Promise.resolve(window.tus);
+    if (tusClientPromise) return tusClientPromise;
+    tusClientPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/tus-js-client@4/dist/tus.min.js';
+      script.async = true;
+      script.onload = () => {
+        if (window.tus && typeof window.tus.Upload === 'function') resolve(window.tus);
+        else reject(new Error('The resumable upload library did not load correctly.'));
+      };
+      script.onerror = () => reject(new Error('Could not load the resumable upload library. Check your connection and retry.'));
+      document.head.appendChild(script);
+    }).catch(err => {
+      tusClientPromise = null;
+      throw err;
+    });
+    return tusClientPromise;
+  }
+
+  async function uploadWithTus(file, datasetId, session, onProgress) {
+    const tus = await ensureTusClient();
+    const cfg = window.CORPUS_CONFIG || {};
+    const projectMatch = String(cfg.SUPABASE_URL || '').match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i);
+    if (!projectMatch || !cfg.SUPABASE_ANON_KEY) {
+      throw new Error('Supabase Storage configuration is missing for resumable uploads.');
+    }
+    const projectId = projectMatch[1];
+    return new Promise((resolve, reject) => {
+      const upload = new tus.Upload(file, {
+        endpoint: 'https://' + projectId + '.storage.supabase.co/storage/v1/upload/resumable',
+        retryDelays: [0, 3000, 5000, 10000, 20000],
+        headers: {
+          apikey: cfg.SUPABASE_ANON_KEY,
+          'x-signature': session.token,
+        },
+        metadata: {
+          bucketName: session.bucket || 'corpus-storage',
+          objectName: session.storage_path,
+          contentType: file.type || 'text/plain',
+          cacheControl: '3600',
+        },
+        chunkSize: 6 * 1024 * 1024,
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: false,
+        fingerprint: () => Promise.resolve([
+          'corpus-upload',
+          datasetId,
+          session.storage_path,
+          file.name,
+          file.size,
+          file.lastModified || 0,
+        ].join(':')),
+        onError: (error) => reject(error instanceof Error ? error : new Error(String(error))),
+        onProgress: (uploaded, total) => {
+          if (onProgress && total > 0) onProgress(Math.min(99, Math.round((uploaded / total) * 99)));
+        },
+        onSuccess: () => resolve(upload),
+      });
+      upload.findPreviousUploads().then(previous => {
+        if (previous && previous.length) upload.resumeFromPreviousUpload(previous[0]);
+        upload.start();
+      }).catch(reject);
+    });
   }
 
   function formatsLabel() {
@@ -232,30 +304,15 @@ window.datasets = (function () {
           </button>
         </div>
 
-        <!--
-          Mobile-first file picking — the tap must always reach the real
-          native file input, and it must open exactly one picker.
-
-          1. The input is a transparent, full-size overlay of the whole zone
-             (CSS: .drop-zone > input[type="file"]), so a tap anywhere — icon,
-             copy, the "Tap to choose files" pill — lands on the real native
-             control and Android opens its own file manager.
-          2. The container is deliberately a <div>, NOT a <label for>: a label
-             adds a second, browser-driven activation path, and that is how a
-             tap can produce no dialog (old clipped-input CSS) or two dialogs.
-             With a plain container the only paths are "tap hit the input"
-             (native) or "tap hit the zone" (the JS fallback below), never both.
-          3. The decorative children are pointer-events:none, so they cannot
-             swallow the tap; the input is labelled via aria-labelledby.
-        -->
         <div class="drop-zone" id="datasets-drop" role="group" aria-label="Upload dataset files">
           <i class="fas fa-file-import" aria-hidden="true"></i>
-          <strong id="datasets-drop-title">Drop files here, or tap to browse</strong>
-          <span class="drop-zone-meta" id="datasets-drop-meta">${esc(formatsLabel())} · up to ${esc(CORPUS_UTILS.formatBytes(maxSize()))} per file</span>
-          <span class="drop-zone-cta" aria-hidden="true"><i class="fas fa-folder-open"></i> Tap to choose files</span>
+          <strong id="datasets-drop-title">Choose training files</strong>
+          <span class="drop-zone-meta" id="datasets-drop-meta">${esc(formatsLabel())} · no app-level size cap · files over 6 MB use resumable Storage uploads</span>
+          <label class="drop-zone-picker-label" for="datasets-file">Select files from your device</label>
           <input type="file" id="datasets-file" name="datasets-file" class="drop-zone-input"
                  multiple accept="${esc(acceptAttr())}"
                  aria-labelledby="datasets-drop-title" aria-describedby="datasets-drop-meta">
+          <span class="field-hint">Supported: ${esc(formatsLabel())} · You can select multiple files</span>
         </div>
 
         <div class="file-queue" id="datasets-file-list"></div>
@@ -329,31 +386,25 @@ window.datasets = (function () {
   function bindUploadInputs() {
     const input = document.getElementById('datasets-file');
     const drop = document.getElementById('datasets-drop');
+
+    // Keep the native file control visible and directly tappable. Android
+    // WebView file chooser implementations can fail to dispatch selection
+    // when the control is made transparent and stretched over another element.
     if (input && input.dataset.bound !== '1') {
       input.dataset.bound = '1';
-      // Clear the previous selection before opening the native chooser, not
-      // inside change. Android file providers can otherwise invalidate the
-      // just-returned selection when the input is reset synchronously.
-      input.addEventListener('click', () => {
-        try { input.value = ''; } catch (e) { /* read-only in mocked inputs */ }
-      });
       input.addEventListener('change', async (event) => {
-        // The picker is a local selection action; it must never bubble into a
-        // parent form/router handler or trigger a document-level submit path.
         event.stopPropagation();
         try {
           const picked = Array.prototype.slice.call(input.files || []);
-          if (picked.length) {
-            setQueue(picked);
-            // Persist the File blobs immediately. Android may suspend/recreate
-            // the page after returning from the system document picker.
-            // persistPendingQueue() never rejects — it returns false instead —
-            // but stay defensive: a failure here must not lose the selection
-            // silently. The queue is already set in memory above.
-            const saved = await persistPendingQueue();
-            if (!saved && queueOwnerKey()) {
-              ui.toast('Files selected, but this device could not save them for restore. Upload before leaving the page.', 'warning');
-            }
+          if (!picked.length) {
+            ui.toast('No file was selected. Tap “Select files from your device” and choose a supported file.', 'warning');
+            return;
+          }
+
+          setQueue(picked);
+          const saved = await persistPendingQueue();
+          if (!saved && queueOwnerKey()) {
+            ui.toast('Files selected, but this device could not save them for restore. Upload before leaving the page.', 'warning');
           }
         } catch (err) {
           console.error('[CORPUS] File selection failed:', err);
@@ -364,35 +415,9 @@ window.datasets = (function () {
         }
       });
     }
+
     if (!drop || drop.dataset.bound === '1') return;
     drop.dataset.bound = '1';
-
-    // ── Tap → native file manager, guaranteed and exactly once ──────────────
-    // Path A (normal): the transparent overlay input is the topmost element, so
-    // the tap targets the input itself and the browser opens the picker
-    // natively. This handler returns immediately — no second dialog.
-    //
-    // Path B (fallback): the tap hit the zone instead of the input — an old or
-    // cached stylesheet that still clips the input to 1px, a WebView that does
-    // not hit-test a fully transparent input, an overlay covered by some later
-    // style, or a synthetic .click() from a test/automation. We open the picker
-    // ourselves. Because the container is a <div> (not a <label for>), the
-    // browser has no second activation path, so this can never double-open.
-    drop.addEventListener('click', (event) => {
-      if (!input || event.target === input) return;
-      event.preventDefault();
-      try {
-        input.focus({ preventScroll: true });
-      } catch (e) { /* older engines: focus() takes no options */ }
-      try {
-        input.click();
-      } catch (e) {
-        ui.toast('Could not open the file picker. Reload the page and tap the drop zone again.', 'error');
-      }
-    });
-
-    // Keyboard: Enter/Space on the focused control is native. The zone keeps a
-    // single tab stop (the input itself), so no synthetic key handler is added.
 
     ['dragenter', 'dragover'].forEach(type => {
       drop.addEventListener(type, (event) => {
@@ -400,14 +425,12 @@ window.datasets = (function () {
         drop.classList.add('is-dragover');
       });
     });
-    ['dragleave', 'dragend', 'drop'].forEach(type => {
+    ['dragleave', 'dragend'].forEach(type => {
       drop.addEventListener(type, () => drop.classList.remove('is-dragover'));
     });
-    // `drop` fires on the transparent overlay input and bubbles up to the zone.
-    // preventDefault() stops the browser from also assigning input.files (which
-    // would fire a second `change` event) — the queue is filled exactly once.
     drop.addEventListener('drop', async (event) => {
       event.preventDefault();
+      drop.classList.remove('is-dragover');
       const files = event.dataTransfer && event.dataTransfer.files
         ? Array.prototype.slice.call(event.dataTransfer.files)
         : [];
@@ -415,7 +438,7 @@ window.datasets = (function () {
       setQueue(files);
       try {
         const saved = await persistPendingQueue();
-        if (!saved && queueOwnerKey() && document.getElementById('datasets-file-list')) {
+        if (!saved && queueOwnerKey()) {
           ui.toast('Files selected, but this device could not save them for restore. Upload before leaving the page.', 'warning');
         }
       } catch (err) {
@@ -608,8 +631,9 @@ window.datasets = (function () {
     if (formats().indexOf(ext) === -1) {
       return 'Unsupported format "' + ext + '". Supported: ' + formatsLabel() + '.';
     }
-    if (file.size > maxSize()) {
-      return 'File too large (max ' + CORPUS_UTILS.formatBytes(maxSize()) + ').';
+    const limit = maxSize();
+    if (limit > 0 && file.size > limit) {
+      return 'File too large (max ' + CORPUS_UTILS.formatBytes(limit) + ').';
     }
     if (!file.size) {
       return 'That file is empty.';
@@ -711,14 +735,61 @@ window.datasets = (function () {
           await persistPendingQueue(baseName);
         }
 
-        queue[index].message = 'Uploading bytes…';
+        queue[index].message = file.size > Number(window.CORPUS_CONFIG.STANDARD_UPLOAD_THRESHOLD || (6 * 1024 * 1024))
+          ? 'Preparing a resumable direct-to-Storage upload…'
+          : 'Uploading bytes…';
         updateProgress(index);
 
-        await window.CORPUS_API.uploadDatasetFileWithProgress(datasetId, file, token, (percent) => {
-          if (percent == null) return;
-          queue[index].progress = percent;
-          updateProgress(index);
-        });
+        if (file.size > Number(window.CORPUS_CONFIG.STANDARD_UPLOAD_THRESHOLD || (6 * 1024 * 1024))) {
+          if (!queue[index].uploadSession) {
+            const session = await window.CORPUS_API.createDatasetUploadSession(datasetId, {
+              file_name: file.name,
+              content_type: file.type || 'text/plain',
+            }, token);
+            if (!session || !session.storage_path || !session.token) {
+              throw new Error('The backend did not return a valid resumable upload session.');
+            }
+            queue[index].uploadSession = {
+              bucket: session.bucket,
+              storage_path: session.storage_path,
+              token: session.token,
+            };
+            await persistPendingQueue(baseName);
+          }
+
+          if (!queue[index].storageUploaded) {
+            queue[index].message = 'Uploading directly to private Storage in resumable 6 MB chunks…';
+            updateProgress(index);
+            const tusUpload = await uploadWithTus(file, datasetId, queue[index].uploadSession, (percent) => {
+              queue[index].progress = percent;
+              updateProgress(index);
+            });
+            queue[index].storageUploaded = true;
+            queue[index].progress = 99;
+            queue[index].message = 'Upload transferred. Verifying and registering dataset…';
+            await persistPendingQueue(baseName);
+            await window.CORPUS_API.completeDatasetUpload(datasetId, {
+              storage_path: queue[index].uploadSession.storage_path,
+              file_name: file.name,
+            }, token);
+            if (tusUpload && typeof tusUpload.removeFingerprint === 'function') {
+              try { await tusUpload.removeFingerprint(); } catch (ignore) { /* best effort */ }
+            }
+          } else {
+            queue[index].message = 'Verifying and registering the completed Storage upload…';
+            updateProgress(index);
+            await window.CORPUS_API.completeDatasetUpload(datasetId, {
+              storage_path: queue[index].uploadSession.storage_path,
+              file_name: file.name,
+            }, token);
+          }
+        } else {
+          await window.CORPUS_API.uploadDatasetFileWithProgress(datasetId, file, token, (percent) => {
+            if (percent == null) return;
+            queue[index].progress = percent;
+            updateProgress(index);
+          });
+        }
 
         queue[index].state = 'done';
         queue[index].progress = 100;

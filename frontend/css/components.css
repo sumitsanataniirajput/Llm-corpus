@@ -866,9 +866,11 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
   background: var(--color-accent-soft);
 }
 
-/* Decorative content (icon, copy, "Tap to choose files") never intercepts the
-   tap — the file input overlay below is the only tap target in the zone. */
-.drop-zone > * {
+/* Only decorative elements ignore taps. The native file input remains a
+   visible, directly tappable control for Android WebView compatibility. */
+.drop-zone > i,
+.drop-zone > strong,
+.drop-zone > span {
   pointer-events: none;
 }
 
@@ -904,38 +906,45 @@ input:checked + .toggle-slider::before { transform: translateX(1.25rem); }
   font-weight: 600;
 }
 
-/* The real native file input: a transparent, full-size overlay over the whole
-   drop zone. It stays rendered, sized and hit-testable (opacity 0 is NOT
-   "hidden"): a real tap lands on the real control, which is what opens the
-   Android Chrome file manager. It must never get pointer-events:none, a 1px
-   clip, display:none or visibility:hidden — that is what previously broke
-   mobile selection. Kept last so it wins over .drop-zone > * above.
-
-   NOTE: deliberately NOT `appearance: none`. Stripping the native widget
-   rendering on `input[type=file]` removes the platform "Choose file" control
-   in some Android Chrome/WebView builds, and a transparent input without that
-   control can stop responding to taps. `opacity: 0` already hides the native
-   chrome, so the default rendering is kept. */
-.drop-zone > input[type="file"],
+/* Keep the browser's native file chooser control visible. Some Android
+   WebView versions do not reliably dispatch a selection from transparent
+   full-zone input overlays or clipped controls. */
 .drop-zone input.drop-zone-input {
-  position: absolute;
-  inset: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  position: static;
+  display: block;
   width: 100%;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  opacity: 0;
-  background: transparent;
-  color: transparent;
-  font-size: var(--text-body-small);
+  max-width: 100%;
+  min-height: 2.75rem;
+  height: auto;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  opacity: 1;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
   pointer-events: auto;
   cursor: pointer;
-  z-index: 5;
+  z-index: auto;
+}
+
+.drop-zone input.drop-zone-input::file-selector-button {
+  min-height: 2.25rem;
+  margin-right: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font: inherit;
+  font-weight: 600;
+}
+
+.drop-zone-picker-label {
+  font-size: var(--text-label-medium);
+  font-weight: 600;
+  color: var(--color-text);
 }
 
 /* Selected file rows */

@@ -4,10 +4,31 @@
  * Covers the reported bug: "ValueError: Select a dataset before starting
  * training." because the job was POSTed with dataset_id = null.
  */
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createApp, datasetFixtures, tick } from './harness.mjs';
+import { createApp as createAppBase, datasetFixtures, tick } from './harness.mjs';
+
+// Every jsdom window must be closed when the file finishes. An open window keeps
+// the Training page's polling timer (5 s, recursive) armed, and Node then never
+// exits — the suite "hangs" after all tests have passed.
+const openApps = [];
+function createApp(options) {
+  const app = createAppBase(options);
+  openApps.push(app);
+  return app;
+}
+after(() => {
+  while (openApps.length) {
+    const app = openApps.pop();
+    try {
+      if (app.window.training && typeof app.window.training.dispose === 'function') {
+        app.window.training.dispose();
+      }
+      app.dom.window.close();
+    } catch (e) { /* already closed */ }
+  }
+});
 
 test('dataset selector lists name, file name, size and upload status', async () => {
   const fx = datasetFixtures();
@@ -311,4 +332,33 @@ test('API client uses trailing slashes on collection endpoints to avoid 307 redi
   const modelsGet = app.net.calls.find((c) => c.method === 'GET' && c.route === '/api/v1/models');
   assert.ok(datasetsGet && new URL(datasetsGet.url).pathname.endsWith('/api/v1/datasets/'));
   assert.ok(modelsGet && new URL(modelsGet.url).pathname.endsWith('/api/v1/models/'));
+});
+
+
+test('restores latest completed job and its real metrics after page reload', async () => {
+  const fx = datasetFixtures();
+  fx.jobs = [{
+    id: 'job_completed_real',
+    owner_id: 'user-1',
+    model_id: 'model_1',
+    dataset_id: 'ds_uploaded',
+    status: 'completed',
+    engine: 'pytorch',
+    compute: 'local',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }];
+  fx.metrics = [
+    { step: 1, loss: 5.9, learning_rate: 0.001, tokens_per_second: 70 },
+    { step: 2, loss: 5.3, learning_rate: 0.001, tokens_per_second: 72 },
+  ];
+  const app = createApp(fx);
+  await app.window.training.render();
+
+  assert.match(app.doc.getElementById('t-monitor-status').textContent, /completed/i);
+  assert.equal(app.doc.getElementById('t-metric-step').textContent, '2');
+  assert.equal(app.doc.getElementById('t-metric-loss').textContent, '5.3000');
+  assert.equal(app.doc.getElementById('t-metric-tps').textContent, '72');
+  assert.equal(app.doc.getElementById('t-metric-progress').textContent, '100%');
+  app.window.training.dispose();
 });

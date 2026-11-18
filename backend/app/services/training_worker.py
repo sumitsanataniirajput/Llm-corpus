@@ -44,6 +44,7 @@ def _register_job_control(job_id: str):
     loop = asyncio.get_running_loop()
     ctrl = {
         "cancel": threading.Event(),
+        "pause": threading.Event(),
         "done": asyncio.Event(),
         "loop": loop,
     }
@@ -77,6 +78,26 @@ def request_job_stop(job_id: str) -> bool:
         return True
 
 
+def request_job_pause(job_id: str) -> bool:
+    """Ask an active worker to pause at its next optimizer-step boundary."""
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+        if not ctrl or ctrl["done"].is_set() or ctrl["cancel"].is_set():
+            return False
+        ctrl["pause"].set()
+        return True
+
+
+def request_job_resume(job_id: str) -> bool:
+    """Release a paused worker so training can continue."""
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+        if not ctrl or ctrl["done"].is_set() or ctrl["cancel"].is_set():
+            return False
+        ctrl["pause"].clear()
+        return True
+
+
 async def stop_and_wait_for_job(job_id: str, timeout: float = 5.0) -> bool:
     """Signal an active in-process training job to stop and wait for exit.
 
@@ -104,6 +125,49 @@ def _check_not_stopped(job_id: str):
             raise TrainingStoppedError("Training job was stopped.")
 
 
+async def _persist_worker_status(job_id: str, status: str):
+    """Persist a worker-observed pause/resume state for the live monitor."""
+    factory = get_session_factory()
+    async with factory() as db:
+        await db.execute(text("""
+            UPDATE public.training_jobs
+            SET status = :status, updated_at = now()
+            WHERE id = :job_id
+              AND status NOT IN ('completed', 'failed', 'stopped', 'cancelled', 'stopping')
+        """), {"job_id": job_id, "status": status})
+        await db.commit()
+
+
+def _set_worker_status_from_thread(job_id: str, status: str, ctrl: dict):
+    """Bridge a synchronous PyTorch callback back to the worker's async DB loop."""
+    future = asyncio.run_coroutine_threadsafe(
+        _persist_worker_status(job_id, status),
+        ctrl["loop"],
+    )
+    future.result(timeout=30)
+
+
+def _wait_if_paused(job_id: str):
+    """Block the training thread at an optimizer-step boundary until resumed."""
+    if not job_id:
+        return
+    with _JOB_CONTROLS_LOCK:
+        ctrl = _JOB_CONTROLS.get(job_id)
+    if not ctrl:
+        _check_not_stopped(job_id)
+        return
+    _check_not_stopped(job_id)
+    if not ctrl["pause"].is_set():
+        return
+
+    _set_worker_status_from_thread(job_id, "paused", ctrl)
+    while ctrl["pause"].is_set():
+        _check_not_stopped(job_id)
+        time.sleep(0.1)
+    _check_not_stopped(job_id)
+    _set_worker_status_from_thread(job_id, "running", ctrl)
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -123,7 +187,7 @@ def _upload_bytes(client, bucket, path, data, content_type):
     )
 
 
-def _train_sync(text_data, model_config, job_config):
+def _train_sync(text_data, model_config, job_config, on_metric=None):
     torch.manual_seed(int(job_config.get("seed", 42)))
     # Safe limits for the Render free CPU service.
     context = max(8, min(int(model_config.get("context_length", 64)), 64))
@@ -164,21 +228,33 @@ def _train_sync(text_data, model_config, job_config):
     metrics = []
     started = time.monotonic()
     current_job_id = _CURRENT_JOB_ID.get("")
+    processed_tokens = 0
+    def report_optimizer_step(step_data):
+        nonlocal processed_tokens
+        _wait_if_paused(current_job_id)
+        processed_tokens += int(step_data.get("tokens") or (int(loader.batch_size or 1) * context))
+        elapsed = max(time.monotonic() - started, 0.001)
+        metric = {
+            "step": int(step_data["step"]),
+            "loss": float(step_data["loss"]),
+            "learning_rate": float(trainer.optimizer.param_groups[0]["lr"]),
+            "tokens_per_second": float(processed_tokens / elapsed),
+        }
+        metrics.append(metric)
+        if on_metric is not None:
+            on_metric(metric)
+
     for epoch in range(cfg["epochs"]):
         _check_not_stopped(current_job_id)
-        loss = trainer.train_epoch(
+        trainer.train_epoch(
             loader,
             clip_grad=float(job_config.get("gradient_clip", 1.0)),
             accum_steps=max(1, min(int(job_config.get("gradient_accumulation_steps", 1)), 4)),
+            on_step=report_optimizer_step,
         )
         _check_not_stopped(current_job_id)
-        elapsed = max(time.monotonic() - started, 0.001)
-        metrics.append({
-            "step": epoch + 1,
-            "loss": float(loss),
-            "learning_rate": cfg["learning_rate"],
-            "tokens_per_second": float(len(ids) * (epoch + 1) / elapsed),
-        })
+    if not metrics:
+        raise RuntimeError("Training completed without producing an optimizer step or metric.")
     buffer = io.BytesIO()
     torch.save({
         "model_state": trainer.model.state_dict(),
@@ -194,6 +270,17 @@ def _train_sync(text_data, model_config, job_config):
         "token_to_id": tokenizer.token_to_id,
     }, ensure_ascii=False).encode("utf-8")
     return cfg, metrics, buffer.getvalue(), tokenizer_json, len(ids)
+
+
+async def _persist_training_metric(factory, job_id: str, metric: dict):
+    """Persist each genuine optimizer-step metric before the worker advances."""
+    async with factory() as db:
+        await db.execute(text("""
+            INSERT INTO public.training_metrics
+            (job_id, step, loss, learning_rate, tokens_per_second)
+            VALUES (:job_id, :step, :loss, :learning_rate, :tokens_per_second)
+        """), {"job_id": job_id, **metric})
+        await db.commit()
 
 
 async def run_training_job(job_id: str, owner_id: str):
@@ -289,8 +376,17 @@ async def run_training_job(job_id: str, owner_id: str):
             })})
             await db.commit()
         _check_not_stopped(job_id)
+        loop = asyncio.get_running_loop()
+        def publish_metric(metric):
+            future = asyncio.run_coroutine_threadsafe(
+                _persist_training_metric(factory, job_id, metric), loop
+            )
+            # Propagate persistence failures into the worker so a job cannot
+            # report success when its live metrics were not durably recorded.
+            future.result(timeout=60)
+
         cfg, metrics, checkpoint_bytes, tokenizer_bytes, token_count = await asyncio.to_thread(
-            _train_sync, text_data, model_config, job_config
+            _train_sync, text_data, model_config, job_config, publish_metric
         )
         _check_not_stopped(job_id)
         async with factory() as db:
@@ -311,12 +407,6 @@ async def run_training_job(job_id: str, owner_id: str):
             _upload_bytes, client, bucket, tokenizer_path, tokenizer_bytes, "application/json"
         )
         async with factory() as db:
-            for metric in metrics:
-                await db.execute(text("""
-                    INSERT INTO public.training_metrics
-                    (job_id, step, loss, learning_rate, tokens_per_second)
-                    VALUES (:job_id, :step, :loss, :learning_rate, :tokens_per_second)
-                """), {"job_id": job_id, **metric})
             checkpoint_id = "ckpt_" + uuid.uuid4().hex[:8]
             await db.execute(text("""
                 INSERT INTO public.checkpoints

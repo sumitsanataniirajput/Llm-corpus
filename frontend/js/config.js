@@ -43,12 +43,12 @@ window.CORPUS_CONFIG = {
   // CSS/JS in index.html. Used to cache-bust a page module the router has to
   // re-request when one failed to register. Enforced by
   // frontend/tests/build-id.test.mjs.
-  BUILD_ID: '2026-11-16.8',
+  BUILD_ID: '2026-11-18.2',
 
-  // Uploads get their own (much longer) timeout. REQUEST_TIMEOUT above applies
-  // to small JSON calls; a 100 MB dataset on a phone needs minutes, and the old
-  // code had no upload timeout at all, so a stalled transfer hung forever.
+  // Small files use the authenticated API upload; larger files go directly to
+  // private Supabase Storage using resumable TUS chunks.
   UPLOAD_TIMEOUT_MS: 600000,
+  STANDARD_UPLOAD_THRESHOLD: 6 * 1024 * 1024,
 
   // Default model configuration (small, CPU-friendly)
   DEFAULT_MODEL_CONFIG: {
@@ -78,8 +78,8 @@ window.CORPUS_CONFIG = {
   // Supported dataset formats
   SUPPORTED_DATASET_FORMATS: ['txt', 'md', 'csv', 'json', 'jsonl', 'pdf'],
 
-  // Max file sizes (bytes)
-  MAX_FILE_SIZE: 100 * 1024 * 1024, // 100 MB
+  // No arbitrary app-level size cap. Supabase Storage plan/global limits apply.
+  MAX_FILE_SIZE: 0,
 
   // WebSocket reconnect
   WS_RECONNECT_INTERVAL: 3000,
@@ -91,6 +91,12 @@ window.CORPUS_CONFIG = {
 
   // Request timeout in milliseconds
   REQUEST_TIMEOUT: 15000,
+
+  // Collection reads (models, datasets, jobs, checkpoints…) are cached for this
+  // long so revisiting a page is instant instead of another cold-backend round
+  // trip. Every write and every "changed" event invalidates the cache, and a
+  // manual Refresh bypasses it. 0 disables caching.
+  API_CACHE_TTL_MS: 20000,
 };
 
 // ========================================

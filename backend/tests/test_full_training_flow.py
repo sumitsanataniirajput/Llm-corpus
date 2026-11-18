@@ -76,8 +76,11 @@ async def test_upload_select_train_full_flow(http, storage, monkeypatch):
         {"step": 2, "loss": 2.5, "learning_rate": 0.001, "tokens_per_second": 95.0},
     ]
 
-    def fake_train(text_data, model_config, job_config):
+    def fake_train(text_data, model_config, job_config, on_metric=None):
         assert "The corpus is real text" in text_data
+        if on_metric:
+            for metric in metrics:
+                on_metric(metric)
         return (
             {"vocab_size": 64, "context_length": 32, "d_model": 32, "n_layers": 1,
              "n_heads": 4, "d_ff": 64, "learning_rate": 0.001, "epochs": 1},
@@ -104,7 +107,8 @@ async def test_upload_select_train_full_flow(http, storage, monkeypatch):
 
     logs = (await http.get(f"/api/v1/training/{job['id']}/logs")).json()
     events = [entry["event"] for entry in logs]
-    assert events == ["started", "completed"]
+    assert events[0] == "started"
+    assert events[-1] == "completed"
     assert logs[0]["data"]["dataset_id"] == dataset["id"]
     assert logs[0]["data"]["file_name"] == "fullflow.txt"
 

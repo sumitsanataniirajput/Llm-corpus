@@ -21,7 +21,7 @@ window.charts = (function () {
   const commonOptions = {
     responsive: true,
     maintainAspectRatio: false,
-    animation: { duration: 800, easing: 'easeInOutQuart' },
+    animation: false,
     plugins: {
       legend: { labels: { color: '#cac4d0', font: { family: 'Inter', size: 12 } } },
       title: { display: false },
@@ -67,15 +67,9 @@ window.charts = (function () {
     if (!inst) return;
     inst.data.labels = labels;
     inst.data.datasets = datasets;
-    // Live data (training metrics) must not run the 800 ms entry animation on
-    // every update: that was one full re-layout/draw per metric event.
-    if (options.animate === false) {
-      inst.options = inst.options || {};
-      inst.options.animation = false;
-      inst.update('none');
-    } else {
-      inst.update();
-    }
+    // Live metrics update frequently; skip the entry animation so a metric
+    // stream cannot queue one full re-layout/draw per event on mobile.
+    inst.update('none');
   }
 
   function destroyChart(ctxId) {

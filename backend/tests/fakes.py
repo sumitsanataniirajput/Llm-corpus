@@ -31,6 +31,16 @@ class FakeBucket:
         self.downloads.append({"bucket": self.bucket, "path": path})
         return self.objects[key]
 
+    def create_signed_upload_url(self, path, options=None):
+        return {"path": path, "token": "test-signed-token-" + path}
+
+    def info(self, path):
+        key = (self.bucket, path)
+        if key not in self.objects:
+            raise FileNotFoundError(f"Object not found: {self.bucket}/{path}")
+        size = len(self.objects[key])
+        return {"name": path, "size": size, "metadata": {"size": size}}
+
     def remove(self, paths):
         removed = []
         for path in paths:

@@ -59,7 +59,8 @@ class Settings(BaseSettings):
 
     # ── Storage ──
     STORAGE_BUCKET: str = "corpus-storage"
-    MAX_UPLOAD_SIZE: int = 104857600  # 100 MB
+    # Small fallback multipart route only; normal browser uploads use direct TUS.
+    MAX_UPLOAD_SIZE: int = 6 * 1024 * 1024
 
     # ── Resource limits ──
     MAX_PARAMETERS_DEFAULT: int = 100000000

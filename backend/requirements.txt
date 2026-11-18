@@ -4,7 +4,7 @@
 # Web framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-pydantic==2.5.3
+pydantic==2.11.7
 pydantic-settings==2.1.0
 
 # Database & async
@@ -13,7 +13,10 @@ asyncpg==0.29.0
 alembic==1.13.1
 
 # Supabase
-supabase==2.3.0
+supabase==2.34.1
+
+# Keep NumPy 1.x for compatibility with the pinned PyTorch 2.1.0 binary.
+numpy==1.26.4
 
 # PyTorch (CPU version — install CUDA variant separately if needed)
 torch==2.1.0

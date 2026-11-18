@@ -232,7 +232,7 @@ window.training = (function () {
           <div class="metric-tile"><div class="metric-value" id="t-metric-step">—</div><div class="metric-label">Latest step</div></div>
           <div class="metric-tile"><div class="metric-value" id="t-metric-loss">—</div><div class="metric-label">Loss</div></div>
           <div class="metric-tile"><div class="metric-value" id="t-metric-tps">—</div><div class="metric-label">Tokens / sec</div></div>
-          <div class="metric-tile"><div class="metric-value" id="t-metric-progress">—</div><div class="metric-label">Epoch progress</div></div>
+          <div class="metric-tile"><div class="metric-value" id="t-metric-progress">—</div><div class="metric-label">Job completion</div></div>
         </div>
 
         <div class="training-charts" id="training-charts">
@@ -275,7 +275,7 @@ window.training = (function () {
     if (datasetSelect) datasetSelect.addEventListener('change', onDatasetChange);
 
     renderCharts();
-    await Promise.all([loadModels(), refreshDatasets()]);
+    await Promise.all([loadModels(), refreshDatasets(), loadJobs()]);
 
     const pendingId = state.getPendingDatasetId ? state.getPendingDatasetId() : null;
     if (pendingId) applySelectedDataset(pendingId);
@@ -289,7 +289,6 @@ window.training = (function () {
       }
     }
 
-    await loadJobs();
     updateEstimate();
   }
 
@@ -306,11 +305,12 @@ window.training = (function () {
     const entry = document.createElement('div');
     entry.className = 'log-entry ' + (type || 'info');
     entry.innerHTML = '<span class="log-time">[' + time + ']</span><span>' + escapeHtml(message) + '</span>';
+    const keepPinnedToBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 48;
     panel.appendChild(entry);
     // A long training run produced thousands of nodes; keep the newest lines
     // and drop the oldest so the panel cannot grow without bound.
     while (panel.childElementCount > LOG_LIMIT) panel.removeChild(panel.firstElementChild);
-    panel.scrollTop = panel.scrollHeight;
+    if (keepPinnedToBottom) panel.scrollTop = panel.scrollHeight;
   }
 
   function clearLog() {
@@ -659,16 +659,72 @@ window.training = (function () {
   /* ---------------- Jobs ---------------- */
 
   async function loadJobs() {
+    let token;
     try {
-      const token = await state.getAccessToken();
+      token = await state.getAccessToken();
+      // Job state is live: never serve it from the read cache.
       const data = await window.CORPUS_API.listTrainingJobs(token, { noCache: true });
       state.setTrainingJobs(normalizeList(data, 'jobs'));
     } catch (err) {
       if (ui.isAborted && ui.isAborted(err)) return;
       state.setTrainingJobs([]);
       log('Could not load training jobs: ' + (err.message || 'unknown error'), 'error');
+      renderJobList();
+      return;
     }
+
     renderJobList();
+    const jobs = state.getTrainingJobs() || [];
+    if (!jobs.length) {
+      wsJobId = null;
+      metricSeries = { steps: [], loss: [], throughput: [] };
+      seenSteps = new Set();
+      updateMetricTiles();
+      updateCharts();
+      updateMonitorStatus(null);
+      return;
+    }
+
+    // Restore the newest real backend job on page load. This makes completed
+    // runs inspectable after navigation/reload instead of showing a misleading
+    // Idle monitor with empty charts.
+    const selected = jobs.find(item => item.id === wsJobId) || jobs[0];
+    const changedJob = wsJobId !== selected.id;
+    wsJobId = selected.id;
+    if (changedJob) {
+      metricSeries = { steps: [], loss: [], throughput: [] };
+      seenSteps = new Set();
+      updateMetricTiles();
+      updateCharts();
+    }
+
+    updateMonitorStatus(selected);
+    updateControls(selected);
+    await refreshJob(selected.id, true);
+
+    if (window.CORPUS_API.listTrainingLogs) {
+      try {
+        const events = await window.CORPUS_API.listTrainingLogs(selected.id, token);
+        (events || []).forEach(entry => {
+          if (!entry || !entry.event) return;
+          if (entry.event === 'started') {
+            log('Worker started training from the selected stored dataset.', 'info');
+          } else if (entry.event === 'completed') {
+            log('Training completed and checkpoint saved.', 'success');
+          } else if (entry.event === 'failed') {
+            reportJobFailure(selected.id, entry.data && entry.data.error);
+          }
+        });
+      } catch (err) {
+        log('Could not restore training event history: ' + (err.message || 'unknown error'), 'warn');
+      }
+    }
+
+    if (selected.model_id) await loadCheckpoints(selected.model_id);
+    const latest = state.getTrainingJob(selected.id) || selected;
+    if (isActiveStatus(latest.status) && !startInFlight) {
+      connectJobStream(selected.id);
+    }
   }
 
   function renderJobList() {
@@ -819,20 +875,32 @@ window.training = (function () {
   }
 
   async function runControl(btnId, action, label) {
-    if (!wsJobId) return;
+    const jobId = wsJobId;
+    if (!jobId) return;
     const btn = document.getElementById(btnId);
     // Pause/Resume change backend state: a double tap must send one request.
     return ui.guard(btn, async () => {
       ui.setButtonLoading(btn, true);
       try {
         const token = await state.getAccessToken();
-        await action(wsJobId, token);
-        log(label + ' requested for job ' + wsJobId);
+        const response = await action(jobId, token);
+        if (response && response.status) {
+          const current = state.getTrainingJob(jobId) || { id: jobId };
+          state.updateTrainingJob(jobId, { ...current, status: response.status });
+          const updated = state.getTrainingJob(jobId) || { ...current, status: response.status };
+          updateControls(updated);
+          updateMonitorStatus(updated);
+          updateMetricTiles();
+        }
+        log(label + ' signal accepted for job ' + jobId +
+          (response && response.status ? ' — status: ' + response.status : ''));
       } catch (err) {
-        if (!ui.isAborted(err)) ui.toast(err.message || (label + ' failed'), 'error');
+        if (ui.isAborted && ui.isAborted(err)) return;
+        ui.toast(err.message || (label + ' failed'), 'error');
+        log(label + ' failed: ' + (err.message || 'unknown error'), 'error');
       } finally {
         ui.setButtonLoading(btn, false);
-        updateControls(state.getTrainingJob(wsJobId) || null);
+        updateControls(state.getTrainingJob(jobId) || null);
       }
     });
   }
@@ -852,11 +920,22 @@ window.training = (function () {
       return ui.guard(btn, async () => {
         ui.setButtonLoading(btn, true);
         try {
+          const jobId = wsJobId;
           const token = await state.getAccessToken();
-          await window.CORPUS_API.stopTrainingJob(wsJobId, token);
-          log('Stop requested for job ' + wsJobId);
+          const response = await window.CORPUS_API.stopTrainingJob(jobId, token);
+          if (response && response.status) {
+            const current = state.getTrainingJob(jobId) || { id: jobId };
+            state.updateTrainingJob(jobId, { ...current, status: response.status });
+            const updated = state.getTrainingJob(jobId) || { ...current, status: response.status };
+            updateControls(updated);
+            updateMonitorStatus(updated);
+            updateMetricTiles();
+          }
+          log('Stop signal accepted for job ' + jobId +
+            (response && response.status ? ' — status: ' + response.status : ''));
         } catch (err) {
-          if (!ui.isAborted(err)) ui.toast(err.message || 'Stop failed', 'error');
+          if (ui.isAborted && ui.isAborted(err)) return;
+          ui.toast(err.message || 'Stop failed', 'error');
         } finally {
           ui.setButtonLoading(btn, false);
           updateControls(state.getTrainingJob(wsJobId) || null);
@@ -879,7 +958,7 @@ window.training = (function () {
     const active = isActiveStatus(status);
     startEl.disabled = startInFlight || active || !validateSelection().ok;
     if (pauseEl) pauseEl.disabled = status !== 'running';
-    if (resumeEl) resumeEl.disabled = status !== 'paused';
+    if (resumeEl) resumeEl.disabled = !(status === 'paused' || status === 'pausing');
     if (stopEl) stopEl.disabled = !(status === 'running' || status === 'paused' || status === 'queued' || status === 'pausing');
   }
 
@@ -940,10 +1019,27 @@ window.training = (function () {
           return;
         }
         log('Live stream error: ' + message, 'error');
+        if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
+      },
+      onClose: () => {
+        if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
       },
     }).then((socket) => {
       activeSocket = socket;
-      if (!socket) log('Live progress stream unavailable — using periodic refresh instead.', 'warn');
+      if (!socket) {
+        log('Live progress stream unavailable — using periodic refresh instead.', 'warn');
+        startPolling(jobId);
+        return;
+      }
+      // Keep the polling fallback only until the WebSocket is actually open.
+      // This avoids polling the same job while its live stream is healthy.
+      if (socket.readyState === 1) stopPolling();
+      else if (typeof socket.addEventListener === 'function') {
+        socket.addEventListener('open', () => stopPolling(), { once: true });
+        socket.addEventListener('error', () => {
+          if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
+        }, { once: true });
+      }
     });
   }
 
@@ -1026,14 +1122,14 @@ window.training = (function () {
       ? Math.round(metricSeries.throughput[last]).toLocaleString()
       : '—';
     if (progressEl) {
-      const epochsEl = document.getElementById('t-epochs');
-      const epochs = epochsEl ? parseInt(epochsEl.value, 10) : NaN;
-      if (last >= 0 && Number.isFinite(epochs) && epochs > 0) {
-        const percent = Math.min(100, Math.round((metricSeries.steps[last] / epochs) * 100));
-        progressEl.textContent = percent + '%';
-      } else {
-        progressEl.textContent = '—';
-      }
+      const job = wsJobId ? state.getTrainingJob(wsJobId) : null;
+      const status = job && job.status ? String(job.status).toLowerCase() : '';
+      if (status === 'completed') progressEl.textContent = '100%';
+      else if (status === 'failed') progressEl.textContent = 'Failed';
+      else if (status === 'stopped' || status === 'cancelled') progressEl.textContent = 'Stopped';
+      else if (ACTIVE_STATUSES.indexOf(status) !== -1) progressEl.textContent = 'In progress';
+      else if (status === 'queued') progressEl.textContent = 'Queued';
+      else progressEl.textContent = '—';
     }
   }
 
@@ -1047,6 +1143,7 @@ window.training = (function () {
     const job = state.getTrainingJob(jobId) || { id: jobId, status: payload.status };
     updateControls(job);
     updateMonitorStatus(job);
+    updateMetricTiles();
     log('Job ' + jobId + ' status: ' + payload.status);
     if (!isActiveStatus(payload.status)) {
       stopPolling();

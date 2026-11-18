@@ -49,6 +49,16 @@ class DatasetIn(BaseModel):
     size: int = 0
 
 
+class DatasetUploadSessionIn(BaseModel):
+    file_name: str
+    content_type: Optional[str] = None
+
+
+class DatasetUploadFinalizeIn(BaseModel):
+    storage_path: str
+    file_name: str
+
+
 class DatasetOut(BaseModel):
     id: str
     owner_id: str
@@ -276,6 +286,132 @@ async def delete_dataset(dataset_id: str, user=Depends(require_user), db: AsyncS
     return {"ok": True, "dataset_id": dataset_id, "removed_files": len(storage_paths)}
 
 
+@router.post("/{dataset_id}/upload-session", tags=["datasets"])
+async def create_dataset_upload_session(
+    dataset_id: str,
+    data: DatasetUploadSessionIn,
+    user=Depends(require_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Create a short-lived signed Storage token for a direct TUS upload.
+
+    File bytes travel from the browser straight to Supabase Storage in resumable
+    chunks; the Render API never buffers a multi-gigabyte multipart request.
+    """
+    owner_id = uuid.UUID(user["user_id"])
+    result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
+    ds = result.scalar_one_or_none()
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if ds.owner_id != owner_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    safe_name = os.path.basename((data.file_name or "").strip()).replace("\\", "_")
+    if not safe_name or not is_supported_format(safe_name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported dataset file '{safe_name or 'unnamed'}'. Supported formats: {SUPPORTED_LABEL}.",
+        )
+
+    storage = _storage_client()
+    bucket_api = storage.storage.from_(settings.STORAGE_BUCKET)
+    object_path = f"{owner_id}/datasets/{dataset_id}/{uuid.uuid4().hex}_{safe_name}"
+    try:
+        # Supabase Python SDK 2.34.x exposes create_signed_upload_url(path);
+        # its default is upsert=false, which is what this unique path requires.
+        signed = await asyncio.to_thread(
+            bucket_api.create_signed_upload_url,
+            object_path,
+        )
+        if isinstance(signed, dict) and isinstance(signed.get("data"), dict):
+            signed = signed["data"]
+        token = signed.get("token") if isinstance(signed, dict) else getattr(signed, "token", None)
+        if not token:
+            raise RuntimeError("Supabase did not return a signed upload token.")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not prepare a resumable Storage upload: {str(exc)[:250]}",
+        ) from exc
+
+    return {
+        "ok": True,
+        "bucket": settings.STORAGE_BUCKET,
+        "storage_path": object_path,
+        "token": token,
+        "file_name": safe_name,
+    }
+
+
+@router.post("/{dataset_id}/complete", tags=["datasets"])
+async def complete_dataset_upload(
+    dataset_id: str,
+    data: DatasetUploadFinalizeIn,
+    user=Depends(require_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Verify a finished Storage object and attach it to the caller's dataset."""
+    owner_id = uuid.UUID(user["user_id"])
+    result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
+    ds = result.scalar_one_or_none()
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    if ds.owner_id != owner_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    safe_name = os.path.basename((data.file_name or "").strip()).replace("\\", "_")
+    expected_prefix = f"{owner_id}/datasets/{dataset_id}/"
+    if not safe_name or not is_supported_format(safe_name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported dataset file '{safe_name or 'unnamed'}'. Supported formats: {SUPPORTED_LABEL}.",
+        )
+    if not data.storage_path.startswith(expected_prefix) or not data.storage_path.endswith("_" + safe_name):
+        raise HTTPException(status_code=403, detail="The upload path does not belong to this dataset.")
+
+    storage = _storage_client()
+    bucket_api = storage.storage.from_(settings.STORAGE_BUCKET)
+    try:
+        info = await asyncio.to_thread(bucket_api.info, data.storage_path)
+        metadata = info.get("metadata") or {} if isinstance(info, dict) else {}
+        raw_size = (info.get("size") if isinstance(info, dict) else None) or metadata.get("size")
+        file_size = int(raw_size or 0)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Storage has not confirmed this upload yet: {str(exc)[:250]}",
+        ) from exc
+    if file_size <= 0:
+        raise HTTPException(status_code=400, detail="The uploaded dataset is empty or not yet complete.")
+
+    existing = await db.execute(
+        text("SELECT id FROM public.dataset_files WHERE storage_path = :storage_path LIMIT 1"),
+        {"storage_path": data.storage_path},
+    )
+    if not existing.first():
+        await db.execute(text("""
+            INSERT INTO public.dataset_files
+            (id, dataset_id, storage_path, file_name, file_size, checksum)
+            VALUES (:id, :dataset_id, :storage_path, :file_name, :file_size, NULL)
+        """), {
+            "id": str(uuid.uuid4()),
+            "dataset_id": dataset_id,
+            "storage_path": data.storage_path,
+            "file_name": safe_name,
+            "file_size": file_size,
+        })
+
+    ds.size = file_size
+    ds.checksum = None
+    ds.status = "uploaded"
+    ds.format = os.path.splitext(safe_name)[1].lstrip(".").lower() or ds.format
+    ds.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(ds)
+    file_row = await latest_file_for_dataset(db, dataset_id, owner_id)
+    return {"ok": True, "file_name": safe_name, "file_size": file_size, "dataset": _dataset_to_out(ds, file_row)}
+
+
 @router.post("/{dataset_id}/upload", tags=["datasets"])
 async def upload_dataset_file(
     dataset_id: str,
@@ -292,11 +428,16 @@ async def upload_dataset_file(
         raise HTTPException(status_code=404, detail="Dataset not found")
     if ds.owner_id != owner_id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    contents = await file.read()
+    # This legacy multipart route is intentionally small and bounded. The
+    # browser's normal upload flow uses the direct resumable TUS endpoints above.
+    contents = await file.read(settings.MAX_UPLOAD_SIZE + 1)
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded dataset file is empty.")
     if len(contents) > settings.MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail="Dataset exceeds the configured upload limit.")
+        raise HTTPException(
+            status_code=413,
+            detail="Use the resumable upload flow for files larger than 6 MB.",
+        )
     safe_name = os.path.basename(file.filename or "").replace("\\", "_")
     if not is_supported_format(safe_name):
         raise HTTPException(
