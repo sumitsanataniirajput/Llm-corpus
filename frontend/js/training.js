@@ -27,6 +27,10 @@ window.training = (function () {
   let checkpointsCache = [];
   let checkpointsModelId = null;
   let reportedFailureJobId = null;
+  // A confirmed deletion stays hidden for this page session even if a stale
+  // list response races the DELETE response. The backend remains authoritative
+  // across reloads; this set only prevents an already-confirmed row reappearing.
+  const confirmedDeletedJobIds = new Set();
 
   const DATASET_UNUSABLE_STATUSES = ['failed', 'deleted'];
   const ACTIVE_STATUSES = ['queued', 'running', 'pausing', 'paused', 'stopping', 'preparing', 'finalizing'];
@@ -718,7 +722,8 @@ window.training = (function () {
       token = await state.getAccessToken();
       // Job state is live: never serve it from the read cache.
       const data = await window.CORPUS_API.listTrainingJobs(token, { noCache: true });
-      state.setTrainingJobs(normalizeList(data, 'jobs'));
+      const jobs = normalizeList(data, 'jobs');
+      state.setTrainingJobs(jobs.filter(item => item && !confirmedDeletedJobIds.has(item.id)));
     } catch (err) {
       if (ui.isAborted && ui.isAborted(err)) return;
       state.setTrainingJobs([]);
@@ -1326,9 +1331,25 @@ window.training = (function () {
               return window.CORPUS_API.deleteTrainingJob(jobId, token);
             },
             onSuccess: async function () {
+              // Remove the visible card immediately after the server confirms
+              // deletion. Do not wait for a second list request to finish.
+              confirmedDeletedJobIds.add(jobId);
               state.setTrainingJobs((state.getTrainingJobs() || []).filter(item => item.id !== jobId));
-              if (wsJobId === jobId) wsJobId = null;
+              const row = document.querySelector('[data-job-row="' + jobId.replace(/["\\]/g, '') + '"]');
+              if (row && row.parentNode) row.parentNode.removeChild(row);
+              if (wsJobId === jobId) {
+                stopPolling();
+                disconnectJobStream();
+                wsJobId = null;
+                metricSeries = { steps: [], loss: [], throughput: [] };
+                seenSteps = new Set();
+                updateMetricTiles();
+                updateCharts();
+                updateMonitorStatus(null);
+              }
               renderJobList();
+              // Reconcile with the backend; loadJobsData also filters any stale
+              // response for this just-deleted id during the current page visit.
               await loadJobs();
               ui.toast('Training job removed from your history.', 'success');
             },
