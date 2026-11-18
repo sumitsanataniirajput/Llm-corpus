@@ -1,15 +1,16 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-19.1",
+  "buildId": "2026-11-19.2",
   "sourceRef": "main",
   "notes": [
-    "Device compute: a new Device Compute page detects what this browser really reports (CPU cores, device memory, WebGPU adapter limits, WebGL renderer, WASM SIMD, storage quota, battery, connection, screen) and says \"Not available\" for anything the platform does not expose. Real device work (dataset shard tokenization) runs in a separate Web Worker, so the page never freezes, and a measured tokenizer speed can be taken on the device.",
-    "Multi-device training: a new Multi-Device Training page lists every device on the account with its capabilities, current job, dataset, stage, per-job progress and last heartbeat. Modes are honest: parallel independent jobs (each job keeps its own progress and checkpoints) and collaborative preprocessing (devices tokenize their own dataset shard and the backend aggregates the real token counts). Distributed gradient/weight synchronisation is not implemented and is labelled as such in the API response and the UI.",
-    "Lease-based work distribution: devices heartbeat and hold leases; a device that stops reporting is marked offline after 75 s and its tasks expire, so a dead phone can never keep a job locked, and the same work can be reassigned without double processing.",
-    "Real live progress: the training worker now persists the engine's own optimizer steps, total steps, epoch, processed tokens, loss and stage, and the Training page renders that instead of a placeholder. The bar is indeterminate with a stage label when a phase cannot be measured, completed is always 100%, and ETA appears only when it can be derived from a real start time. Progress arrives over the WebSocket and by polling, and is read from the database, so a refresh or another device shows the same numbers.",
-    "Deletable job history: each finished job in Recent Training Jobs has a Delete control with a confirmation. Only the caller's own jobs can be deleted, an active job must be stopped first (the backend answers 409 with that reason), and deleting history never deletes the model, dataset or checkpoints.",
-    "New endpoints: GET /api/v1/datasets/{id}/text streams a real character range of the stored file for device workers; /api/v1/devices covers registration, heartbeat, status, assignment, collaborative planning, task progress and completion; DELETE /api/v1/training/{job_id} removes history only."
+    "AI Teacher Network: providers (OpenAI, Gemini, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks or a custom OpenAI-compatible endpoint) are connected once, verified against the real API, and their models are discovered live. No model list or price is hardcoded anywhere: specs appear only where the provider reports them and prices only where you enter them.",
+    "Credential security: API keys are encrypted with AES-256-GCM before storage, returned only as a last-four hint plus a short fingerprint, redacted from provider errors, and refused outright when CREDENTIAL_ENCRYPTION_KEY is not configured on the backend.",
+    "Teacher Selection Studio: modes A single, B multiple independent answers, C teacher + separate evaluator, D competition, E specialised by domain, with hard per-run budgets (requests, tokens, spend, concurrency) and a daily cap per provider that stops a run mid-flight and records why.",
+    "Knowledge Distillation and Dataset Quality Review: instruction/QA/coding/multilingual/summarization/classification/preference tasks, per-record provenance (provider, model, request ID, tokens, latency), duplicate and near-duplicate filtering, language and format validation, contradiction and teacher-disagreement analysis, human approval, and conversion of accepted records only into chat JSONL / Alpaca / QA / classification / preference datasets.",
+    "Student Model Studio: inspects the real architecture (CORPUS models are instantiated and counted; Hugging Face models are read through AutoConfig) and gates SFT, LoRA, QLoRA, DPO and continued training on the libraries and hardware that are actually present.",
+    "Training Intelligence: architecture, training configuration, dataset analytics, hardware telemetry, live optimizer-step metrics and charts are all read from persisted rows; anything the runtime could not measure is shown as Unavailable.",
+    "API Usage and Budgets: per-provider requests, failures, rate-limit errors, input/output/cached tokens, estimated spend, average latency and last request, with owner-configured hard limits."
   ],
   "howToVerify": "GET <frontend-url>/version.json \u2014 the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }

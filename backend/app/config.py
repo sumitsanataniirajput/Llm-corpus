@@ -47,6 +47,23 @@ class Settings(BaseSettings):
     # ── Worker auth ──
     WORKER_AUTH_SECRET: str = ""
 
+    # ── Provider credential encryption (AES-256-GCM) ──
+    # 32 random bytes, base64 or hex. Render environment variable; never the repo.
+    # When empty, saving a provider credential is refused instead of storing it
+    # insecurely (see app/services/crypto.py).
+    CREDENTIAL_ENCRYPTION_KEY: str = ""
+    # Per-IP request budget for the API middleware. 60/min by default; raise it
+    # deliberately for a load test or a trusted internal client pool.
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
+
+    # ── External teacher providers ──
+    # Timeouts and concurrency are configuration, not capability claims.
+    PROVIDER_REQUEST_TIMEOUT_SECONDS: float = 90.0
+    PROVIDER_MAX_CONCURRENCY: int = 4
+    PROVIDER_MAX_RETRIES: int = 2
+    DISTILLATION_MAX_EXAMPLES_PER_RUN: int = 200
+    DISTILLATION_MAX_SOURCE_CHARS: int = 400_000
+
     # ── API ──
     API_BASE_URL: str = "http://localhost:8000"
     CORS_ORIGINS: List[str] = [

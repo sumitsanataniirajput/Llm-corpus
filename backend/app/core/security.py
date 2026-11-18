@@ -9,10 +9,22 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 
-# Simple in-memory rate limiter (per IP)
+# Simple in-memory rate limiter (per IP). The limit is configurable through
+# RATE_LIMIT_REQUESTS_PER_MINUTE so an operator can raise it for a busy deploy
+# without editing code; 60 remains the default.
 _request_counts = defaultdict(list)
 RATE_LIMIT_REQUESTS = 60
 RATE_LIMIT_WINDOW = 60  # seconds
+
+
+def request_limit() -> int:
+    """Effective per-minute request limit for one client IP."""
+    configured = getattr(settings, "RATE_LIMIT_REQUESTS_PER_MINUTE", None)
+    try:
+        value = int(configured) if configured is not None else 0
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else RATE_LIMIT_REQUESTS
 
 
 async def rate_limit_middleware(request: Request, call_next):
@@ -24,7 +36,7 @@ async def rate_limit_middleware(request: Request, call_next):
         t for t in _request_counts[client_ip] if now - t < RATE_LIMIT_WINDOW
     ]
 
-    if len(_request_counts[client_ip]) >= RATE_LIMIT_REQUESTS:
+    if len(_request_counts[client_ip]) >= request_limit():
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={"detail": "Rate limit exceeded"},

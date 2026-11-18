@@ -31,6 +31,12 @@ const MODULES = [
   'js/datasets.js',
   'js/device-agent.js',
   'js/devices.js',
+  'js/teachers.js',
+  'js/teacher-selection.js',
+  'js/distillation.js',
+  'js/students.js',
+  'js/intelligence.js',
+  'js/budgets.js',
 ];
 
 class ChartStub {
@@ -188,6 +194,10 @@ function createAppFromFiles(options) {
     deviceCalls: [],
     checkpoints: options.checkpoints ? [...options.checkpoints] : [],
     health: options.health === undefined ? { status: 'ok' } : options.health,
+    // Extra routes let a test describe endpoints the legacy fixtures never
+    // needed (teacher network, distillation, student studio, telemetry) without
+    // growing this file's if-chain. Each entry: {method, match, respond}.
+    extraRoutes: Array.isArray(options.extraRoutes) ? [...options.extraRoutes] : [],
     calls: [],
     createJobResponses: [],
     preview: options.preview || {
@@ -212,6 +222,21 @@ function createAppFromFiles(options) {
       body: opts.body ? JSON.parse(opts.body) : null,
       url,
     });
+
+    for (const entry of state.extraRoutes) {
+      if (entry.method && entry.method !== method) continue;
+      const matched = entry.match instanceof RegExp ? entry.match.test(route) : entry.match === route;
+      if (!matched) continue;
+      const result = await entry.respond({
+        route,
+        method,
+        url,
+        body: opts.body ? JSON.parse(opts.body) : null,
+        searchParams: parsed.searchParams,
+        state,
+      });
+      if (result !== undefined) return result;
+    }
 
     if (route === '/api/v1/datasets' && method === 'GET') {
       return jsonResponse([...state.datasets]);

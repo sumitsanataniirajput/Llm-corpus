@@ -79,6 +79,30 @@ try:
 except Exception:
     pass
 
+try:
+    from app.api.endpoints import teachers as teachers_endpoints
+    api_router.include_router(teachers_endpoints.router, prefix="/teachers", tags=["teachers"])
+except Exception:
+    pass
+
+try:
+    from app.api.endpoints import distillation as distillation_endpoints
+    api_router.include_router(distillation_endpoints.router, prefix="/distillation", tags=["distillation"])
+except Exception:
+    pass
+
+try:
+    from app.api.endpoints import students as students_endpoints
+    api_router.include_router(students_endpoints.router, prefix="/students", tags=["students"])
+except Exception:
+    pass
+
+try:
+    from app.api.endpoints import intelligence as intelligence_endpoints
+    api_router.include_router(intelligence_endpoints.router, prefix="/training", tags=["intelligence"])
+except Exception:
+    pass
+
 # Health is in main.py
 
 __all__ = ["api_router"]
