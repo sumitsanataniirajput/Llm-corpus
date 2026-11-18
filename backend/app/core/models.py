@@ -79,10 +79,27 @@ class TrainingJob(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    # Real progress, written by the worker from the engine's own step counter
+    # (migration 007). Anything the engine cannot measure stays NULL so the UI
+    # can say "not available" instead of inventing a number.
+    stage = Column(String, nullable=True, default="queued")
+    progress_percent = Column(Float, nullable=True, default=0.0)
+    total_steps = Column(BigInteger, nullable=True)
+    completed_steps = Column(BigInteger, nullable=True, default=0)
+    total_epochs = Column(BigInteger, nullable=True)
+    current_epoch = Column(BigInteger, nullable=True, default=0)
+    processed_tokens = Column(BigInteger, nullable=True, default=0)
+    last_loss = Column(Float, nullable=True)
+    progress_updated_at = Column(DateTime(timezone=True), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    # Soft delete of the history record only; checkpoints/models/datasets keep
+    # their own rows and are never removed by deleting a job.
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_training_jobs_owner_id", "owner_id"),
         Index("ix_training_jobs_model_id", "model_id"),
+        Index("ix_training_jobs_owner_created_live", "owner_id", "created_at"),
     )
 
 

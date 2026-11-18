@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import threading
 import time
 import uuid
@@ -145,13 +146,14 @@ async def reconcile_orphaned_jobs(started_at=None) -> list:
             text(
                 """
                 UPDATE public.training_jobs
-                SET status = 'failed', updated_at = now(), completed_at = now()
+                SET status = 'interrupted', updated_at = now(), completed_at = now(),
+                    stage = 'interrupted', failure_reason = :reason, progress_updated_at = now()
                 WHERE status IN ('queued', 'preparing', 'running', 'pausing', 'paused', 'stopping')
                   AND updated_at < :started_at
                 RETURNING id
                 """
             ),
-            {"started_at": started_at},
+            {"started_at": started_at, "reason": ORPHANED_JOB_MESSAGE},
         )
         recovered = [row[0] for row in rows.fetchall()]
         for job_id in recovered:
@@ -159,7 +161,7 @@ async def reconcile_orphaned_jobs(started_at=None) -> list:
                 text(
                     """
                     INSERT INTO public.training_job_events (job_id, event, data)
-                    VALUES (:job_id, 'failed', CAST(:data AS jsonb))
+                    VALUES (:job_id, 'interrupted', CAST(:data AS jsonb))
                     """
                 ),
                 {"job_id": job_id, "data": json.dumps({"error": ORPHANED_JOB_MESSAGE, "recovered": True})},
@@ -239,6 +241,20 @@ def _upload_bytes(client, bucket, path, data, content_type):
     )
 
 
+def _stage(on_metric, stage, **extra):
+    """Report a lifecycle stage through the same channel as metrics.
+
+    Progress must describe the run the engine is actually executing. The worker
+    emits a stage update when it enters a phase, and a metric per completed
+    optimizer step; the API then persists both (see _persist_training_metric).
+    """
+    if on_metric is None:
+        return
+    payload = {"kind": "stage", "stage": stage}
+    payload.update(extra)
+    on_metric(payload)
+
+
 def _train_sync(text_data, model_config, job_config, on_metric=None):
     torch.manual_seed(int(job_config.get("seed", 42)))
     # Safe limits for the Render free CPU service.
@@ -258,6 +274,7 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
         "learning_rate": min(max(float(job_config.get("learning_rate", 0.001)), 1e-5), 0.01),
         "epochs": max(1, min(int(job_config.get("epochs", 1)), 3)),
     }
+    _stage(on_metric, "tokenizing", total_epochs=cfg["epochs"])
     tokenizer = CorpusTokenizer(vocab_size=cfg["vocab_size"])
     tokenizer.train([text_data])
     ids = tokenizer.encode(text_data, add_special=False)
@@ -275,7 +292,21 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
         raise ValueError("Could not create training sequences from this dataset.")
     x = torch.tensor(xs, dtype=torch.long)
     y = torch.tensor(ys, dtype=torch.long)
-    loader = DataLoader(TensorDataset(x, y), batch_size=max(1, min(int(job_config.get("batch_size", 2)), 4)), shuffle=True)
+    batch_size = max(1, min(int(job_config.get("batch_size", 2)), 4))
+    accum_steps = max(1, min(int(job_config.get("gradient_accumulation_steps", 1)), 4))
+    loader = DataLoader(TensorDataset(x, y), batch_size=batch_size, shuffle=True)
+    # Optimizer steps actually executed: accumulate_grad divides the batches.
+    micro_batches_per_epoch = math.ceil(len(xs) / batch_size)
+    steps_per_epoch = math.ceil(micro_batches_per_epoch / accum_steps)
+    total_steps = max(1, steps_per_epoch * cfg["epochs"])
+    _stage(
+        on_metric,
+        "initializing",
+        total_steps=total_steps,
+        total_epochs=cfg["epochs"],
+        completed_steps=0,
+        processed_tokens=0,
+    )
     trainer = PyTorchTrainer(cfg, device="cpu")
     metrics = []
     started = time.monotonic()
@@ -286,11 +317,20 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
         _wait_if_paused(current_job_id)
         processed_tokens += int(step_data.get("tokens") or (int(loader.batch_size or 1) * context))
         elapsed = max(time.monotonic() - started, 0.001)
+        completed = int(step_data["step"])
         metric = {
-            "step": int(step_data["step"]),
+            "step": completed,
             "loss": float(step_data["loss"]),
             "learning_rate": float(trainer.optimizer.param_groups[0]["lr"]),
             "tokens_per_second": float(processed_tokens / elapsed),
+            # trainer.epoch is incremented at the end of an epoch, so the epoch
+            # currently being trained is epoch + 1 (1-based for humans).
+            "epoch": min(cfg["epochs"], int(trainer.epoch) + 1),
+            "completed_steps": completed,
+            "total_steps": total_steps,
+            "total_epochs": cfg["epochs"],
+            "processed_tokens": processed_tokens,
+            "stage": "training",
         }
         metrics.append(metric)
         if on_metric is not None:
@@ -301,7 +341,7 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
         trainer.train_epoch(
             loader,
             clip_grad=float(job_config.get("gradient_clip", 1.0)),
-            accum_steps=max(1, min(int(job_config.get("gradient_accumulation_steps", 1)), 4)),
+            accum_steps=accum_steps,
             on_step=report_optimizer_step,
         )
         _check_not_stopped(current_job_id)
@@ -324,20 +364,90 @@ def _train_sync(text_data, model_config, job_config, on_metric=None):
     return cfg, metrics, buffer.getvalue(), tokenizer_json, len(ids)
 
 
-async def _persist_training_metric(factory, job_id: str, metric: dict):
-    """Persist each genuine optimizer-step metric before the worker advances."""
+async def _set_stage(factory, job_id: str, stage: str, progress_percent=None):
+    """Record a lifecycle stage (and optional measured percent) on the job row."""
     async with factory() as db:
+        await db.execute(text("""
+            UPDATE public.training_jobs
+            SET stage = :stage,
+                progress_percent = COALESCE(:percent, progress_percent),
+                progress_updated_at = now(), updated_at = now()
+            WHERE id = :job_id
+        """), {"job_id": job_id, "stage": stage, "percent": progress_percent})
+        await db.commit()
+
+
+async def _persist_job_progress(db, job_id: str, payload: dict):
+    """Write the run's real position onto the job row.
+
+    Percent comes only from the engine's own step counter. ``GREATEST`` keeps a
+    replayed or out-of-order event from moving the bar backwards, and a
+    completed job stays at 100.
+    """
+    completed = payload.get("completed_steps")
+    total = payload.get("total_steps")
+    percent = payload.get("progress_percent")
+    if percent is None and completed is not None and total:
+        percent = min(100.0, max(0.0, (float(completed) / float(total)) * 100.0))
+    await db.execute(text("""
+        UPDATE public.training_jobs
+        SET stage = COALESCE(:stage, stage),
+            completed_steps = GREATEST(COALESCE(completed_steps, 0), COALESCE(:completed_steps, 0)),
+            total_steps = COALESCE(:total_steps, total_steps),
+            total_epochs = COALESCE(:total_epochs, total_epochs),
+            current_epoch = GREATEST(COALESCE(current_epoch, 0), COALESCE(:current_epoch, 0)),
+            processed_tokens = GREATEST(COALESCE(processed_tokens, 0), COALESCE(:processed_tokens, 0)),
+            last_loss = COALESCE(:last_loss, last_loss),
+            progress_percent = GREATEST(COALESCE(progress_percent, 0), COALESCE(:percent, 0)),
+            progress_updated_at = now(),
+            updated_at = now()
+        WHERE id = :job_id
+    """), {
+        "job_id": job_id,
+        "stage": payload.get("stage"),
+        "completed_steps": completed,
+        "total_steps": total,
+        "total_epochs": payload.get("total_epochs"),
+        "current_epoch": payload.get("current_epoch", payload.get("epoch")),
+        "processed_tokens": payload.get("processed_tokens"),
+        "last_loss": payload.get("last_loss", payload.get("loss")),
+        "percent": percent,
+    })
+
+
+async def _persist_training_metric(factory, job_id: str, metric: dict):
+    """Persist each genuine optimizer-step metric before the worker advances.
+
+    Stage events (``kind == "stage"``) update the job's lifecycle stage and the
+    run plan (total steps/epochs) without writing a fake metric row.
+    """
+    async with factory() as db:
+        if metric.get("kind") == "stage":
+            await _persist_job_progress(db, job_id, metric)
+            await db.commit()
+            return
         await db.execute(text("""
             INSERT INTO public.training_metrics
             (job_id, step, loss, learning_rate, tokens_per_second)
             VALUES (:job_id, :step, :loss, :learning_rate, :tokens_per_second)
-        """), {"job_id": job_id, **metric})
+        """), {
+            "job_id": job_id,
+            "step": metric["step"],
+            "loss": metric["loss"],
+            "learning_rate": metric["learning_rate"],
+            "tokens_per_second": metric["tokens_per_second"],
+        })
+        await _persist_job_progress(db, job_id, metric)
         await db.commit()
 
 
 async def run_training_job(job_id: str, owner_id: str):
     factory = get_session_factory()
     ctrl = _register_job_control(job_id)
+    try:
+        await _set_stage(factory, job_id, "preparing")
+    except Exception:
+        logger.exception("Could not record the preparing stage for %s", job_id)
     token = _CURRENT_JOB_ID.set(job_id)
     try:
         async with factory() as db:
@@ -437,6 +547,7 @@ async def run_training_job(job_id: str, owner_id: str):
             # report success when its live metrics were not durably recorded.
             future.result(timeout=60)
 
+        await _set_stage(factory, job_id, "loading_model")
         cfg, metrics, checkpoint_bytes, tokenizer_bytes, token_count = await asyncio.to_thread(
             _train_sync, text_data, model_config, job_config, publish_metric
         )
@@ -447,6 +558,7 @@ async def run_training_job(job_id: str, owner_id: str):
             )).scalar_one_or_none()
             if latest_status in {"stopping", "stopped", "cancelled"}:
                 raise TrainingStoppedError("Training job was stopped before checkpoint upload.")
+        await _set_stage(factory, job_id, "saving_checkpoints", progress_percent=99.0)
         client = _storage()
         bucket = settings.STORAGE_BUCKET
         base = f"{owner_id}/{job_id}"
@@ -458,6 +570,7 @@ async def run_training_job(job_id: str, owner_id: str):
         await asyncio.to_thread(
             _upload_bytes, client, bucket, tokenizer_path, tokenizer_bytes, "application/json"
         )
+        await _set_stage(factory, job_id, "finalizing", progress_percent=99.5)
         async with factory() as db:
             checkpoint_id = "ckpt_" + uuid.uuid4().hex[:8]
             await db.execute(text("""
@@ -478,7 +591,11 @@ async def run_training_job(job_id: str, owner_id: str):
                 WHERE id = :dataset_id AND owner_id = :owner_id
             """), {"token_count": token_count, "dataset_id": dataset_id, "owner_id": owner_id})
             await db.execute(text("""
-                UPDATE public.training_jobs SET status = 'completed', completed_at = now(), updated_at = now()
+                UPDATE public.training_jobs
+                SET status = 'completed', completed_at = now(), updated_at = now(),
+                    stage = 'completed', progress_percent = 100,
+                    completed_steps = COALESCE(total_steps, completed_steps),
+                    progress_updated_at = now()
                 WHERE id = :job_id AND owner_id = :owner_id
             """), {"job_id": job_id, "owner_id": owner_id})
             await db.execute(text("""
@@ -491,7 +608,9 @@ async def run_training_job(job_id: str, owner_id: str):
         try:
             async with factory() as db:
                 await db.execute(text("""
-                    UPDATE public.training_jobs SET status = 'stopped', updated_at = now()
+                    UPDATE public.training_jobs
+                    SET status = 'stopped', updated_at = now(), stage = 'stopped',
+                        progress_updated_at = now()
                     WHERE id = :job_id AND owner_id = :owner_id
                 """), {"job_id": job_id, "owner_id": owner_id})
                 await db.execute(text("""
@@ -506,9 +625,11 @@ async def run_training_job(job_id: str, owner_id: str):
         try:
             async with factory() as db:
                 await db.execute(text("""
-                    UPDATE public.training_jobs SET status = 'failed', updated_at = now()
+                    UPDATE public.training_jobs
+                    SET status = 'failed', updated_at = now(), stage = 'failed',
+                        failure_reason = :reason, progress_updated_at = now()
                     WHERE id = :job_id AND owner_id = :owner_id
-                """), {"job_id": job_id, "owner_id": owner_id})
+                """), {"job_id": job_id, "owner_id": owner_id, "reason": str(exc)[:500]})
                 await db.execute(text("""
                     INSERT INTO public.training_job_events (job_id, event, data)
                     VALUES (:job_id, 'failed', CAST(:data AS jsonb))

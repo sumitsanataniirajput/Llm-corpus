@@ -81,7 +81,7 @@ async def _read(job_id):
 
 
 @pytest.mark.asyncio
-async def test_a_job_left_running_by_a_dead_process_is_marked_failed_with_a_reason():
+async def test_a_job_left_running_by_a_dead_process_is_marked_interrupted_with_a_reason():
     now = datetime.datetime.now(datetime.timezone.utc)
     stale = now - datetime.timedelta(minutes=30)
     job_id = "job_orphan_" + uuid.uuid4().hex[:8]
@@ -91,9 +91,9 @@ async def test_a_job_left_running_by_a_dead_process_is_marked_failed_with_a_reas
 
     assert job_id in recovered
     row = await _read(job_id)
-    assert row.status == "failed"
+    assert row.status == "interrupted"
     assert row.completed_at is not None
-    assert row.last_event == "failed"
+    assert row.last_event == "interrupted"
     data = row.last_data if isinstance(row.last_data, dict) else json.loads(row.last_data)
     assert "restarted" in data["error"].lower()
     assert data["recovered"] is True
