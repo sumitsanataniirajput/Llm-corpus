@@ -1,9 +1,15 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-18.2",
+  "buildId": "2026-11-18.3",
   "sourceRef": "main",
   "notes": [
+    "Action feedback: every action now runs through one global action manager (frontend/js/actions.js) with the states idle \u2192 processing \u2192 success/completed/failed/cancelled. The control that started it shows the work immediately, is snapshot/restored exactly (markup, icon and accessibility attributes), cannot fire twice, and always returns to its normal state \u2014 success, error, timeout, abort or navigation away.",
+    "Buttons: ui.setButtonLoading no longer rewrites `disabled` or loses the original markup. Two actions on the same control are reference counted, so one finishing cannot re-enable or relabel the other, and a page that owns a control's disabled state keeps ownership of it.",
+    "Notifications: exactly one confirmation per real outcome, deduplicated across double clicks, duplicated WebSocket events and repeated polls; success toasts are green with a check icon, errors carry the backend detail, and a burst is capped so it cannot cover the screen on a phone.",
+    "Long-running work: training, uploads and evaluation are tracked operations with their real backend state (requested/queued/running/completed/failed/cancelled), real progress where the backend reports it, start and finish times, and a persistent Operation centre that survives a reload. A reload marks interrupted client-side operations as cancelled instead of leaving them Running forever.",
+    "Uploads: the dataset upload reports creating \u2192 transferring (real tus/bytes progress) \u2192 verifying and registering, then confirms only after the backend has verified the stored object, refreshes the dataset list and updates dashboard state. A queue that cannot be persisted no longer leaves the Upload button stuck.",
+    "Training: the monitor reconciles the job status from the create response, WebSocket events and the polling fallback through one idempotent path, so a job that completes while the page is open reports Completed once, with its real final metrics, and stops its indicators; a failed job no longer leaves the control mid-action.",
     "Interaction performance: navigation no longer waits for a page's data. The router starts every navigation immediately and only the newest one may paint, so a click during a slow request is honoured instead of being swallowed.",
     "Requests belong to the page that started them: leaving a page aborts its in-flight calls and a late response can never overwrite the page you are on. Cancelled requests are reported as cancelled, never as a backend failure or an error toast.",
     "Read cache with request de-duplication (frontend/js/api.js): collection reads are cached for API_CACHE_TTL_MS (20 s) per signed-in user, identical concurrent reads share one request, every write and every 'changed' event invalidates the cache, and a manual Refresh bypasses it. Measured: 30 API calls per navigation cycle before, 9 now, 4 on a repeat cycle.",

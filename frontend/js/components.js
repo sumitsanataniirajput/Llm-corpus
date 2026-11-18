@@ -16,6 +16,14 @@ window.ui = (function () {
   function toast(message, type = 'info', duration = 4000) {
     if (isAborted(message)) return;
     if (message && message.aborted) return;
+    // Route through the action manager so success/error notifications are
+    // deduplicated there, in one place, for the whole app.
+    if (window.CORPUS_ACTIONS && window.CORPUS_ACTIONS.notify) {
+      const opts = {};
+      if (typeof duration === 'number') opts.duration = duration;
+      window.CORPUS_ACTIONS.notify(message, type, opts);
+      return;
+    }
     CORPUS_UTILS.toast(message, type, duration);
   }
 
@@ -51,17 +59,34 @@ window.ui = (function () {
     document.getElementById('confirm-dialog').classList.add('hidden');
   }
 
-  // Loading state on button
-  function setButtonLoading(btn, loading) {
+  /* Loading state on a button.
+
+     The old version replaced the markup, disabled the control and set
+     `disabled = false` again when it finished — which silently re-enabled
+     controls the page had deliberately disabled (that is how Start Training
+     came back from a failed run), lost the original markup when two actions
+     touched the same button, and left "Working..." behind whenever an error
+     path skipped the reset. It now delegates to the action manager, which
+     snapshots the exact markup and accessibility attributes, reference-counts
+     concurrent actions on the same control, and never touches `disabled`
+     (the page owns that).
+
+     `label` is optional; pass it to say what is happening ("Saving…"). */
+  function setButtonLoading(btn, loading, label) {
     if (!btn) return;
-    if (loading) {
-      btn.disabled = true;
-      btn.dataset.originalText = btn.innerHTML;
-      btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Working...';
-    } else {
-      btn.disabled = false;
-      if (btn.dataset.originalText) btn.innerHTML = btn.dataset.originalText;
+    const manager = window.CORPUS_ACTIONS;
+    if (!manager) {
+      // Minimal fallback if actions.js failed to load.
+      if (loading) {
+        btn.dataset.originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Working…';
+      } else if (btn.dataset.originalText) {
+        btn.innerHTML = btn.dataset.originalText;
+      }
+      return;
     }
+    if (loading) manager.beginButton(btn, label || 'Working…');
+    else manager.resetButton(btn);
   }
 
   // Format helpers (expose utils)

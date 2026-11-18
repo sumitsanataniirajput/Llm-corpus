@@ -43,7 +43,7 @@ window.CORPUS_CONFIG = {
   // CSS/JS in index.html. Used to cache-bust a page module the router has to
   // re-request when one failed to register. Enforced by
   // frontend/tests/build-id.test.mjs.
-  BUILD_ID: '2026-11-18.2',
+  BUILD_ID: '2026-11-18.3',
 
   // Small files use the authenticated API upload; larger files go directly to
   // private Supabase Storage using resumable TUS chunks.
