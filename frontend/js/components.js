@@ -2,7 +2,12 @@
    CORPUS ULTIMATE — UI components & helpers
    ======================================== */
 
-window.ui = (function () {
+// window.ui is shared with js/auth.js, which loads first and attaches the
+// offline/loading helpers it calls at runtime (showOffline, hideOffline,
+// setLoading, closeAuth). Assigning the object outright — as this file used to
+// — wiped those helpers, so an auth event threw "ui.hideOffline is not a
+// function". Merge instead, and let components win on a name collision.
+window.ui = Object.assign(window.ui || {}, (function () {
   // Toast
   // A request cancelled because the user navigated away is not a failure and
   // must never surface as an error toast.
@@ -196,7 +201,7 @@ window.ui = (function () {
   function installPressFeedback() {
     if (window.__corpusPressFeedback) return;
     window.__corpusPressFeedback = true;
-    const TARGETS = '.btn, button, .nav-link, .sidebar-link, [role="button"], .tab, .chip';
+    const TARGETS = '.btn, button, .nav-item, .nav-group-summary, [role="button"], .tab, .chip';
     const clear = (el) => { if (el && el.classList) el.classList.remove('is-pressed'); };
     document.addEventListener('pointerdown', (event) => {
       const el = event.target && event.target.closest ? event.target.closest(TARGETS) : null;
@@ -455,7 +460,4 @@ window.ui = (function () {
     modelConfigSummary,
     createChartContainer,
   };
-})();
-
-// Expose closeConfirm globally for inline HTML
-window.ui.closeConfirm = window.ui.closeConfirm;
+})());

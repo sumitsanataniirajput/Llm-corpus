@@ -176,7 +176,7 @@ test('remotes and keyboards get an unmistakable focus ring', () => {
 
   const big = mediaBlock(responsive, 'min-width: 1920px');
   assert.match(big, /\.btn[^{]*\{[^}]*min-height/, 'controls grow for viewing distance');
-  assert.match(big, /\.nav-link[^{]*\{[^}]*min-height/, 'nav targets grow for DPad use');
+  assert.match(big, /\.nav-item[^{]*\{[^}]*min-height/, 'nav targets grow for DPad use');
 });
 
 test('print and low-power paths keep their guards', () => {

@@ -79,6 +79,31 @@ const ASSET_MARKERS = [
     label: 'responsive viewport meta tag',
     detail: 'htmlHasViewportMeta',
   },
+  {
+    path: '/js/routes.js',
+    marker: 'CORPUS_ROUTES',
+    label: 'single route registry (sidebar, router and tests read one table)',
+    detail: 'registryServed',
+  },
+  {
+    path: '/index.html',
+    marker: 'aria-controls="sidebar"',
+    label: 'hamburger-opened navigation drawer',
+    detail: 'hamburgerServed',
+  },
+];
+
+// Markers that must NOT be served any more. A host running a cached copy of the
+// old shell would still pass the build-id check if version.json were cached
+// with it, but it cannot hide a bottom navigation bar that no longer exists in
+// this checkout.
+const FORBIDDEN_MARKERS = [
+  {
+    path: '/index.html',
+    marker: 'class="bottom-nav"',
+    label: 'the removed mobile bottom navigation bar',
+    detail: 'bottomNavRemoved',
+  },
 ];
 
 function parseArgs(argv) {
@@ -361,6 +386,27 @@ async function checkFrontend(expectedBuildId) {
         result.problems.push(`could not reach ${assetUrl} (${describeFetchError(err)}).`);
       }
     }
+
+    for (const { path: assetPath, marker, label, detail } of FORBIDDEN_MARKERS) {
+      const assetUrl = `${WEB}${assetPath}`;
+      try {
+        if (!fetched.has(assetUrl)) fetched.set(assetUrl, await httpGet(assetUrl));
+        const asset = fetched.get(assetUrl);
+        const served = asset.status === 200 ? asset.body : '';
+        const found = served.includes(marker);
+        result.details[detail] = !found;
+        if (found) {
+          result.ok = false;
+          result.problems.push(
+            `${assetUrl} still contains "${marker}" — the deployment is serving ${label}. ` +
+              'Redeploy corpus-ultimate-web from this commit.'
+          );
+        }
+      } catch (err) {
+        result.ok = false;
+        result.problems.push(`could not reach ${assetUrl} (${describeFetchError(err)}).`);
+      }
+    }
   }
 
   return result;
@@ -386,6 +432,9 @@ function printReport(backend, frontend, expected) {
     line('module recovery served', frontend.details.routerHasModuleRecovery === true ? 'yes' : 'no');
     line('large-display CSS served', frontend.details.cssHasLargeDisplayBreakpoints === true ? 'yes' : 'no');
     line('viewport meta served', frontend.details.htmlHasViewportMeta === true ? 'yes' : 'no');
+    line('route registry served', frontend.details.registryServed === true ? 'yes' : 'no');
+    line('hamburger drawer served', frontend.details.hamburgerServed === true ? 'yes' : 'no');
+    line('bottom bar removed', frontend.details.bottomNavRemoved === true ? 'yes' : 'no');
   }
   console.log('');
 

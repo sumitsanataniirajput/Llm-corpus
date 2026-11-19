@@ -60,14 +60,42 @@ test('selects show the selected value with room for the chevron', () => {
   assert.match(select, /background-position:\s*right/);
 });
 
-test('mobile chrome respects the Android viewport and safe areas', () => {
+test('the navigation drawer respects the Android viewport and safe areas', () => {
   const variables = css('variables.css');
   const layout = css('layout.css');
   const responsive = css('responsive.css');
+  const html = fs.readFileSync(path.join(FRONTEND_DIR, 'index.html'), 'utf8');
 
   assert.match(variables, /--safe-bottom:\s*env\(safe-area-inset-bottom/);
-  assert.match(layout, /\.bottom-nav\s*\{[^}]*padding-bottom:\s*var\(--safe-bottom\)/s);
-  assert.match(layout, /\.main-content\s*\{[^}]*padding-bottom:\s*calc\(var\(--bottom-nav-height\) \+ var\(--safe-bottom\)/s);
+  assert.match(variables, /--safe-top:\s*env\(safe-area-inset-top/);
+
+  // The drawer, its scrolling list and the page behind it are all safe-area aware.
+  const sidebar = ruleBody(layout, '.sidebar');
+  assert.match(sidebar, /padding-top:\s*var\(--safe-top\)/);
+  assert.match(sidebar, /padding-bottom:\s*var\(--safe-bottom\)/);
+  assert.match(sidebar, /100dvh/, 'the drawer follows the dynamic viewport, not 100vh');
+
+  const nav = ruleBody(layout, '.sidebar-nav');
+  assert.match(nav, /overflow-y:\s*auto/, 'a long menu scrolls inside the drawer');
+  assert.match(nav, /overscroll-behavior:\s*contain/, 'scrolling the menu never scrolls the page');
+  assert.match(nav, /-webkit-overflow-scrolling:\s*touch/, 'momentum scrolling on iOS');
+
+  const main = ruleBody(layout, '.main-content');
+  assert.match(main, /padding-bottom:\s*calc\(var\(--safe-bottom\)/, 'content clears the home indicator');
+  assert.doesNotMatch(main, /bottom-nav/, 'no space is reserved for a bottom bar any more');
+
+  // The bar itself is gone from the markup and from every stylesheet.
+  assert.doesNotMatch(html, /bottom-nav/, 'index.html has no bottom navigation');
+  for (const file of ['layout.css', 'responsive.css', 'components.css', 'variables.css']) {
+    assert.doesNotMatch(css(file), /bottom-nav/, `${file} has no bottom-navigation rules`);
+  }
+
+  // Touch targets stay thumb-sized.
+  const item = ruleBody(layout, '.nav-item');
+  assert.match(item, /min-height:\s*2\.75rem/);
+  const summary = ruleBody(layout, '.nav-group-summary');
+  assert.match(summary, /min-height:\s*2\.75rem/);
+
   assert.match(responsive, /@media \(max-width: 379px\)/);
   assert.match(responsive, /@media \(max-width: 429px\)/);
   assert.match(responsive, /@media \(max-width: 768px\)/);
