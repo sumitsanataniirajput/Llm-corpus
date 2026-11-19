@@ -2,12 +2,16 @@
 /**
  * Baseline-aware frontend test gate.
  *
- * The jsdom suite has 11 known pre-existing failures: nine stale tests for a
- * deliberately removed transparent file-picker overlay, and two real
- * training-progress regressions. Hiding them would be dishonest, but letting a
- * NEW failure merge silently is worse. This gate runs the real `npm test`,
- * parses the TAP failure names and fails CI only when an unknown failure appears
- * (or when the runner fails without TAP failures).
+ * The jsdom suite has 9 known pre-existing failures: nine stale tests for a
+ * deliberately removed transparent file-picker overlay. (The two former
+ * training-progress regressions — "backend failure event surfaces the real
+ * error message" and "restores latest completed job and its real metrics" —
+ * were repaired in the Training Center fix: the terminal WS status can no
+ * longer be reverted by a stale in-flight REST read, and the test harness now
+ * actually maps metrics fixtures.) Hiding remaining failures would be
+ * dishonest, but letting a NEW failure merge silently is worse. This gate runs
+ * the real `npm test`, parses the TAP failure names and fails CI only when an
+ * unknown failure appears (or when the runner fails without TAP failures).
  */
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -22,8 +26,6 @@ export const KNOWN_FAILURES = [
   'the Datasets page renders the complete upload UI controls',
   'index.html loads datasets.js exactly once, before the bootstrap, with build-stamped URLs',
   'the file-picker overlay survives the responsive layer',
-  'backend failure event surfaces the real error message instead of "unknown"',
-  'restores latest completed job and its real metrics after page reload',
 ];
 
 export function classifyFailures(output, known = KNOWN_FAILURES) {

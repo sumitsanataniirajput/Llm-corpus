@@ -54,6 +54,38 @@ window.teacherSelection = (function () {
     return (provider && provider.models) || [];
   }
 
+  function deepCopy(value) {
+    if (Array.isArray(value)) return value.map(deepCopy);
+    if (value && typeof value === 'object') {
+      const out = {};
+      Object.keys(value).forEach((key) => { out[key] = deepCopy(value[key]); });
+      return out;
+    }
+    return value;
+  }
+
+  function uniqueEntries(list) {
+    const seen = new Set();
+    const out = [];
+    (Array.isArray(list) ? list : []).forEach((entry) => {
+      if (!entry || !entry.provider_id) return;
+      const key = String(entry.provider_id) + '::' + String(entry.model_id || '');
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ provider_id: String(entry.provider_id), model_id: entry.model_id || null });
+    });
+    return out;
+  }
+
+  function providerModelIds(provider) {
+    const models = Array.isArray(provider && provider.models)
+      ? provider.models.filter((model) => model && model.enabled !== false)
+      : [];
+    const ids = models.map((model) => model.model_id || model.id || model.name).filter(Boolean).map(String);
+    if (provider && provider.default_teacher_model) ids.unshift(String(provider.default_teacher_model));
+    return Array.from(new Set(ids));
+  }
+
   async function load() {
     try {
       const token = await state.getAccessToken();
@@ -144,8 +176,8 @@ window.teacherSelection = (function () {
     const options = STATE.options || {};
     return Object.assign({
       mode: STATE.mode,
-      teachers: STATE.teachers,
-      evaluators: STATE.evaluators,
+      teachers: uniqueEntries(STATE.teachers),
+      evaluators: uniqueEntries(STATE.evaluators),
       subject_map: Object.entries(STATE.subjectMap).map(([subject, providerId]) => ({ subject, provider_id: providerId })),
       generation: {
         count: Number(($('#ts-count') || {}).value || 10),
@@ -155,14 +187,16 @@ window.teacherSelection = (function () {
         task_types: [($('#ts-task') || {}).value || 'instruction'],
         output_format: 'chat_jsonl',
       },
-      quality: (options.quality_defaults || {}),
+      quality: deepCopy(options.quality_defaults || {}),
       budget: {
         max_requests: Number(($('#ts-max-requests') || {}).value || 200),
         max_tokens: Number(($('#ts-max-tokens') || {}).value || 400000),
         max_spend_usd: Number(($('#ts-max-spend') || {}).value || 5),
         max_concurrency: Number(($('#ts-concurrency') || {}).value || 4),
       },
-      allow_external_send: true,
+      // Consent belongs to the Knowledge Distillation form, where the exact
+      // source excerpt is shown. The plan is never an external-send permission.
+      allow_external_send: false,
     }, extra || {});
   }
 
@@ -171,11 +205,13 @@ window.teacherSelection = (function () {
   /* ------------------------------------------------------------ rendering */
 
   function providerOption(provider) {
-    const models = (provider.models || []).filter((model) => model.enabled !== false);
-    const defaultModel = provider.default_teacher_model
-      || (models[0] && models[0].model_id)
-      || '';
-    return `<option value="${esc(provider.id)}::${esc(defaultModel)}">${esc(provider.name)} · ${esc(defaultModel || 'no model')}</option>`;
+    const modelIds = providerModelIds(provider);
+    const defaultModel = String(provider.default_teacher_model || modelIds[0] || '');
+    if (!modelIds.length) {
+      return `<option value="${esc(provider.id)}::">${esc(provider.name)} · no model</option>`;
+    }
+    return `<optgroup label="${esc(provider.name)}">${modelIds.map((modelId) => `
+      <option value="${esc(provider.id)}::${esc(modelId)}"${modelId === defaultModel ? ' selected' : ''}>${esc(provider.name)} · ${esc(modelId)}</option>`).join('')}</optgroup>`;
   }
 
   function chipRow(list, onRemove) {
@@ -332,12 +368,15 @@ window.teacherSelection = (function () {
     STATE.evaluators = [];
     STATE.subjectMap = {};
     STATE.lastJob = null;
+    pendingPlan = null;
     render();
   }
 
   // A job needs source material, which is chosen on the distillation page. The
   // plan is therefore handed over in memory (never in localStorage) and the job
   // itself is created there, where the dataset and consent checkbox live.
+  // The plan is retained until distillation explicitly clears it: provider
+  // loads, re-renders and navigation must not silently consume the handoff.
   let pendingPlan = null;
 
   function usePlan(button) {
@@ -346,16 +385,18 @@ window.teacherSelection = (function () {
       ui.toast(errors[0], 'error');
       return;
     }
-    pendingPlan = buildPayload();
+    pendingPlan = deepCopy(buildPayload());
     if (button) ui.setButtonLoading(button, false);
-    ui.toast('Plan ready — choose the dataset to create the job.', 'success');
+    ui.toast('Plan carried to Knowledge Distillation — choose a dataset and confirm external-send consent there.', 'info');
     navigate('knowledge-distillation');
   }
 
   function takePlan() {
-    const plan = pendingPlan;
+    return deepCopy(pendingPlan);
+  }
+
+  function clearPlan() {
     pendingPlan = null;
-    return plan;
   }
 
   function hasPlan() {
@@ -377,6 +418,7 @@ window.teacherSelection = (function () {
     reset,
     usePlan,
     takePlan,
+    clearPlan,
     hasPlan,
     navigate,
     // exposed for tests

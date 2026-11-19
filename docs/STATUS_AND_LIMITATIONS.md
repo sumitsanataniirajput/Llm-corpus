@@ -56,9 +56,13 @@ the Git history says otherwise.
 
 ## Verification performed locally
 
-- Frontend jsdom suite: `npm test` currently has 11 known pre-existing failures
-  (stale transparent file-picker tests and two training-progress regressions).
-  P2 added suites pass; `npm run test:baseline` fails only on *new* failures.
+- Frontend jsdom suite: `npm test` currently has 9 known pre-existing failures
+  (stale transparent file-picker tests). The two former training-progress
+  regressions were repaired in the Training Center fix: a terminal WebSocket
+  status can no longer be reverted by a stale in-flight REST read, and the
+  test harness now maps metrics fixtures so completed-job restoration is
+  exercised for real. P2 added suites pass; `npm run test:baseline` fails only
+  on *new* failures.
 - Backend pytest suite: full `pytest -q` passes against a throw-away pgserver
   PostgreSQL instance, including real checkpoint loading and generation.
 - `node --check` on frontend JS/tests/scripts and `py_compile` on changed backend

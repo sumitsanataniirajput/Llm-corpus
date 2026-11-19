@@ -186,6 +186,7 @@ function createAppFromFiles(options) {
     datasets: options.datasets ? [...options.datasets] : [],
     models: options.models ? [...options.models] : [],
     jobs: options.jobs ? [...options.jobs] : [],
+    metrics: options.metrics ? [...options.metrics] : [],
     devices: options.devices ? [...options.devices] : [],
     deviceTasks: options.deviceTasks ? [...options.deviceTasks] : [],
     datasetText: 'datasetText' in options ? String(options.datasetText) : 'device corpus shard text\n'.repeat(40),

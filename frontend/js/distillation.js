@@ -34,6 +34,10 @@ window.distillation = (function () {
     notice: null,
     loading: false,
     timer: null,
+    plan: null,
+    planWarnings: [],
+    providersCache: null,
+    providerOptions: [],
   };
 
   function esc(value) { return ui.escapeHtml(value == null ? '' : String(value)); }
@@ -46,6 +50,50 @@ window.distillation = (function () {
   function container() { return window.CORPUS_APP ? window.CORPUS_APP.getPageContainer() : null; }
   function currentRoute(hint) { return hint || (window.state && state.getRoute && state.getRoute()) || 'knowledge-distillation'; }
   function $(selector) { return document.querySelector(selector); }
+
+  function deepCopy(value) {
+    if (Array.isArray(value)) return value.map(deepCopy);
+    if (value && typeof value === 'object') {
+      const out = {};
+      Object.keys(value).forEach((key) => { out[key] = deepCopy(value[key]); });
+      return out;
+    }
+    return value;
+  }
+
+  function uniqueEntries(list) {
+    const seen = new Set();
+    const out = [];
+    (Array.isArray(list) ? list : []).forEach((entry) => {
+      if (!entry || !entry.provider_id) return;
+      const key = String(entry.provider_id) + '::' + String(entry.model_id || '');
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ provider_id: String(entry.provider_id), model_id: entry.model_id || null });
+    });
+    return out;
+  }
+
+  function listText(values) {
+    return (Array.isArray(values) ? values : []).filter(Boolean).map(String).join(', ') || 'Unavailable';
+  }
+
+  function optionLabel(option) {
+    return option ? String(option.textContent || '').trim() : 'Unavailable';
+  }
+
+  function providerModelIds(provider) {
+    const models = Array.isArray(provider && provider.models)
+      ? provider.models.filter((model) => model && model.enabled !== false)
+      : [];
+    const ids = models.map((model) => model.model_id || model.id || model.name).filter(Boolean).map(String);
+    if (provider && provider.default_teacher_model) ids.unshift(String(provider.default_teacher_model));
+    return Array.from(new Set(ids));
+  }
+
+  function entryValue(entry) {
+    return String(entry.provider_id) + '::' + String(entry.model_id || '');
+  }
 
   function stopTimer() {
     if (STATE.timer) clearInterval(STATE.timer);
@@ -70,7 +118,7 @@ window.distillation = (function () {
     ]);
     STATE.options = options || null;
     STATE.datasets = window.CORPUS_API.asDatasetList(datasets);
-    STATE.jobs = (jobs && jobs.jobs) || [];
+    STATE.jobs = Array.isArray(jobs && jobs.jobs) ? jobs.jobs : [];
   }
 
   async function loadJob(jobId) {
@@ -91,7 +139,7 @@ window.distillation = (function () {
       if (filters[key] === '' || filters[key] === null) delete filters[key];
     });
     const payload = await window.CORPUS_API.listDistillationRecords(jobId, filters, token);
-    STATE.records = (payload && payload.records) || [];
+    STATE.records = Array.isArray(payload && payload.records) ? payload.records : [];
     STATE.recordTotal = (payload && payload.total) || 0;
     // Keep a selection that is still visible after filtering; drop the rest.
     const present = new Set(STATE.records.map((record) => record.id));
@@ -106,17 +154,21 @@ window.distillation = (function () {
   }
 
   function planBanner() {
-    if (!window.teacherSelection || !window.teacherSelection.hasPlan || !window.teacherSelection.hasPlan()) return '';
-    return `<div class="alert alert-success"><i class="fas fa-check-circle"></i>
-      <div>A teacher plan from the selection studio is ready. Choose the dataset and consent below, then create the job.</div></div>`;
+    const hasPending = window.teacherSelection && window.teacherSelection.hasPlan && window.teacherSelection.hasPlan();
+    if (!hasPending && !STATE.plan) return '';
+    const warning = STATE.planWarnings.length
+      ? ' Review the provider warnings in section 2 before creating a job.'
+      : '';
+    return `<div class="alert alert-info"><i class="fas fa-arrow-right-arrow-left"></i>
+      <div>A teacher plan is available. Check the exact teacher and evaluator selections, choose a dataset, and confirm external-send consent below.${esc(warning)}</div></div>`;
   }
 
   function renderCreate() {
     const options = STATE.options || {};
     return `
       <div class="card-grid two">
-        <div class="card">
-          <div class="card-header"><h3>1 · Source material</h3></div>
+        <section class="card" aria-labelledby="kd-source-heading">
+          <div class="card-header"><h3 id="kd-source-heading">1 · Source material</h3></div>
           <div class="card-body form-grid">
             <label>Dataset
               <select id="kd-dataset">${datasetOptions() || '<option value="">No dataset uploaded yet</option>'}</select>
@@ -130,10 +182,11 @@ window.distillation = (function () {
               <i class="fas fa-eye"></i> Show exactly what will be sent
             </button>
             <div id="kd-preview" class="preview-slot"></div>
+            <div id="kd-source-errors" class="form-section-errors" role="alert" aria-live="polite"></div>
           </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><h3>2 · Generation plan</h3></div>
+        </section>
+        <section class="card" aria-labelledby="kd-plan-heading">
+          <div class="card-header"><h3 id="kd-plan-heading">2 · Generation plan</h3></div>
           <div class="card-body form-grid">
             <label>Mode
               <select id="kd-mode">
@@ -143,10 +196,10 @@ window.distillation = (function () {
             </label>
             <label>Teachers
               <select id="kd-teachers" multiple size="4" aria-label="Teachers"></select>
-              <span class="field-help">Mode B needs two or more; modes C/D need a separate evaluator below.</span>
+              <span class="field-help">Every selected teacher is sent with its real provider ID and model ID. Mode B needs two or more different providers.</span>
             </label>
-            <label>Evaluator (separate provider)
-              <select id="kd-evaluator"><option value="">— none — </option></select>
+            <label>Evaluators (separate providers for modes C/D)
+              <select id="kd-evaluator" multiple size="3" aria-label="Evaluators"><option value="">— none —</option></select>
             </label>
             <label>Examples <input id="kd-count" type="number" min="1" inputmode="numeric"
               enterkeyhint="done" max="${Number(options.max_examples_per_run || 200)}" value="10" autocapitalize="off" spellcheck="false"></label>
@@ -162,26 +215,36 @@ window.distillation = (function () {
               inputmode="decimal" enterkeyhint="done" value="5" autocapitalize="off" spellcheck="false"></label>
             <label>Max requests <input id="kd-requests" type="number" min="1" inputmode="numeric"
               enterkeyhint="done" value="200" autocapitalize="off" spellcheck="false"></label>
+            <div id="kd-plan-summary" class="kd-plan-summary" aria-live="polite"></div>
+            <div id="kd-plan-errors" class="form-section-errors" role="alert" aria-live="polite"></div>
           </div>
-        </div>
+        </section>
       </div>
-      <div class="card">
-        <div class="card-header"><h3>3 · Permission</h3></div>
+      <section class="card" aria-labelledby="kd-permission-heading">
+        <div class="card-header"><h3 id="kd-permission-heading">3 · External-send permission</h3></div>
         <div class="card-body">
+          <div class="alert alert-warning permission-explanation" role="note">
+            <i class="fas fa-shield-halved"></i>
+            <div>Creating this job sends only the selected dataset excerpt (shown by “Show exactly what will be sent”)
+              to the external teacher/evaluator providers listed in section 2. Requests, token usage and cost are
+              recorded. Create Job stays disabled until you explicitly allow this below.</div>
+          </div>
           <label class="checkbox-row">
             <input type="checkbox" id="kd-consent">
             I allow the selected dataset excerpt (at most 4000 characters per request) to be sent to the
-            teacher providers chosen above.
+            teacher and evaluator providers chosen above.
           </label>
-          <p class="field-help">Only the excerpt shown by “Show exactly what will be sent” leaves this system.
-          Provider requests, token usage and cost are recorded for every call.</p>
+          <p class="field-help">This consent is mandatory and is sent as <code>allow_external_send</code>. It is not implied by a saved teacher plan.</p>
+          <div id="kd-consent-errors" class="form-section-errors" role="alert" aria-live="polite"></div>
         </div>
         <div class="card-footer actions-row">
-          <button class="btn btn-primary" type="button" onclick="distillation.createJob(this)">
+          <span id="kd-create-status" class="field-help" aria-live="polite"></span>
+          <button class="btn btn-primary" type="button" id="kd-create" disabled aria-disabled="true"
+                  onclick="distillation.createJob(this)">
             <i class="fas fa-play"></i> Create job
           </button>
         </div>
-      </div>`;
+      </section>`;
   }
 
   function renderJobsTable() {
@@ -189,7 +252,7 @@ window.distillation = (function () {
       return ui.emptyState({ icon: 'fa-droplet', title: 'No distillation runs yet',
         text: 'Create a run above: choose a dataset, a teacher plan and a budget.' });
     }
-    return `<table class="table">
+    return `<div class="table-scroll"><table class="table">
       <thead><tr><th>Job</th><th>Mode</th><th>Status</th><th>Records</th><th>Accepted</th><th>Created</th><th></th></tr></thead>
       <tbody>${STATE.jobs.map((job) => `
         <tr>
@@ -209,7 +272,7 @@ window.distillation = (function () {
             <button class="btn btn-sm btn-outline" type="button" onclick="distillation.review('${esc(job.id)}')"><i class="fas fa-list-check"></i> Review</button>
           </td>
         </tr>`).join('')}</tbody>
-    </table>`;
+    </table></div>`;
   }
 
   function statusBadge(status) {
@@ -286,41 +349,191 @@ window.distillation = (function () {
         <div id="kd-jobs">${renderJobsTable()}</div>
       </div>`;
     await fillTeacherSelects();
-    prefillFromPlan();
+    await prefillFromPlan();
+    bindValidationEvents();
+  }
+
+  function pushWarning(message) {
+    if (message && STATE.planWarnings.indexOf(message) === -1) STATE.planWarnings.push(message);
+  }
+
+  function optionMarkup(option) {
+    return `<option value="${esc(option.value)}" data-available="1" data-provider-id="${esc(option.providerId)}" data-model-id="${esc(option.modelId)}">${esc(option.label)}</option>`;
   }
 
   async function fillTeacherSelects() {
-    const token = await state.getAccessToken();
     let providers = STATE.providersCache;
     if (!providers) {
-      const payload = await window.CORPUS_API.listProviders(token);
-      providers = (payload && payload.providers) || [];
+      try {
+        const token = await state.getAccessToken();
+        const payload = await window.CORPUS_API.listProviders(token);
+        providers = payload && Array.isArray(payload.providers) ? payload.providers : [];
+      } catch (err) {
+        providers = [];
+        STATE.error = (err && err.message) || 'Could not load teacher providers.';
+      }
       STATE.providersCache = providers;
     }
+    const options = [];
+    (Array.isArray(providers) ? providers : []).forEach((provider) => {
+      if (!provider || provider.enabled === false) return;
+      providerModelIds(provider).forEach((modelId) => {
+        options.push({
+          value: String(provider.id) + '::' + modelId,
+          providerId: String(provider.id),
+          modelId,
+          label: String(provider.name || provider.id) + ' · ' + modelId,
+        });
+      });
+    });
+    const seen = new Set();
+    STATE.providerOptions = options.filter((option) => {
+      if (seen.has(option.value)) return false;
+      seen.add(option.value);
+      return true;
+    });
     const teacherSelect = $('#kd-teachers');
     const evaluatorSelect = $('#kd-evaluator');
     if (!teacherSelect || !evaluatorSelect) return;
-    const optionHtml = providers.map((provider) => {
-      const models = (provider.models || []).filter((model) => model.enabled !== false);
-      const modelId = provider.default_teacher_model || (models[0] && models[0].model_id) || '';
-      return `<option value="${esc(provider.id)}::${esc(modelId)}">${esc(provider.name)} · ${esc(modelId || 'no model')}</option>`;
-    }).join('');
+    const optionHtml = STATE.providerOptions.map(optionMarkup).join('');
     teacherSelect.innerHTML = optionHtml || '<option value="">No provider connected</option>';
     evaluatorSelect.innerHTML = '<option value="">— none —</option>' + optionHtml;
   }
 
-  function prefillFromPlan() {
-    if (!window.teacherSelection || !window.teacherSelection.hasPlan || !window.teacherSelection.hasPlan()) return;
-    const plan = window.teacherSelection.takePlan();
-    if (!plan) return;
-    const modeSelect = $('#kd-mode');
-    if (modeSelect && plan.mode) modeSelect.value = plan.mode;
-    const countInput = $('#kd-count');
-    if (countInput && plan.generation && plan.generation.count) countInput.value = plan.generation.count;
-    const spendInput = $('#kd-spend');
-    if (spendInput && plan.budget && plan.budget.max_spend_usd != null) spendInput.value = plan.budget.max_spend_usd;
-    STATE.plan = plan;
-    ui.toast('Teacher plan loaded from the selection studio.', 'success');
+  function resolvePlanEntry(entry, role) {
+    const providerId = String(entry.provider_id || '');
+    const requestedModel = String(entry.model_id || '');
+    const originalValue = entryValue({ provider_id: providerId, model_id: requestedModel || null });
+    const providers = Array.isArray(STATE.providersCache) ? STATE.providersCache : [];
+    const provider = providers.find((item) => item && item.id === providerId && item.enabled !== false);
+    if (!provider) {
+      const warning = `${role} provider '${providerId}' is not available for this account. Connect or enable it in Provider Management; the original selection is preserved below but cannot be submitted.`;
+      return { unavailable: true, value: originalValue, warning,
+        label: `Unavailable · ${providerId} · ${requestedModel || 'default'}` };
+    }
+    const models = providerModelIds(provider);
+    const fallback = String(provider.default_teacher_model || models[0] || '');
+    const selectedModel = requestedModel && models.indexOf(requestedModel) !== -1
+      ? requestedModel : fallback;
+    if (!selectedModel) {
+      const warning = `${role} provider '${provider.name || providerId}' has no available model. Discover models in Provider Management before submitting.`;
+      return { unavailable: true, value: originalValue, warning,
+        label: `Unavailable · ${provider.name || providerId} · no model` };
+    }
+    const value = String(provider.id) + '::' + selectedModel;
+    const warning = requestedModel && models.indexOf(requestedModel) === -1
+      ? `${role} model '${requestedModel}' is not registered for '${provider.name || providerId}'; using available model '${selectedModel}' instead.`
+      : null;
+    return { unavailable: false, value, warning, label: `${provider.name || providerId} · ${selectedModel}` };
+  }
+
+  function addUnavailableOption(select, resolved) {
+    if (!select || !resolved || !resolved.unavailable) return;
+    let option = Array.from(select.options || []).find((item) => item.value === resolved.value);
+    if (!option) {
+      option = document.createElement('option');
+      option.value = resolved.value;
+      option.textContent = resolved.label;
+      option.disabled = true;
+      select.appendChild(option);
+    }
+    option.setAttribute('data-available', '0');
+    option.setAttribute('data-warning', resolved.warning);
+    option.selected = true;
+  }
+
+  function setSelectedValues(select, values) {
+    if (!select) return;
+    const wanted = new Set(values.filter(Boolean));
+    Array.from(select.options || []).forEach((option) => {
+      option.selected = wanted.has(option.value);
+    });
+  }
+
+  function setFieldValue(selector, value) {
+    const el = $(selector);
+    if (!el || value === null || value === undefined || value === '') return;
+    if (el.tagName === 'SELECT') {
+      const match = Array.from(el.options || []).some((option) => option.value === String(value));
+      if (match) el.value = String(value);
+      return;
+    }
+    el.value = String(value);
+  }
+
+  function applyPlanToForm(plan) {
+    const generation = plan.generation || {};
+    const budget = plan.budget || {};
+    setFieldValue('#kd-mode', plan.mode);
+    setFieldValue('#kd-count', generation.count);
+    setFieldValue('#kd-task', Array.isArray(generation.task_types) ? generation.task_types[0] : null);
+    setFieldValue('#kd-format', generation.output_format);
+    setFieldValue('#kd-spend', budget.max_spend_usd);
+    setFieldValue('#kd-requests', budget.max_requests);
+  }
+
+  function applyPlanSelections(plan) {
+    STATE.planWarnings = [];
+    const teacherSelect = $('#kd-teachers');
+    const evaluatorSelect = $('#kd-evaluator');
+    const teacherValues = [];
+    const evaluatorValues = [];
+    uniqueEntries(plan.teachers).forEach((entry) => {
+      const resolved = resolvePlanEntry(entry, 'Teacher');
+      if (resolved.warning) pushWarning(resolved.warning);
+      addUnavailableOption(teacherSelect, resolved);
+      teacherValues.push(resolved.value);
+    });
+    uniqueEntries(plan.evaluators).forEach((entry) => {
+      const resolved = resolvePlanEntry(entry, 'Evaluator');
+      if (resolved.warning) pushWarning(resolved.warning);
+      addUnavailableOption(evaluatorSelect, resolved);
+      evaluatorValues.push(resolved.value);
+    });
+    setSelectedValues(teacherSelect, teacherValues);
+    setSelectedValues(evaluatorSelect, evaluatorValues);
+  }
+
+  async function prefillFromPlan() {
+    const pending = window.teacherSelection && typeof window.teacherSelection.takePlan === 'function'
+      && window.teacherSelection.hasPlan && window.teacherSelection.hasPlan()
+      ? window.teacherSelection.takePlan() : null;
+    if (pending) {
+      STATE.plan = deepCopy(pending);
+      if (window.teacherSelection && typeof window.teacherSelection.clearPlan === 'function') {
+        window.teacherSelection.clearPlan();
+      }
+    }
+    const plan = STATE.plan;
+    if (!plan) {
+      updateValidationUI();
+      return;
+    }
+    if (!STATE.providerOptions.length && !STATE.providersCache) await fillTeacherSelects();
+    applyPlanToForm(plan);
+    applyPlanSelections(plan);
+    syncPlanFromForm();
+    updateValidationUI();
+  }
+
+  function syncPlanFromForm() {
+    if (!STATE.plan) return null;
+    const base = deepCopy(STATE.plan);
+    const generation = deepCopy(base.generation || {});
+    const budget = deepCopy(base.budget || {});
+    generation.count = Number(($('#kd-count') || {}).value || 10);
+    generation.task_types = [($('#kd-task') || {}).value || 'instruction'];
+    generation.output_format = ($('#kd-format') || {}).value || 'chat_jsonl';
+    budget.max_spend_usd = Number(($('#kd-spend') || {}).value || 5);
+    budget.max_requests = Number(($('#kd-requests') || {}).value || 200);
+    STATE.plan = Object.assign(base, {
+      mode: ($('#kd-mode') || {}).value || base.mode || 'single',
+      teachers: uniqueEntries(selectedValues($('#kd-teachers')).map(parseEntry)),
+      evaluators: uniqueEntries(selectedValues($('#kd-evaluator')).map(parseEntry)),
+      generation,
+      budget,
+    });
+    return STATE.plan;
   }
 
   function selectedValues(select) {
@@ -331,6 +544,176 @@ window.distillation = (function () {
   function parseEntry(value) {
     const [provider_id, model_id] = String(value || '').split('::');
     return { provider_id, model_id: model_id || null };
+  }
+
+  function selectedOptionRows(select) {
+    return Array.from(select && select.selectedOptions ? select.selectedOptions : [])
+      .filter((option) => option && option.value);
+  }
+
+  function unavailableRows(select) {
+    return selectedOptionRows(select).filter((option) => option.getAttribute('data-available') === '0');
+  }
+
+  function renderPlanSummary(check) {
+    const slot = $('#kd-plan-summary');
+    if (!slot) return;
+    const plan = STATE.plan || {};
+    const generation = plan.generation || {};
+    const budget = plan.budget || {};
+    const chipRow = (rows, empty) => rows.length
+      ? rows.map((option) => `<span class="chip ${option.getAttribute('data-available') === '0' ? 'chip-warning' : 'chip-ok'}">${esc(optionLabel(option))}</span>`).join('')
+      : `<span class="muted">${esc(empty)}</span>`;
+    const warnings = STATE.planWarnings.length
+      ? `<div class="plan-warning-list">${STATE.planWarnings.map((warning) => `<div class="alert alert-warning"><i class="fas fa-triangle-exclamation"></i><div>${esc(warning)}</div></div>`).join('')}</div>`
+      : '';
+    slot.innerHTML = `
+      <div class="kd-summary-grid">
+        <div><span class="kd-summary-label">Mode</span><strong>${esc(check.mode)}</strong></div>
+        <div><span class="kd-summary-label">Examples</span><strong>${esc(($('#kd-count') || {}).value || generation.count || '—')}</strong></div>
+        <div><span class="kd-summary-label">Languages</span><span>${esc(listText(generation.languages))}</span></div>
+        <div><span class="kd-summary-label">Subjects</span><span>${esc(listText(generation.subjects))}</span></div>
+        <div><span class="kd-summary-label">Difficulties</span><span>${esc(listText(generation.difficulties))}</span></div>
+        <div><span class="kd-summary-label">Budget</span><span>${esc(num(budget.max_spend_usd))} USD · ${esc(num(budget.max_requests))} requests · ${esc(num(budget.max_tokens))} tokens</span></div>
+        <div class="kd-summary-wide"><span class="kd-summary-label">Teachers</span><div class="chip-row">${chipRow(selectedOptionRows($('#kd-teachers')), 'No teacher selected')}</div></div>
+        <div class="kd-summary-wide"><span class="kd-summary-label">Evaluators</span><div class="chip-row">${chipRow(selectedOptionRows($('#kd-evaluator')), 'None (single/multi mode)')}</div></div>
+      </div>${warnings}`;
+  }
+
+  function validationState() {
+    const errors = { source: [], plan: [], permission: [] };
+    const datasetId = ($('#kd-dataset') || {}).value || '';
+    const mode = ($('#kd-mode') || {}).value || 'single';
+    const teachers = uniqueEntries(selectedValues($('#kd-teachers')).map(parseEntry));
+    const evaluators = uniqueEntries(selectedValues($('#kd-evaluator')).map(parseEntry));
+    const consent = $('#kd-consent');
+    const sourceErrors = errors.source;
+    const planErrors = errors.plan;
+    if (!datasetId) sourceErrors.push('Section 1 · Choose a source dataset.');
+    if (!teachers.length) planErrors.push('Section 2 · Select at least one available teacher.');
+    unavailableRows($('#kd-teachers')).forEach((option) => {
+      planErrors.push('Section 2 · Teacher is unavailable: ' + optionLabel(option) + '. Connect/enable that provider or remove this selection.');
+    });
+    unavailableRows($('#kd-evaluator')).forEach((option) => {
+      planErrors.push('Section 2 · Evaluator is unavailable: ' + optionLabel(option) + '. Connect/enable that provider or remove this selection.');
+    });
+    if ((mode === 'evaluator' || mode === 'competition') && !evaluators.length) {
+      planErrors.push('Section 2 · This mode requires at least one separate evaluator.');
+    }
+    if (evaluators.length && evaluators.some((evaluator) => teachers.some((teacher) => teacher.provider_id === evaluator.provider_id))) {
+      planErrors.push('Section 2 · Choose an evaluator from a different provider than every teacher.');
+    }
+    if (mode === 'multi' && new Set(teachers.map((teacher) => teacher.provider_id)).size < 2) {
+      planErrors.push('Section 2 · Mode B requires at least two different teacher providers.');
+    }
+    if (mode === 'specialized' && !(STATE.plan && Array.isArray(STATE.plan.subject_map) && STATE.plan.subject_map.length)) {
+      planErrors.push('Section 2 · Mode E needs subject routing from the Teacher Selection Studio.');
+    }
+    const count = Number(($('#kd-count') || {}).value || 0);
+    if (!Number.isFinite(count) || count < 1) planErrors.push('Section 2 · Examples must be a positive number.');
+    const spend = Number(($('#kd-spend') || {}).value || 0);
+    const requests = Number(($('#kd-requests') || {}).value || 0);
+    if (!Number.isFinite(spend) || spend < 0) planErrors.push('Section 2 · Max spend cannot be negative.');
+    if (!Number.isFinite(requests) || requests < 1) planErrors.push('Section 2 · Max requests must be at least one.');
+    if (!consent || !consent.checked) {
+      errors.permission.push('Section 3 · Check external-send consent after reviewing the exact excerpt and providers.');
+    }
+    const allErrors = sourceErrors.concat(planErrors, errors.permission);
+    return { errors, warnings: STATE.planWarnings.slice(), allErrors, valid: allErrors.length === 0,
+      datasetId, mode, teachers, evaluators, consentChecked: !!(consent && consent.checked) };
+  }
+
+  function renderErrors(element, messages) {
+    if (!element) return;
+    element.innerHTML = messages.length
+      ? `<strong>Before you can create a job:</strong><ul>${messages.map((message) => `<li>${esc(message)}</li>`).join('')}</ul>`
+      : '';
+    element.classList.toggle('hidden', messages.length === 0);
+  }
+
+  function updateValidationUI() {
+    const check = validationState();
+    renderErrors($('#kd-source-errors'), check.errors.source);
+    renderErrors($('#kd-plan-errors'), check.errors.plan);
+    renderErrors($('#kd-consent-errors'), check.errors.permission);
+    const button = $('#kd-create');
+    if (button) {
+      button.disabled = !check.valid;
+      button.setAttribute('aria-disabled', String(!check.valid));
+    }
+    const status = $('#kd-create-status');
+    if (status) {
+      status.textContent = check.valid
+        ? 'All required fields are ready. The draft job will not contact providers.'
+        : 'Missing: ' + check.allErrors[0];
+    }
+    renderPlanSummary(check);
+    return check;
+  }
+
+  function bindValidationEvents() {
+    const ids = ['kd-dataset', 'kd-extra', 'kd-mode', 'kd-teachers', 'kd-evaluator', 'kd-count',
+      'kd-task', 'kd-format', 'kd-spend', 'kd-requests', 'kd-consent'];
+    const handler = () => { syncPlanFromForm(); updateValidationUI(); };
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.kdValidationBound === '1') return;
+      el.dataset.kdValidationBound = '1';
+      el.addEventListener('change', handler);
+      el.addEventListener('input', handler);
+    });
+    updateValidationUI();
+  }
+
+  async function createJob(button) {
+    syncPlanFromForm();
+    const check = updateValidationUI();
+    if (!check.valid) return;
+    const plan = STATE.plan || {};
+    const generation = Object.assign({}, deepCopy(plan.generation || {}), {
+      count: Number(($('#kd-count') || {}).value || 10),
+      task_types: [($('#kd-task') || {}).value || 'instruction'],
+      output_format: ($('#kd-format') || {}).value || 'chat_jsonl',
+    });
+    if (!Array.isArray(generation.languages) || !generation.languages.length) generation.languages = ['en'];
+    if (!Array.isArray(generation.subjects) || !generation.subjects.length) generation.subjects = ['general knowledge'];
+    if (!Array.isArray(generation.difficulties) || !generation.difficulties.length) generation.difficulties = ['beginner'];
+    const budget = Object.assign({}, deepCopy(plan.budget || {}), {
+      max_spend_usd: Number(($('#kd-spend') || {}).value || 5),
+      max_requests: Number(($('#kd-requests') || {}).value || 200),
+    });
+    const payload = {
+      dataset_id: check.datasetId,
+      mode: check.mode,
+      teachers: check.teachers,
+      evaluators: check.evaluators,
+      generation,
+      quality: deepCopy(plan.quality || {}),
+      budget,
+      allow_external_send: check.consentChecked === true,
+    };
+    if (Array.isArray(plan.subject_map) && plan.subject_map.length) payload.subject_map = deepCopy(plan.subject_map);
+    const extra = (($('#kd-extra') || {}).value || '').trim();
+    if (extra) payload.extra_source_text = extra;
+
+    ui.setButtonLoading(button, true, 'Creating…');
+    try {
+      const token = await state.getAccessToken();
+      const job = await window.CORPUS_API.createDistillationJob(payload, token);
+      STATE.job = job;
+      STATE.plan = null;
+      STATE.planWarnings = [];
+      if (window.teacherSelection && typeof window.teacherSelection.clearPlan === 'function') {
+        window.teacherSelection.clearPlan();
+      }
+      ui.toast('Draft job created. Start it when you are ready.', 'success');
+      await loadOverview();
+      await renderDistillation();
+    } catch (err) {
+      ui.toast((err && err.message) || 'Could not create the job.', 'error');
+    } finally {
+      ui.setButtonLoading(button, false);
+    }
   }
 
   async function previewSource(button) {
@@ -354,57 +737,6 @@ window.distillation = (function () {
       }
     } catch (err) {
       ui.toast((err && err.message) || 'Could not build the preview.', 'error');
-    } finally {
-      ui.setButtonLoading(button, false);
-    }
-  }
-
-  async function createJob(button) {
-    const consent = $('#kd-consent');
-    if (!consent || !consent.checked) {
-      ui.toast('Confirm that the dataset excerpt may be sent to the selected providers.', 'error');
-      return;
-    }
-    const datasetId = ($('#kd-dataset') || {}).value;
-    if (!datasetId) { ui.toast('Choose a dataset.', 'error'); return; }
-    const teachers = selectedValues($('#kd-teachers')).map(parseEntry);
-    if (!teachers.length) { ui.toast('Select at least one teacher.', 'error'); return; }
-    const evaluatorValue = ($('#kd-evaluator') || {}).value;
-    const plan = STATE.plan || {};
-    const payload = {
-      dataset_id: datasetId,
-      mode: ($('#kd-mode') || {}).value || 'single',
-      teachers,
-      evaluators: evaluatorValue ? [parseEntry(evaluatorValue)] : [],
-      generation: {
-        count: Number(($('#kd-count') || {}).value || 10),
-        languages: (plan.generation && plan.generation.languages) || ['en'],
-        subjects: (plan.generation && plan.generation.subjects) || ['general knowledge'],
-        difficulties: (plan.generation && plan.generation.difficulties) || ['beginner'],
-        task_types: [($('#kd-task') || {}).value || 'instruction'],
-        output_format: ($('#kd-format') || {}).value || 'chat_jsonl',
-      },
-      extra_source_text: (($('#kd-extra') || {}).value || '').trim() || null,
-      budget: {
-        max_spend_usd: Number(($('#kd-spend') || {}).value || 5),
-        max_requests: Number(($('#kd-requests') || {}).value || 200),
-      },
-      allow_external_send: true,
-    };
-    if (plan.subject_map && plan.subject_map.length) payload.subject_map = plan.subject_map;
-    if (!payload.extra_source_text) delete payload.extra_source_text;
-
-    ui.setButtonLoading(button, true, 'Creating…');
-    try {
-      const token = await state.getAccessToken();
-      const job = await window.CORPUS_API.createDistillationJob(payload, token);
-      STATE.job = job;
-      STATE.plan = null;
-      ui.toast('Job created. Start it when you are ready.', 'success');
-      await loadOverview();
-      await renderDistillation();
-    } catch (err) {
-      ui.toast((err && err.message) || 'Could not create the job.', 'error');
     } finally {
       ui.setButtonLoading(button, false);
     }
@@ -519,16 +851,16 @@ window.distillation = (function () {
     const languages = summary.by_language || [];
     return `<div class="card-grid two">
       <div class="card"><div class="card-header"><h3>Teacher contribution</h3></div>
-        <div class="card-body">${teachers.length ? `<table class="table compact">
+        <div class="card-body">${teachers.length ? `<div class="table-scroll"><table class="table compact">
           <thead><tr><th>Teacher</th><th>Model</th><th>Records</th><th>Accepted</th><th>Share</th></tr></thead>
           <tbody>${teachers.map((row) => `<tr><td>${esc(row.provider_name)}</td><td><code>${esc(row.model_id)}</code></td>
             <td>${num(row.total)}</td><td>${num(row.accepted)}</td><td>${row.share_percent}%</td></tr>`).join('')}</tbody>
-        </table>` : '<p class="muted">No generated records yet.</p>'}</div></div>
+        </table></div>` : '<p class="muted">No generated records yet.</p>'}</div></div>
       <div class="card"><div class="card-header"><h3>By language</h3></div>
-        <div class="card-body">${languages.length ? `<table class="table compact">
+        <div class="card-body">${languages.length ? `<div class="table-scroll"><table class="table compact">
           <thead><tr><th>Language</th><th>Records</th><th>Accepted</th></tr></thead>
           <tbody>${languages.map((row) => `<tr><td>${esc(row.language)}</td><td>${num(row.total)}</td>
-            <td>${num(row.accepted)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nothing generated yet.</p>'}
+            <td>${num(row.accepted)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Nothing generated yet.</p>'}
         </div></div>
     </div>`;
   }
@@ -625,11 +957,13 @@ window.distillation = (function () {
             <button class="btn btn-sm btn-outline" type="button" onclick="distillation.bulk('pending', this)">Mark pending</button>
             <button class="btn btn-sm btn-danger" type="button" onclick="distillation.bulk('delete', this)">Delete selected</button>
           </div>
+          <div class="table-scroll">
           <table class="table records-table">
             <thead><tr><th></th><th>Instruction</th><th>Answer</th><th>Provenance</th><th>Score</th><th>Status</th><th></th></tr></thead>
             <tbody>${STATE.records.length ? STATE.records.map(recordRow).join('')
               : `<tr><td colspan="7" class="muted">No records match these filters.</td></tr>`}</tbody>
           </table>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -815,6 +1149,8 @@ window.distillation = (function () {
     cancel,
     createJob,
     previewSource,
+    prefillFromPlan,
+    updateValidationUI,
     selectJob,
     applyFilters,
     toggleSelect,
@@ -825,7 +1161,9 @@ window.distillation = (function () {
     convert,
     // exposed for tests
     _state: () => ({ job: STATE.job, summary: STATE.summary, records: STATE.records,
-                     jobs: STATE.jobs, filters: STATE.filters, selected: selectedIds() }),
+                     jobs: STATE.jobs, filters: STATE.filters, selected: selectedIds(),
+                     plan: STATE.plan, planWarnings: STATE.planWarnings,
+                     providerOptions: STATE.providerOptions }),
     _summaryCards: summaryCards,
     _recordRow: recordRow,
     _statusBadge: statusBadge,

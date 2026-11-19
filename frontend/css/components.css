@@ -1251,3 +1251,272 @@ button[aria-busy="true"]::after {
   .tab.is-pressed,
   .chip.is-pressed { transform: none; filter: brightness(0.9); }
 }
+
+/* ========================================
+   Shared card/stat grids and spec consoles
+
+   These classes were emitted by six page modules but never had base rules:
+   cards touched each other, "grids" collapsed into a single column, and
+   key/value lists rendered as an unstyled definition dump. The rules below
+   give them one spacing system without changing any existing component.
+   ======================================== */
+
+/* ---------- Card & stat grids ---------- */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.card-grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+/* ---------- Key/value lists ---------- */
+.kv-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.kv-list > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.kv-list > div:last-child { border-bottom: none; }
+
+.kv-list dt { color: var(--color-text-muted); flex-shrink: 0; }
+
+.kv-list dd {
+  margin: 0;
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Inspection console (Student Model Studio) ---------- */
+.spec-stat { min-width: 0; }
+
+.spec-stat-value {
+  font-size: clamp(1.05rem, 0.95rem + 0.6vw, 1.4rem);
+}
+
+.spec-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.spec-group {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  min-width: 0;
+}
+
+.spec-group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-body-medium);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.spec-group-title i { color: var(--color-accent); }
+
+.spec-list { display: grid; gap: 0; margin: 0; }
+
+.spec-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.spec-row:last-child { border-bottom: none; }
+
+.spec-row dt { color: var(--color-text-muted); flex-shrink: 0; }
+
+.spec-row dd {
+  margin: 0;
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.spec-na {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.spec-advanced { margin-top: var(--space-2); }
+
+.spec-advanced summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+}
+
+.param-table {
+  margin-top: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  max-height: 20rem;
+  overflow: auto;
+}
+
+.param-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.param-row:last-child { border-bottom: none; }
+.param-row .param-name { overflow-wrap: anywhere; min-width: 0; }
+.param-row .param-count { flex-shrink: 0; }
+
+/* ---------- Section-level form errors (Knowledge Distillation) ---------- */
+.form-section-errors {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-container, rgba(251, 191, 36, 0.08));
+  font-size: var(--text-body-small);
+}
+
+.form-section-errors ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+}
+
+.form-section-errors.hidden { display: none; }
+
+.kd-plan-summary {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.kd-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+
+.kd-summary-grid > div { min-width: 0; }
+
+.kd-summary-label {
+  display: block;
+  font-size: var(--text-label-small, 0.72rem);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-1);
+}
+
+.kd-summary-wide { grid-column: 1 / -1; }
+
+.plan-warning-list { margin-top: var(--space-3); }
+
+.chip.chip-warning {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.card-footer {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.card-footer.actions-row,
+.actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.card-header {
+  margin-bottom: var(--space-3);
+}
+
+.card-header h3 { margin: 0; }
+
+.permission-explanation { margin-bottom: var(--space-3); }
+
+/* ---------- Provider Management cards ---------- */
+.provider-card {
+  min-width: 0;
+}
+
+.provider-card > .card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.provider-head-copy { min-width: 0; }
+.provider-head-copy h3 { margin: 0; }
+
+.provider-type-line { overflow-wrap: anywhere; }
+.provider-endpoint,
+.provider-fingerprint,
+.provider-model-ref { overflow-wrap: anywhere; word-break: break-word; }
+
+.provider-card .chip-row { margin: var(--space-3) 0; }
+
+.model-card-list {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.model-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  min-width: 0;
+}
+
+.model-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
+.model-card-id { overflow-wrap: anywhere; word-break: break-word; }
+
+.model-card-specs { font-size: var(--text-body-small); }

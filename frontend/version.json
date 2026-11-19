@@ -1,7 +1,7 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-20.7",
+  "buildId": "2026-11-20.8",
   "sourceRef": "main",
   "navigation": "All application routes are in the hamburger sidebar; bottom navigation removed.",
   "notes": [
@@ -19,7 +19,10 @@
     "P2 security slice 1: Supabase tokens are never placed in WebSocket URLs; general, training and inference sockets share a first-frame auth handshake, and device/task/job ownership uses canonical UUID/text-safe helpers so another account cannot see or sweep rows.",
     "P2 charts slice 2: Dashboard, Statistics, Training and Intelligence now share numeric line charts with linear step axes, readable x/y ranges, min/max-preserving downsampling for long metric series, drag/ctrl-wheel zoom and an explicit Reset that also removes live listeners on dispose.",
     "P2 / Phase 2 inference: Chat and Prediction Lab offer an account-scoped model selector with per-user active-model persistence; after training, the backend loads the owner's private PyTorch checkpoint and tokenizer for real generation, tokenization, next-token logits and authenticated token streaming. Untrained models report unavailable instead of returning canned text.",
-    "P2 repository hygiene: docs and CI now distinguish implemented CPU training/checkpoint inference from unimplemented cloud gradient workers, enumerate all ten forward-only SQL migrations with a snapshot-based rollback playbook, commit the npm lockfile for reproducible installs, and run backend/frontend tests plus a baseline-aware test gate on every push."
+    "P2 repository hygiene: docs and CI now distinguish implemented CPU training/checkpoint inference from unimplemented cloud gradient workers, enumerate all ten forward-only SQL migrations with a snapshot-based rollback playbook, commit the npm lockfile for reproducible installs, and run backend/frontend tests plus a baseline-aware test gate on every push.",
+    "Training Center repair: the 't is not iterable' crash is fixed at its root cause (chart options were mutated through the Chart.js resolver Proxy); charts are optional and can never blank the page, async reads are generation-guarded so open/leave/reopen and stale responses cannot corrupt a fresh page, and a terminal WebSocket status can no longer be reverted by a stale in-flight REST read.",
+    "Teacher plan handoff: Use plan in Teacher Selection now transfers every selected teacher/evaluator provider and model ID, mode, generation settings, languages, subjects, difficulties and budget into Knowledge Distillation; unavailable providers are shown as blocking inline warnings instead of being silently discarded, section-level validation keeps Create Job disabled until dataset, teachers, mode rules and external-send consent are all satisfied, and the POST body carries the real IDs.",
+    "Student Model Studio shows the inspected model as an engineering console (overview cards plus identity/dimensions/parameters/tokenizer groups with a collapsible parameter breakdown); unmeasured values say 'Not reported' instead of being invented. Provider Management cards no longer overflow a phone: models are responsive cards, endpoints and fingerprints wrap, credentials stay masked, and all actions remain. Shared card-grid/stats-grid/kv-list spacing rules now exist, and in-card tables use bounded scroll regions."
   ],
   "howToVerify": "GET <frontend-url>/version.json \u2014 the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }

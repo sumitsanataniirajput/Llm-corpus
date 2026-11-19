@@ -955,11 +955,17 @@ window.CORPUS_API = (function () {
     }
   }
 
-  // Normalise dataset payloads: the API returns a bare array today, but keep
-  // this tolerant so callers never end up iterating over an object.
+  // Normalise list payloads: the API returns a bare array today, but keep this
+  // tolerant so callers never iterate over an object or a malformed envelope.
   function asDatasetList(data) {
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data.datasets)) return data.datasets;
+    if (Array.isArray(data)) return data.filter(item => item && typeof item === 'object');
+    if (!data || typeof data !== 'object') return [];
+    const keys = ['datasets', 'items', 'data', 'results'];
+    for (let index = 0; index < keys.length; index += 1) {
+      if (Array.isArray(data[keys[index]])) {
+        return data[keys[index]].filter(item => item && typeof item === 'object');
+      }
+    }
     return [];
   }
 
