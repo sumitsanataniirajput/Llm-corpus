@@ -1,5 +1,9 @@
 # Critical dataset upload & authentication repair — engineering report
 
+Historical engineering report. The branch/build tags below describe the state
+at the time of that investigation; current status is
+[STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md).
+
 Build: `2026-11-16.7` (frontend) · branch `arena/5959197e-llm-corpus` (base `fae0531`)
 Date: 2026-11-17 · Status: **implemented and tested, not committed/deployed — awaiting PHASE H approval**
 

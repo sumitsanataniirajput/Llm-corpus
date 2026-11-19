@@ -30,7 +30,12 @@ window.prediction = (function () {
       return;
     }
 
+    await state.ensureModels();
     const activeModel = state.getActiveModel();
+    const modelOptions = state.getModels().map((model) => {
+      const label = (model.name || model.id) + (model.status === 'trained' ? ' · trained' : ' · no checkpoint');
+      return `<option value="${esc(model.id)}" ${activeModel && activeModel.id === model.id ? 'selected' : ''}>${esc(label)}</option>`;
+    }).join('');
     container.innerHTML = `
       <div class="page-header">
         <div class="page-header-copy">
@@ -39,9 +44,14 @@ window.prediction = (function () {
           <p class="section-subtitle">See how the model ranks the next token for a sentence you provide.</p>
         </div>
         <div class="page-header-actions">
-          ${activeModel
-            ? `<span class="chat-model-chip"><i class="fas fa-cube"></i><span>${esc(activeModel.name || activeModel.id)}</span></span>`
-            : '<a class="btn btn-outline" href="#/models" onclick="event.preventDefault();router.navigate(\'models\')"><i class="fas fa-cube"></i> Select model</a>'}
+          <label class="chat-model-select-label" for="pred-model-select">Model</label>
+          <select id="pred-model-select" class="chat-model-select"
+                  inputmode="none" enterkeyhint="done" autocapitalize="off" spellcheck="false"
+                  aria-label="Select model for prediction" onchange="prediction.selectModel(this.value)">
+            <option value="" ${activeModel ? '' : 'selected'}>No model selected</option>
+            ${modelOptions}
+          </select>
+          <a class="btn btn-outline" href="#/models" onclick="event.preventDefault();router.navigate('models')"><i class="fas fa-cube"></i> Models</a>
         </div>
       </div>
 
@@ -49,7 +59,9 @@ window.prediction = (function () {
         <section class="prediction-input">
           <div class="input-field">
             <label for="pred-text">Test sentence</label>
-            <textarea id="pred-text" rows="3" placeholder="Enter a sentence to predict the next token…">${activeModel ? '' : ''}</textarea>
+            <textarea id="pred-text" rows="3" inputmode="text" enterkeyhint="enter"
+                      autocapitalize="sentences" spellcheck="true" autocomplete="off"
+                      placeholder="Enter a sentence to predict the next token…"></textarea>
             <span class="field-hint">The model continues from this text; nothing is sent anywhere except your backend.</span>
           </div>
           <div class="input-field">
@@ -62,7 +74,7 @@ window.prediction = (function () {
               <i class="fas fa-microscope"></i> Predict next token
             </button>
           </div>
-          ${activeModel ? '' : '<p class="field-hint">Select a model to enable prediction.</p>'}
+          <p id="pred-no-model" class="field-hint${activeModel ? ' hidden' : ''}">Select a trained model to enable prediction.</p>
         </section>
 
         <div class="prediction-results" id="pred-results"></div>
@@ -104,6 +116,17 @@ window.prediction = (function () {
         if (label) label.textContent = Number(event.target.value).toFixed(1);
       });
     }
+  }
+
+  function selectModel(modelId) {
+    const model = modelId ? state.getModel(modelId) : null;
+    state.setActiveModel(model || null);
+    const selector = document.getElementById('pred-model-select');
+    if (selector) selector.value = model ? model.id : '';
+    const hint = document.getElementById('pred-no-model');
+    if (hint) hint.classList.toggle('hidden', !!model);
+    const button = document.getElementById('pred-run');
+    if (button) button.disabled = !model;
   }
 
   async function runPrediction() {
@@ -183,8 +206,8 @@ window.prediction = (function () {
       if (container) {
         container.innerHTML = ui.emptyState({
           icon: 'fa-circle-question',
-          title: 'No predictions returned',
-          text: 'The backend responded without a next-token distribution. The model may not be trained yet.',
+          title: result.status === 'unavailable' ? 'Checkpoint unavailable' : 'No predictions returned',
+          text: result.message || 'The backend responded without a next-token distribution. The model may not be trained yet.',
           compact: true,
         });
       }
@@ -224,5 +247,5 @@ window.prediction = (function () {
     }
   }
 
-  return { render, runPrediction };
+  return { render, selectModel, runPrediction };
 })();

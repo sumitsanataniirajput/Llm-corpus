@@ -4,7 +4,9 @@ This document describes the navigation shell: one hamburger, one drawer, every
 page in a grouped menu, and the route registry that keeps the menu, the router,
 the bootstrap and the test suite from disagreeing.
 
-Branch: `arena/fcde7427-llm-corpus` · build `2026-11-20.1`
+Historical implementation notes. For the current build identity, read
+`frontend/version.json` and `GET /api/v1/version`; for current capability
+claims, read [STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md).
 
 ---
 

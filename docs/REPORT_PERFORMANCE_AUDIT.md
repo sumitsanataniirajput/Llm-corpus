@@ -1,5 +1,9 @@
 # CORPUS ULTIMATE — global UI lag and freezing: audit and repair
 
+Historical engineering report. The branch/build tags below describe the state
+at the time of that investigation; current status is
+[STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md).
+
 Build: `2026-11-16.8` · branch `arena/27ef2b6a-llm-corpus` (base `a6ce6d7` = `main`)
 Date: 2026-11-18 · **not merged, not deployed** (PHASE H gate)
 

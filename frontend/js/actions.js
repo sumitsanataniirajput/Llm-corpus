@@ -172,7 +172,14 @@ window.CORPUS_ACTIONS = (function () {
     if (pressBlockInstalled || typeof document === 'undefined') return;
     pressBlockInstalled = true;
     document.addEventListener('click', function (event) {
-      const target = event.target && event.target.closest ? event.target.closest('[data-busy="true"]') : null;
+      const origin = event.target;
+      // A busy control must never swallow a tap on an editable field. If a
+      // page ever marks a container busy, its inputs still have to accept
+      // focus and typing (Android opens the keyboard on the tap itself).
+      if (origin && origin.matches && origin.matches(
+        'input, textarea, select, [contenteditable="true"]'
+      )) return;
+      const target = origin && origin.closest ? origin.closest('[data-busy="true"]') : null;
       if (!target) return;
       event.preventDefault();
       event.stopPropagation();
@@ -208,6 +215,7 @@ window.CORPUS_ACTIONS = (function () {
         result: op.result,
         error: op.error,
         jobId: op.jobId,
+        key: op.key || null,
       }));
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
     } catch (e) {
@@ -271,6 +279,7 @@ window.CORPUS_ACTIONS = (function () {
           '<strong>Recent operations</strong>' +
           '<div class="operation-panel-actions">' +
             '<button class="btn btn-ghost btn-sm" type="button" id="operation-clear">Clear finished</button>' +
+            '<button class="btn btn-ghost btn-sm" type="button" id="operation-clear-all">Clear all</button>' +
           '</div>' +
         '</div>' +
         '<div class="operation-list" id="operation-list"></div>' +
@@ -284,6 +293,23 @@ window.CORPUS_ACTIONS = (function () {
     });
     host.querySelector('#operation-clear').addEventListener('click', function () {
       clearFinished();
+    });
+    host.querySelector('#operation-clear-all').addEventListener('click', function () {
+      clearAll();
+    });
+    // One delegated listener survives every re-render of the operation list.
+    host.querySelector('#operation-list').addEventListener('click', function (event) {
+      const target = event.target;
+      if (!target || !target.closest) return;
+      const clearBtn = target.closest('[data-operation-clear]');
+      if (clearBtn) {
+        clearOperation(clearBtn.getAttribute('data-operation-clear'));
+        return;
+      }
+      const cancelBtn = target.closest('[data-operation-cancel]');
+      if (cancelBtn) {
+        cancelOperation(cancelBtn.getAttribute('data-operation-cancel'));
+      }
     });
     return host;
   }
@@ -360,6 +386,26 @@ window.CORPUS_ACTIONS = (function () {
         row.appendChild(tail);
       }
 
+      const rowActions = document.createElement('div');
+      rowActions.className = 'operation-row-actions';
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'btn btn-ghost btn-sm';
+      clear.setAttribute('data-operation-clear', op.id);
+      clear.setAttribute('aria-label', 'Clear ' + (op.name || 'operation'));
+      clear.textContent = 'Clear';
+      rowActions.appendChild(clear);
+      if (BUSY.has(op.state)) {
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-ghost btn-sm';
+        cancelBtn.setAttribute('data-operation-cancel', op.id);
+        cancelBtn.setAttribute('aria-label', 'Cancel ' + (op.name || 'operation'));
+        cancelBtn.textContent = 'Cancel';
+        rowActions.appendChild(cancelBtn);
+      }
+      row.appendChild(rowActions);
+
       list.appendChild(row);
     });
   }
@@ -379,6 +425,7 @@ window.CORPUS_ACTIONS = (function () {
         result: null,
         error: null,
         jobId: patch.jobId || null,
+        key: patch.key || null,
       };
       operationsById.set(op.id, op);
       operations.unshift(op);
@@ -387,7 +434,7 @@ window.CORPUS_ACTIONS = (function () {
         dropped.forEach(item => operationsById.delete(item.id));
       }
     }
-    ['name', 'state', 'progress', 'result', 'error', 'jobId', 'endedAt'].forEach(key => {
+    ['name', 'state', 'progress', 'result', 'error', 'jobId', 'endedAt', 'key'].forEach(key => {
       if (patch[key] !== undefined) op[key] = patch[key];
     });
     persistOperations();
@@ -406,6 +453,7 @@ window.CORPUS_ACTIONS = (function () {
       result: opts.result || null,
       error: null,
       jobId: opts.jobId || null,
+      key: opts.key || null,
     });
   }
 
@@ -462,6 +510,64 @@ window.CORPUS_ACTIONS = (function () {
     }
     persistOperations();
     renderOperations();
+  }
+
+  /** Remove exactly one operation. Active work is cancelled before removal. */
+  function clearOperation(id) {
+    const op = operationsById.get(id);
+    if (!op) return false;
+    if (BUSY.has(op.state) && op.key) {
+      try { cancel(op.key, 'cleared from operations'); } catch (e) { /* no controller */ }
+    }
+    operationsById.delete(id);
+    const index = operations.findIndex(item => item.id === id);
+    if (index !== -1) operations.splice(index, 1);
+    persistOperations();
+    renderOperations();
+    return true;
+  }
+
+  /** Cancel a running operation from its row, leaving the cancelled record. */
+  function cancelOperation(id) {
+    const op = operationsById.get(id);
+    if (!op || !BUSY.has(op.state)) return false;
+    if (op.key) {
+      try { cancel(op.key, 'cancelled from operations'); } catch (e) { /* no controller */ }
+    }
+    finishOperation(id, STATES.CANCELLED, {
+      result: 'Cancelled from the Operations panel.',
+      notify: false,
+    });
+    return true;
+  }
+
+  /** Clear the whole list, but only after an explicit confirmation. */
+  function clearAll() {
+    if (!operations.length) return false;
+    const removeEverything = function () {
+      Array.from(operationsById.values()).forEach(op => {
+        if (BUSY.has(op.state) && op.key) {
+          try { cancel(op.key, 'clear all'); } catch (e) { /* no controller */ }
+        }
+      });
+      operationsById.clear();
+      operations.length = 0;
+      persistOperations();
+      renderOperations();
+    };
+    const canConfirm = typeof window !== 'undefined' && window.ui &&
+      typeof window.ui.confirm === 'function' && typeof document !== 'undefined' &&
+      document.getElementById('confirm-dialog');
+    if (canConfirm) {
+      window.ui.confirm(
+        'Clear all operations',
+        'Remove every operation from this list? Active work will be cancelled.',
+        removeEverything
+      );
+    } else {
+      removeEverything();
+    }
+    return true;
   }
 
   function getOperation(id) {
@@ -546,6 +652,7 @@ window.CORPUS_ACTIONS = (function () {
         name: name,
         state: STATES.PROCESSING,
         jobId: options.jobId || null,
+        key: key || null,
       });
     }
 
@@ -861,6 +968,9 @@ window.CORPUS_ACTIONS = (function () {
     getOperation: getOperation,
     operations: listOperations,
     clearFinished: clearFinished,
+    clearOperation: clearOperation,
+    cancelOperation: cancelOperation,
+    clearAll: clearAll,
     renderOperations: renderOperations,
     syncJob: syncJob,
     isJobTracked: isJobTracked,

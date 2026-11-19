@@ -249,6 +249,268 @@ window.ui = Object.assign(window.ui || {}, (function () {
     return !!(element && inFlight.has(element));
   }
 
+  /* ------------------------------------------------------------------------
+     Form-state preservation across full-page re-renders
+
+     Several pages replace their whole container with `innerHTML = ...` while
+     the user is typing: the Knowledge Distillation poller (every 5s), the
+     Dataset Quality Review filters, provider save/retry, and auth session
+     events (SIGNED_IN after an Android file-picker round trip or a token
+     refresh). Replacing a focused <input> destroys its value, caret, text
+     selection and — on Android — dismisses the soft keyboard. That is the
+     "I cannot type into this field" bug, and it is not caused by an overlay.
+
+     The guard below snapshots editable state immediately before ANY innerHTML
+     write to the page container and restores it afterwards. It is installed
+     once on that single element, so every page and every future page is
+     covered without each module having to remember to opt in.
+
+     Values live only in a local variable for the duration of one repaint:
+     never in localStorage, never in a URL, never in a log. Password fields
+     keep their `type="password"` masking at all times. When the form identity
+     changes (i.e. the user navigated to a different page) nothing is restored,
+     so a value can never leak from one page into another.
+     ------------------------------------------------------------------------ */
+
+  const FORM_FIELD_SELECTOR = 'input, textarea, select';
+  // File inputs cannot be reassigned; buttons/hidden fields carry no typed text.
+  const FORM_SKIP_TYPES = new Set([
+    'file', 'hidden', 'submit', 'button', 'reset', 'image', 'color',
+  ]);
+  const FORM_TEXT_TYPES = new Set([
+    '', 'text', 'password', 'search', 'email', 'url', 'tel', 'number',
+    'date', 'time', 'datetime-local', 'month', 'week',
+  ]);
+
+  // Reads an attribute from either a DOM element or a captured entry object.
+  function _formAttr(el, name) {
+    if (el && typeof el.getAttribute === 'function') return el.getAttribute(name) || '';
+    if (!el) return '';
+    if (name === 'aria-label') return el.ariaLabel || '';
+    return el[name] || '';
+  }
+
+  // The signature must identify the exact form, not merely the number of
+  // inputs. Including the route means a value can never be carried from one
+  // page into a different page that happens to use the same field names.
+  function _formStateSignature(root, fields) {
+    const view = root.ownerDocument && root.ownerDocument.defaultView;
+    const route = (view && view.location && view.location.hash) || '';
+    return String(route) + '|' + fields.map(function (el) {
+      return [
+        el.id || _formAttr(el, 'id'),
+        _formAttr(el, 'name'),
+        el.tagName || el.tag || '',
+        String(el.type || _formAttr(el, 'type') || '').toLowerCase(),
+        _formAttr(el, 'placeholder'),
+        _formAttr(el, 'aria-label'),
+      ].join(':');
+    }).join('|');
+  }
+
+  function captureFormState(root) {
+    if (!root || !root.querySelectorAll) return null;
+    const ownerDocument = root.ownerDocument || document;
+    const activeElement = ownerDocument.activeElement || null;
+    const fields = Array.prototype.slice.call(root.querySelectorAll(FORM_FIELD_SELECTOR))
+      .map(function (el, index) {
+        const type = String(el.type || '').toLowerCase();
+        const entry = {
+          index: index,
+          id: el.id || '',
+          name: el.getAttribute('name') || '',
+          tag: el.tagName,
+          type: type,
+          placeholder: el.getAttribute('placeholder') || '',
+          ariaLabel: el.getAttribute('aria-label') || '',
+          skip: FORM_SKIP_TYPES.has(type),
+          value: null,
+          checked: !!el.checked,
+          selectionStart: null,
+          selectionEnd: null,
+          scrollTop: el.scrollTop || 0,
+          scrollLeft: el.scrollLeft || 0,
+          focused: el === activeElement,
+        };
+        if (!entry.skip) {
+          entry.value = el.value;
+          if (el.tagName === 'TEXTAREA' || FORM_TEXT_TYPES.has(type)) {
+            try {
+              entry.selectionStart = el.selectionStart;
+              entry.selectionEnd = el.selectionEnd;
+            } catch (e) { /* search/email inputs do not expose selection */ }
+          }
+        }
+        return entry;
+      });
+    return {
+      fields: fields,
+      signature: _formStateSignature(root, fields),
+      focusWasInRoot: !!(activeElement && root.contains(activeElement)),
+    };
+  }
+
+  function restoreFormState(root, snapshot) {
+    if (!root || !snapshot || !snapshot.fields.length) return false;
+    const fresh = Array.prototype.slice.call(root.querySelectorAll(FORM_FIELD_SELECTOR));
+    // A different set of fields means a different page/form. Never carry typed
+    // values (especially credentials) across a navigation.
+    const signature = _formStateSignature(root, fresh);
+    if (signature !== snapshot.signature) return false;
+
+    const ownerDocument = root.ownerDocument || document;
+    const EventCtor = (ownerDocument.defaultView && ownerDocument.defaultView.Event) || window.Event;
+    root.__corpusRestoring = true;
+    try {
+      snapshot.fields.forEach(function (entry) {
+        let el = fresh[entry.index];
+        if (el && entry.id && el.id !== entry.id) el = null;
+        if (!el && entry.id) el = fresh.find(function (c) { return c.id === entry.id; });
+        if (!el && entry.name) {
+          el = fresh.find(function (c) {
+            return c.getAttribute('name') === entry.name && c.tagName === entry.tag;
+          });
+        }
+        if (!el || el.tagName !== entry.tag) return;
+
+        // Checkbox/radio state must survive too (e.g. the distillation consent).
+        if (entry.type === 'checkbox' || entry.type === 'radio') {
+          if (el.checked !== entry.checked) el.checked = entry.checked;
+        } else if (!entry.skip && entry.value != null && el.value !== entry.value) {
+          el.value = entry.value;
+          // Let the page recompute derived UI (auto-grow, send-button state,
+          // slider readouts) without bubbling into delegated page handlers.
+          try { el.dispatchEvent(new EventCtor('input', { bubbles: false })); } catch (e) {}
+        }
+        if (entry.focused) {
+          try { el.focus({ preventScroll: true }); } catch (e) { try { el.focus(); } catch (e2) {} }
+          if (entry.selectionStart != null && typeof el.setSelectionRange === 'function') {
+            try { el.setSelectionRange(entry.selectionStart, entry.selectionEnd); } catch (e) {}
+          }
+          el.scrollTop = entry.scrollTop;
+          el.scrollLeft = entry.scrollLeft;
+        }
+      });
+    } finally {
+      root.__corpusRestoring = false;
+    }
+    return snapshot.focusWasInRoot;
+  }
+
+  /** Explicit wrapper for renders that are known to happen while typing. */
+  async function repaintPreservingForms(root, repaint) {
+    const snapshot = captureFormState(root);
+    try {
+      return await repaint();
+    } finally {
+      restoreFormState(root, snapshot);
+    }
+  }
+
+  function _innerHTMLDescriptor(node) {
+    let proto = Object.getPrototypeOf(node);
+    while (proto) {
+      const descriptor = Object.getOwnPropertyDescriptor(proto, 'innerHTML');
+      if (descriptor && typeof descriptor.get === 'function' && typeof descriptor.set === 'function') {
+        return descriptor;
+      }
+      proto = Object.getPrototypeOf(proto);
+    }
+    return null;
+  }
+
+  /* Every page has hand-written forms, so fill in the Android keyboard hints
+     once per render instead of trying to remember them in 15 modules. Existing
+     explicit attributes (login `current-password`, Chat `enterkeyhint=send`,
+     password `autocomplete=new-password`, …) are always left untouched. */
+  function applyMobileInputHints(root) {
+    if (!root || !root.querySelectorAll) return 0;
+    let changed = 0;
+    root.querySelectorAll('input, textarea').forEach(function (el) {
+      const type = String(el.type || '').toLowerCase();
+      if (FORM_SKIP_TYPES.has(type) ||
+          ['checkbox', 'radio', 'range', 'file'].indexOf(type) !== -1) return;
+      if (!el.hasAttribute('inputmode')) {
+        let mode = 'text';
+        if (type === 'number') {
+          mode = String(el.getAttribute('step') || '').indexOf('.') !== -1 ? 'decimal' : 'numeric';
+        } else if (type === 'email') mode = 'email';
+        else if (type === 'url') mode = 'url';
+        else if (type === 'tel') mode = 'tel';
+        else if (type === 'search') mode = 'search';
+        else if (type === 'password') mode = 'text';
+        el.setAttribute('inputmode', mode);
+        changed += 1;
+      }
+      if (!el.hasAttribute('enterkeyhint')) {
+        el.setAttribute('enterkeyhint',
+          el.tagName === 'TEXTAREA' ? 'enter' : (type === 'search' ? 'search' : 'done'));
+        changed += 1;
+      }
+      if (!el.hasAttribute('autocapitalize')) {
+        const cap = el.tagName === 'TEXTAREA' ? 'sentences'
+          : (['password', 'email', 'url', 'search'].indexOf(type) !== -1 ? 'off' : 'words');
+        el.setAttribute('autocapitalize', cap);
+        changed += 1;
+      }
+      if (!el.hasAttribute('spellcheck')) {
+        el.setAttribute('spellcheck',
+          ['password', 'email', 'url', 'number', 'search'].indexOf(type) !== -1 ? 'false' : 'true');
+        changed += 1;
+      }
+    });
+    return changed;
+  }
+
+  /** Install the shared guard on one container. Safe to call repeatedly. */
+  function installFormStateGuard(root) {
+    if (!root || root.__corpusFormStateGuard) return false;
+    const descriptor = _innerHTMLDescriptor(root);
+    if (!descriptor) return false;
+    Object.defineProperty(root, 'innerHTML', {
+      configurable: true,
+      enumerable: true,
+      get: function () { return descriptor.get.call(this); },
+      set: function (markup) {
+        // A restore-triggered repaint must not recurse into another capture.
+        if (this.__corpusRestoring) {
+          descriptor.set.call(this, markup);
+          return;
+        }
+        const snapshot = captureFormState(this);
+        descriptor.set.call(this, markup);
+        restoreFormState(this, snapshot);
+        applyMobileInputHints(this);
+      },
+    });
+    root.__corpusFormStateGuard = true;
+
+    // Nested sections (`#kd-progress`, provider form slots, dynamic rows) are
+    // replaced without touching the root's innerHTML setter. A childList
+    // observer decorates those fields too. Setting attributes does not add or
+    // remove nodes, so this cannot recurse.
+    try {
+      const view = root.ownerDocument && root.ownerDocument.defaultView;
+      const Observer = (view && view.MutationObserver) || window.MutationObserver;
+      if (Observer) {
+        const observer = new Observer(function () { applyMobileInputHints(root); });
+        observer.observe(root, { childList: true, subtree: true });
+        root.__corpusMobileHintObserver = observer;
+      }
+    } catch (e) { /* MutationObserver is optional */ }
+    applyMobileInputHints(root);
+    return true;
+  }
+
+  // The page container exists by the time deferred scripts execute. Installing
+  // here (as well as from the bootstrap, which is idempotent) means every page
+  // — including pages loaded before bootstrap finishes — is protected.
+  try {
+    if (typeof document !== 'undefined' && document.getElementById) {
+      installFormStateGuard(document.getElementById('page-container'));
+    }
+  } catch (e) { /* no DOM (source-only test sandbox) */ }
+
   // Set loading overlay
   function setLoading(loading) {
     document.body.classList.toggle('loading', loading);
@@ -337,18 +599,44 @@ window.ui = Object.assign(window.ui || {}, (function () {
       ok = false;
     }
     if (!ok) {
+      // The execCommand fallback creates a temporary textarea. Calling
+      // select() on it steals focus — on Android that closes the soft keyboard
+      // and drops the caret in the field the user was editing. Remember the
+      // focused control (and its selection) and put it back, and make sure the
+      // helper element can never intercept a tap.
+      const previous = document.activeElement;
+      let previousStart = null;
+      let previousEnd = null;
+      if (previous && typeof previous.setSelectionRange === 'function') {
+        try {
+          previousStart = previous.selectionStart;
+          previousEnd = previous.selectionEnd;
+        } catch (e) { /* not a text field */ }
+      }
+      let area = null;
       try {
-        const area = document.createElement('textarea');
+        area = document.createElement('textarea');
         area.value = value;
         area.setAttribute('readonly', '');
+        area.setAttribute('aria-hidden', 'true');
         area.style.position = 'fixed';
         area.style.opacity = '0';
+        area.style.pointerEvents = 'none';
+        area.style.width = '1px';
+        area.style.height = '1px';
         document.body.appendChild(area);
         area.select();
         ok = document.execCommand ? document.execCommand('copy') : false;
-        document.body.removeChild(area);
       } catch (e) {
         ok = false;
+      } finally {
+        if (area && area.parentNode) area.parentNode.removeChild(area);
+        if (previous && typeof previous.focus === 'function' && previous.isConnected !== false) {
+          try { previous.focus({ preventScroll: true }); } catch (e) { try { previous.focus(); } catch (e2) {} }
+          if (previousStart != null && typeof previous.setSelectionRange === 'function') {
+            try { previous.setSelectionRange(previousStart, previousEnd); } catch (e) {}
+          }
+        }
       }
     }
     if (btn) {
@@ -435,6 +723,11 @@ window.ui = Object.assign(window.ui || {}, (function () {
     delegate,
     guard,
     isBusy,
+    captureFormState,
+    restoreFormState,
+    repaintPreservingForms,
+    installFormStateGuard,
+    applyMobileInputHints,
     installPressFeedback,
     confirm,
     escapeHtml,

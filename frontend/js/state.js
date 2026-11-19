@@ -19,6 +19,7 @@ window.state = (function () {
   let apiKeys = [];
   let settings = {};
   let connectionStatus = 'disconnected';
+  const ACTIVE_MODEL_KEY = 'corpus:active-model:v1';
 
   // Authentication initialization state
   let authReady = false;        // Set to true once initial Supabase session restore completes
@@ -28,6 +29,28 @@ window.state = (function () {
   // User state (Supabase Auth is the source of truth)
   // ========================================
 
+  function activeModelStorageKey() {
+    const id = user && (user.id || user.email);
+    return ACTIVE_MODEL_KEY + ':' + (id || 'anonymous');
+  }
+
+  function readStoredActiveModelId() {
+    try {
+      return localStorage.getItem(activeModelStorageKey());
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function restoreActiveModel() {
+    // Only overwrite the in-memory selection when a persisted id resolves to a
+    // loaded model. An empty fetch must not clear a model the user just picked.
+    const id = readStoredActiveModelId();
+    if (!id) return;
+    const found = getModel(id);
+    if (found) activeModel = found;
+  }
+
   function setUser(u) {
     user = u;
     if (u) {
@@ -35,7 +58,9 @@ window.state = (function () {
       try {
         localStorage.setItem('corpus_user', JSON.stringify(u));
       } catch (e) {}
+      restoreActiveModel();
     } else {
+      activeModel = null;
       try {
         localStorage.removeItem('corpus_user');
       } catch (e) {}
@@ -48,8 +73,10 @@ window.state = (function () {
 
   function clearUser() {
     user = null;
+    activeModel = null;
     try {
       localStorage.removeItem('corpus_user');
+      localStorage.removeItem(activeModelStorageKey());
     } catch (e) {}
   }
 
@@ -118,21 +145,51 @@ window.state = (function () {
   // Models
   // ========================================
 
-  function setModels(list) { models = list || []; }
+  function setModels(list) {
+    models = list || [];
+    restoreActiveModel();
+  }
   function getModels() { return models; }
   function addModel(m) { models.push(m); }
   function updateModel(id, changes) {
     const idx = models.findIndex(m => m.id === id);
     if (idx >= 0) models[idx] = { ...models[idx], ...changes };
+    if (activeModel && activeModel.id === id && idx >= 0) activeModel = models[idx];
   }
   function removeModel(id) {
     models = models.filter(m => m.id !== id);
+    if (activeModel && activeModel.id === id) setActiveModel(null);
   }
   function getModel(id) {
     return models.find(m => m.id === id) || null;
   }
-  function setActiveModel(m) { activeModel = m; }
+  function setActiveModel(m) {
+    activeModel = m || null;
+    try {
+      if (activeModel && activeModel.id) {
+        localStorage.setItem(activeModelStorageKey(), activeModel.id);
+      } else {
+        localStorage.removeItem(activeModelStorageKey());
+      }
+    } catch (e) { /* private mode / quota */ }
+  }
   function getActiveModel() { return activeModel; }
+
+  /** Load the account's models once so Chat/Prediction Lab can offer a selector. */
+  async function ensureModels() {
+    if (models.length || !window.CORPUS_API || typeof window.CORPUS_API.listModels !== 'function') {
+      return models;
+    }
+    try {
+      const token = await getAccessToken();
+      const result = await window.CORPUS_API.listModels(token);
+      const list = Array.isArray(result) ? result : (result && result.models) || [];
+      setModels(list);
+    } catch (e) {
+      // A failed list must not blank the UI or the user's current selection.
+    }
+    return models;
+  }
 
   // ========================================
   // Datasets
@@ -229,7 +286,7 @@ window.state = (function () {
     setAuthReady, isAuthReady, setAuthInitializing, isAuthInitializing, isAuthLoading,
     setRoute, getRoute,
     setModels, getModels, addModel, updateModel, removeModel, getModel,
-    setActiveModel, getActiveModel,
+    setActiveModel, getActiveModel, ensureModels,
     setDatasets, getDatasets, addDataset, removeDataset, getDataset,
     setPendingDatasetId, getPendingDatasetId, clearPendingDatasetId,
     setTrainingJobs, getTrainingJobs, addTrainingJob, updateTrainingJob,

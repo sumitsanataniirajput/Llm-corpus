@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.dependencies import require_user, get_db_session
-from app.core.models import EvaluationRun
+from app.core.models import EvaluationRun, Model
 
 router = APIRouter()
 
@@ -25,6 +25,7 @@ class EvalOut(BaseModel):
     model_id: Optional[str]
     score: Optional[float]
     status: str
+    message: Optional[str] = None
     created_at: str
 
     class Config:
@@ -57,22 +58,48 @@ async def list_evaluations(user=Depends(require_user), db: AsyncSession = Depend
 
 @router.post("/run", response_model=EvalOut, tags=["evaluation"])
 async def run_evaluation(config: EvalConfig, user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
-    eval_id = "eval_" + uuid.uuid4().hex[:12]
+    """Record an evaluation request WITHOUT inventing a score or completion.
+
+    Real scoring needs a trained checkpoint and the inference engine (P0 #1).
+    Until that workflow exists, the honest response is `unavailable` with no
+    score. We still verify the model belongs to the caller so a user cannot
+    create evaluation rows pointing at somebody else's model.
+    """
     owner_id = uuid.UUID(user["user_id"])
+    model_result = await db.execute(
+        select(Model).where(Model.id == config.model_id, Model.owner_id == owner_id)
+    )
+    if model_result.scalar_one_or_none() is None:
+        # Hide existence: a model owned by another account is simply "not found".
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    eval_id = "eval_" + uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc)
+    message = (
+        "Evaluation is not available yet: real scoring requires a trained "
+        "checkpoint and the inference engine. No score was computed."
+    )
     ev = EvaluationRun(
         id=eval_id,
         owner_id=owner_id,
         model_id=config.model_id,
         test_type=config.test_type,
-        score=0.0,
-        status="completed",
+        score=None,
+        status="unavailable",
         created_at=now,
     )
     db.add(ev)
     await db.commit()
     await db.refresh(ev)
-    return _eval_to_out(ev)
+    return EvalOut(
+        id=ev.id,
+        owner_id=str(ev.owner_id),
+        model_id=ev.model_id,
+        score=ev.score,
+        status=ev.status,
+        message=message,
+        created_at=ev.created_at.isoformat(),
+    )
 
 
 @router.get("/{eval_id}", response_model=EvalOut, tags=["evaluation"])

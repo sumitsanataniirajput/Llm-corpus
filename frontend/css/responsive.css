@@ -76,6 +76,32 @@
 
   .upload-form-grid { grid-template-columns: minmax(0, 1fr); }
 
+  /* Phase 1: one full-width field per row on phones. Side-by-side bare-label
+     inputs were squeezed to ~120px on a 360x800 viewport, which is where the
+     "I cannot type here" reports came from. Nothing is hidden by this. */
+  .form-grid,
+  .card-grid.two { grid-template-columns: minmax(0, 1fr); }
+  .inline-form > label,
+  .filter-row > label,
+  .filter-row > input,
+  .filter-row > select,
+  .filter-row > textarea {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .inline-form > .btn,
+  .filter-row > .btn { flex: 1 1 100%; }
+
+  label > input,
+  label > select,
+  label > textarea,
+  .inline-form input,
+  .inline-form select,
+  .inline-form textarea,
+  .filter-row input,
+  .filter-row select,
+  .filter-row textarea { font-size: 16px; } /* iOS/Android must not zoom the viewport on focus */
+
   .drop-zone { padding: var(--space-5) var(--space-3); min-height: 9rem; }
   .drop-zone .drop-zone-cta { min-height: 2.75rem; width: 100%; max-width: 16rem; }
   .drop-zone input.drop-zone-input {
@@ -173,6 +199,10 @@
   .chat-container { height: calc(100dvh - 170px); }
 
   .chart-container { height: 190px; }
+  .corpus-chart-toolbar { gap: var(--space-1); padding-inline: var(--space-1); font-size: 0.68rem; }
+  .corpus-chart-points { display: none; }
+  .corpus-chart-range { flex-basis: 105px; }
+  .corpus-chart-actions button { min-width: 40px; padding-inline: 0; }
 }
 
 /* ---------- Wide desktop refinements ---------- */

@@ -93,8 +93,10 @@ The UI never prints a statistic it did not receive:
 - `ai-information` describes model capabilities as reported by the API and lists
   what it cannot report (trainable/non-trainable parameter split, benchmark
   scores, accuracy) as unknown.
-- Chat performs real inference through `/api/v1/inference/{model_id}` and shows
-  the backend error when it fails — the old placeholder reply is gone.
+- Chat performs checkpoint-backed inference through
+  `/api/v1/inference/{model_id}` after a successful training job, and shows the
+  backend's explicit `unavailable` message for an untrained model — the old
+  placeholder reply is gone.
 - Settings only shows API keys the backend returns; when the endpoint is absent
   it says "This backend does not expose API keys yet."
 
@@ -205,5 +207,11 @@ expected API calls.
   explanation.
 - PDF extraction reads the text layer only; scanned documents need OCR, which is
   not included.
-- `/api/v1/inference/{id}` quality depends on the trained checkpoint — a model
-  with little training returns poor text, and the UI does not mask that.
+- `/api/v1/inference/{id}` loads the real PyTorch checkpoint and tokenizer and
+  samples from its logits — a model with little training returns poor text, and
+  the UI does not mask that. Untrained models report `status="unavailable"`
+  instead of fabricating a response.
+- Charts use numeric linear step axes, min/max-preserving downsampling and a
+  zoom/reset toolbar; cross-realm jsdom assertions compare plain x/y objects.
+- Auth tokens are never placed in WebSocket URLs. The browser sends a first
+  `auth` frame; the backend closes unauthenticated sockets with code 1008.

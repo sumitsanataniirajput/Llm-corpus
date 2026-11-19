@@ -264,7 +264,7 @@ window.teachers = (function () {
     root.innerHTML = `
       ${header('ai-teachers')}
       ${credentialBanner()}
-      ${noticeBanner()}
+      <div id="teacher-notice-slot">${noticeBanner()}</div>
       ${STATE.error ? `<div class="alert alert-error"><i class="fas fa-circle-exclamation"></i><div>${esc(STATE.error)}</div></div>` : ''}
       <div class="stats-grid">
         ${statCard('Providers', STATE.providers.length, 'fa-plug')}
@@ -305,7 +305,7 @@ window.teachers = (function () {
     root.innerHTML = `
       ${header('provider-management')}
       ${credentialBanner()}
-      ${noticeBanner()}
+      <div id="teacher-notice-slot">${noticeBanner()}</div>
       ${STATE.error ? `<div class="alert alert-error"><i class="fas fa-circle-exclamation"></i><div>${esc(STATE.error)}</div></div>` : ''}
       <div id="provider-form-slot"></div>
       <div class="section-block">
@@ -320,11 +320,11 @@ window.teachers = (function () {
               <form class="inline-form" onsubmit="teachers.saveBudget(event, '${esc(provider.id)}')">
                 <label>Daily spend cap (USD)
                   <input type="number" min="0" step="0.01" name="max_spend_usd_per_day"
-                         value="${provider.budget && provider.budget.max_spend_usd_per_day != null ? provider.budget.max_spend_usd_per_day : ''}">
+                         value="${provider.budget && provider.budget.max_spend_usd_per_day != null ? provider.budget.max_spend_usd_per_day : ''}" inputmode="decimal" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                 </label>
                 <label>Daily request cap
                   <input type="number" min="0" step="1" name="max_requests_per_day"
-                         value="${provider.budget && provider.budget.max_requests_per_day != null ? provider.budget.max_requests_per_day : ''}">
+                         value="${provider.budget && provider.budget.max_requests_per_day != null ? provider.budget.max_requests_per_day : ''}" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                 </label>
                 <button class="btn btn-sm btn-primary" type="submit">Save limits</button>
               </form>
@@ -342,7 +342,9 @@ window.teachers = (function () {
             </select>
           </label>
           <label>New API key
-            <input type="password" name="api_key" autocomplete="off" required minlength="8" placeholder="new secret">
+            <input type="password" name="api_key" autocomplete="new-password" required minlength="8"
+                   inputmode="text" enterkeyhint="done" autocapitalize="off" spellcheck="false"
+                   placeholder="new secret">
           </label>
           <button class="btn btn-sm btn-outline" type="submit"><i class="fas fa-rotate"></i> Replace key</button>
         </form>` : ''}
@@ -369,18 +371,24 @@ window.teachers = (function () {
             </select>
           </label>
           <label>Display name
-            <input name="name" required maxlength="80" placeholder="e.g. OpenAI primary">
+            <input name="name" required maxlength="80" inputmode="text" enterkeyhint="next"
+                   autocomplete="off" autocapitalize="words" placeholder="e.g. OpenAI primary" spellcheck="true">
           </label>
           <label>API key
-            <input type="password" name="api_key" autocomplete="off" required minlength="8"
+            <input type="password" name="api_key" autocomplete="new-password" required minlength="8"
+                   inputmode="text" enterkeyhint="done" autocapitalize="off" spellcheck="false"
                    placeholder="stored encrypted, never shown again">
           </label>
           <label>Custom base URL
-            <input name="base_url" placeholder="https://api.example.com/v1" data-role="base-url">
+            <input name="base_url" type="url" inputmode="url" enterkeyhint="done"
+                   autocomplete="off" autocapitalize="off" spellcheck="false"
+                   placeholder="https://api.example.com/v1" data-role="base-url">
             <span class="field-help">Required for a custom OpenAI-compatible endpoint; optional otherwise.</span>
           </label>
           <label>Default teacher model ID
-            <input name="default_teacher_model" placeholder="discover after saving, or type an exact model ID">
+            <input name="default_teacher_model" inputmode="text" enterkeyhint="done"
+                   autocomplete="off" autocapitalize="off" spellcheck="false"
+                   placeholder="discover after saving, or type an exact model ID">
             <span class="field-help">Left empty, you can pick a model after discovery.</span>
           </label>
           <label class="checkbox-row">
@@ -438,9 +446,11 @@ window.teachers = (function () {
       await load();
       await renderProviderManagement();
     } catch (err) {
-      setNotice('error', (err && err.message) || 'Could not save the provider.');
-      await renderProviderManagement();
-      openAddForm();
+      // Do NOT re-render here. Rebuilding the page would replace the add-provider
+      // form and throw away everything the user just typed (including the other
+      // fields). Keep the form in place so they can correct and retry.
+      setNotice('error', ((err && err.message) || 'Could not save the provider.') +
+        ' Check the values below and try again; your entries are still here.');
     } finally {
       if (button) ui.setButtonLoading(button, false);
     }
@@ -596,6 +606,10 @@ window.teachers = (function () {
 
   function setNotice(kind, text) {
     STATE.notice = { kind, text };
+    // Update only the notice slot. A full re-render here would replace the
+    // provider form and discard the values the user has just typed.
+    const slot = document.getElementById('teacher-notice-slot');
+    if (slot) slot.innerHTML = noticeBanner();
     ui.toast(text, kind === 'error' ? 'error' : 'success');
   }
 

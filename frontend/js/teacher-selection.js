@@ -273,7 +273,7 @@ window.teacherSelection = (function () {
           <div class="card-header"><h3>Generation settings</h3></div>
           <div class="card-body form-grid">
             <label>Examples per run
-              <input id="ts-count" type="number" min="1" max="${Number(options.max_examples_per_run || 200)}" value="10">
+              <input id="ts-count" type="number" min="1" max="${Number(options.max_examples_per_run || 200)}" value="10" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
               <span class="field-help">Backend maximum: ${Number(options.max_examples_per_run || 200)} per run.</span>
             </label>
             <label>Task type
@@ -301,10 +301,10 @@ window.teacherSelection = (function () {
       <div class="card">
         <div class="card-header"><h3>Hard budget</h3></div>
         <div class="card-body form-grid">
-          <label>Max requests <input id="ts-max-requests" type="number" min="1" value="200"></label>
-          <label>Max tokens <input id="ts-max-tokens" type="number" min="1" value="400000"></label>
-          <label>Max spend (USD) <input id="ts-max-spend" type="number" min="0" step="0.01" value="5"></label>
-          <label>Max concurrency <input id="ts-concurrency" type="number" min="1" max="8" value="4"></label>
+          <label>Max requests <input id="ts-max-requests" type="number" min="1" value="200" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false"></label>
+          <label>Max tokens <input id="ts-max-tokens" type="number" min="1" value="400000" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false"></label>
+          <label>Max spend (USD) <input id="ts-max-spend" type="number" min="0" step="0.01" value="5" inputmode="decimal" enterkeyhint="done" autocapitalize="off" spellcheck="false"></label>
+          <label>Max concurrency <input id="ts-concurrency" type="number" min="1" max="8" value="4" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false"></label>
         </div>
         <div class="card-footer">
           <p class="field-help">The runner stops as soon as any limit is reached and records the reason on the job.</p>

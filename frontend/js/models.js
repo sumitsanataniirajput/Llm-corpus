@@ -72,7 +72,7 @@ window.models = (function () {
               <p>Name the model so you can recognise it in the training center.</p>
               <div class="input-field" id="m-name-field">
                 <label for="m-name">Model name <span aria-hidden="true">*</span></label>
-                <input type="text" id="m-name" placeholder="e.g. Wiki small — run 3" maxlength="80" required autocomplete="off">
+                <input type="text" id="m-name" placeholder="e.g. Wiki small — run 3" maxlength="80" required autocomplete="off" inputmode="text" enterkeyhint="done" autocapitalize="words" spellcheck="true">
                 <span class="field-hint">Shown in the model list and training history.</span>
               </div>
             </section>
@@ -83,32 +83,32 @@ window.models = (function () {
               <div class="form-grid">
                 <div class="input-field">
                   <label for="m-vocab">Vocabulary size</label>
-                  <input type="number" id="m-vocab" value="5000" min="100" step="1" required inputmode="numeric">
+                  <input type="number" id="m-vocab" value="5000" min="100" step="1" required inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Tokens the tokenizer can learn.</span>
                 </div>
                 <div class="input-field">
                   <label for="m-context">Context length</label>
-                  <input type="number" id="m-context" value="256" min="16" step="1" required inputmode="numeric">
+                  <input type="number" id="m-context" value="256" min="16" step="1" required inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Tokens per training sequence.</span>
                 </div>
                 <div class="input-field">
                   <label for="m-dmodel">Embedding dimension</label>
-                  <input type="number" id="m-dmodel" value="256" min="16" step="1" required inputmode="numeric">
+                  <input type="number" id="m-dmodel" value="256" min="16" step="1" required inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Model width (d_model).</span>
                 </div>
                 <div class="input-field">
                   <label for="m-layers">Transformer layers</label>
-                  <input type="number" id="m-layers" value="4" min="1" step="1" required inputmode="numeric">
+                  <input type="number" id="m-layers" value="4" min="1" step="1" required inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Number of decoder blocks.</span>
                 </div>
                 <div class="input-field">
                   <label for="m-heads">Attention heads</label>
-                  <input type="number" id="m-heads" value="4" min="1" step="1" required inputmode="numeric">
+                  <input type="number" id="m-heads" value="4" min="1" step="1" required inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Embedding dimension must divide evenly.</span>
                 </div>
                 <div class="input-field">
                   <label for="m-dff">Feed-forward dimension</label>
-                  <input type="number" id="m-dff" value="1024" min="32" step="1" required inputmode="numeric">
+                  <input type="number" id="m-dff" value="1024" min="32" step="1" required inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Hidden width of each block.</span>
                 </div>
               </div>
@@ -118,7 +118,7 @@ window.models = (function () {
                 <div class="accordion-body">
                   <div class="input-field">
                     <label for="m-dropout">Dropout</label>
-                    <input type="number" id="m-dropout" value="0.1" min="0" max="0.9" step="0.05" inputmode="decimal">
+                    <input type="number" id="m-dropout" value="0.1" min="0" max="0.9" step="0.05" inputmode="decimal" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                     <span class="field-hint">Regularisation applied during training (0–0.9).</span>
                   </div>
                 </div>

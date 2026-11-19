@@ -320,7 +320,7 @@ window.datasets = (function () {
         <div class="upload-form-grid">
           <div class="input-field">
             <label for="datasets-name">Dataset name</label>
-            <input type="text" id="datasets-name" placeholder="e.g. Wiki corpus" maxlength="120" autocomplete="off">
+            <input type="text" id="datasets-name" placeholder="e.g. Wiki corpus" maxlength="120" autocomplete="off" inputmode="text" enterkeyhint="done" autocapitalize="words" spellcheck="true">
             <span class="field-hint" id="datasets-name-hint">Required for a single file. Multiple files get their own record named after each file.</span>
           </div>
           <div class="input-field">
@@ -346,7 +346,7 @@ window.datasets = (function () {
         <div class="search-field">
           <i class="fas fa-search"></i>
           <input type="search" id="datasets-search" placeholder="Search datasets by name or file" autocomplete="off"
-                 oninput="datasets.setSearch(this.value)">
+                 oninput="datasets.setSearch(this.value)" inputmode="search" enterkeyhint="search" autocapitalize="off" spellcheck="false">
         </div>
         <span class="chip" id="datasets-count">—</span>
       </div>

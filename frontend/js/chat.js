@@ -16,6 +16,8 @@ window.chat = (function () {
   let currentId = null;
   let isGenerating = false;
   let abortController = null;
+  // Mutable so the model selector can update Send/Enter without a full repaint.
+  let activeModel = null;
 
   function esc(value) {
     return ui.escapeHtml(value == null ? '' : String(value));
@@ -82,8 +84,13 @@ window.chat = (function () {
     }
 
     loadSessions();
-    const activeModel = state.getActiveModel();
+    await state.ensureModels();
+    activeModel = state.getActiveModel();
     if (!currentId && sessions.length) currentId = sessions[0].id;
+    const modelOptions = state.getModels().map((model) => {
+      const label = (model.name || model.id) + (model.status === 'trained' ? ' · trained' : ' · no checkpoint');
+      return `<option value="${esc(model.id)}" ${activeModel && activeModel.id === model.id ? 'selected' : ''}>${esc(label)}</option>`;
+    }).join('');
 
     container.innerHTML = `
       <div class="page-header">
@@ -102,12 +109,10 @@ window.chat = (function () {
         </div>
       </div>
 
-      ${!activeModel ? `
-        <div class="info-panel" style="margin-bottom:var(--space-4);">
-          <i class="fas fa-circle-info"></i>
-          <div><strong>No model selected.</strong> Open <a href="#/models" onclick="event.preventDefault();router.navigate('models')">Models</a>, choose a trained model, then return here. Sending is disabled until a model is active.</div>
-        </div>
-      ` : ''}
+      <div id="chat-no-model" class="info-panel${activeModel ? ' hidden' : ''}" style="margin-bottom:var(--space-4);">
+        <i class="fas fa-circle-info"></i>
+        <div><strong>No model selected.</strong> Choose a model above, or open <a href="#/models" onclick="event.preventDefault();router.navigate('models')">Models</a> to train one. Sending is disabled until a model is active.</div>
+      </div>
 
       <div class="chat-container">
         <aside class="chat-sidebar" id="chat-sidebar" aria-label="Conversation history">
@@ -128,9 +133,16 @@ window.chat = (function () {
             <button class="icon-btn" type="button" onclick="chat.toggleSidebar()" aria-label="Show conversation history" style="margin-right:var(--space-1);">
               <i class="fas fa-bars"></i>
             </button>
-            ${activeModel
-              ? `<span class="chat-model-chip" title="${esc(activeModel.name || activeModel.id)}"><i class="fas fa-cube"></i><span>${esc(activeModel.name || 'Unnamed model')}</span></span>`
-              : '<span class="status-badge cancelled">No model selected</span>'}
+            <label class="chat-model-select-label" for="chat-model-select">Model</label>
+            <select id="chat-model-select" class="chat-model-select"
+                    inputmode="none" enterkeyhint="done" autocapitalize="off" spellcheck="false"
+                    aria-label="Select model for chat" onchange="chat.selectModel(this.value)">
+              <option value="" ${activeModel ? '' : 'selected'}>No model selected</option>
+              ${modelOptions}
+            </select>
+            <span id="chat-model-readiness" class="status-badge ${activeModel && activeModel.status === 'trained' ? 'completed' : 'cancelled'}">
+              ${activeModel ? esc(activeModel.status === 'trained' ? 'Checkpoint ready' : 'No checkpoint') : 'No model selected'}
+            </span>
             <span class="spacer"></span>
             <button class="btn btn-ghost btn-sm" type="button" onclick="chat.clearCurrent()" title="Delete this conversation">
               <i class="fas fa-trash"></i>
@@ -151,7 +163,7 @@ window.chat = (function () {
               </div>
               <div class="chat-setting-row">
                 <span class="chat-setting-label">Top-K</span>
-                <input type="number" id="chat-topk" value="50" min="1" step="1" inputmode="numeric">
+                <input type="number" id="chat-topk" value="50" min="1" step="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
               </div>
               <div class="chat-setting-row">
                 <span class="chat-setting-label">Top-P</span>
@@ -160,14 +172,18 @@ window.chat = (function () {
               </div>
               <div class="chat-setting-row">
                 <span class="chat-setting-label">Max tokens</span>
-                <input type="number" id="chat-maxtokens" value="100" min="1" step="1" inputmode="numeric">
+                <input type="number" id="chat-maxtokens" value="100" min="1" step="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
               </div>
             </div>
           </details>
 
           <div class="chat-input-area">
-            <textarea id="chat-input" class="chat-input" rows="1" placeholder="Message your model… (Enter to send, Shift+Enter for a new line)" ${activeModel ? '' : 'disabled'}></textarea>
-            <button class="chat-send" id="chat-send" type="button" onclick="chat.sendMessage()" disabled ${activeModel ? '' : 'title="Select a model first"'}>
+            <textarea id="chat-input" class="chat-input" rows="1" inputmode="text"
+                      enterkeyhint="send" autocapitalize="sentences" spellcheck="true"
+                      aria-label="Message your model"
+                      placeholder="Message your model… (Enter to send, Shift+Enter for a new line)"></textarea>
+            <button class="chat-send" id="chat-send" type="button" onclick="chat.sendMessage()" disabled
+                    ${activeModel ? '' : 'title="Select a model first"'}>
               <i class="fas fa-paper-plane"></i>
             </button>
           </div>
@@ -175,12 +191,32 @@ window.chat = (function () {
       </div>
     `;
 
-    wireComposer(activeModel);
+    wireComposer();
     renderConversationList();
     renderMessages();
   }
 
-  function wireComposer(activeModel) {
+  function selectModel(modelId) {
+    const model = modelId ? state.getModel(modelId) : null;
+    activeModel = model || null;
+    state.setActiveModel(activeModel);
+    const selector = document.getElementById('chat-model-select');
+    if (selector) selector.value = activeModel ? activeModel.id : '';
+    const readiness = document.getElementById('chat-model-readiness');
+    if (readiness) {
+      readiness.className = 'status-badge ' + (activeModel && activeModel.status === 'trained' ? 'completed' : 'cancelled');
+      readiness.textContent = activeModel
+        ? (activeModel.status === 'trained' ? 'Checkpoint ready' : 'No checkpoint')
+        : 'No model selected';
+    }
+    const warning = document.getElementById('chat-no-model');
+    if (warning) warning.classList.toggle('hidden', !!activeModel);
+    const input = document.getElementById('chat-input');
+    const send = document.getElementById('chat-send');
+    if (send) send.disabled = !activeModel || isGenerating || !(input && input.value.trim());
+  }
+
+  function wireComposer() {
     const temp = document.getElementById('chat-temp');
     const topp = document.getElementById('chat-topp');
     const input = document.getElementById('chat-input');
@@ -204,10 +240,16 @@ window.chat = (function () {
       if (send) send.disabled = !e.target.value.trim() || isGenerating || !activeModel;
     });
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
+      if (e.key !== 'Enter' || e.shiftKey) return;
+      // Indic and other Android IMEs emit Enter (isComposing / keyCode 229)
+      // while a candidate word is still being composed. Sending then would
+      // submit half a word, swallow the keystroke and drop the caret.
+      if (e.isComposing || e.keyCode === 229) return;
+      // With no usable model we let Enter insert a normal newline: the field
+      // stays editable, only Send is disabled (with an explanation).
+      if (!activeModel || isGenerating) return;
+      e.preventDefault();
+      sendMessage();
     });
     autoGrow();
   }
@@ -354,7 +396,9 @@ window.chat = (function () {
         ? '<i class="fas fa-circle-notch fa-spin"></i>'
         : '<i class="fas fa-paper-plane"></i>';
     }
-    if (input) input.disabled = sending;
+    // The composer is never disabled — not while a response is streaming and
+    // not when no model is selected. Only the Send action is gated.
+    if (input) input.disabled = false;
   }
 
   async function sendMessage() {
@@ -405,6 +449,9 @@ window.chat = (function () {
       };
       const token = await state.getAccessToken();
       const result = await window.CORPUS_API.infer(activeModel.id, payload, token);
+      if (result && result.status === 'unavailable') {
+        throw new Error(result.message || 'This model has no trained checkpoint yet.');
+      }
       const response = result && (result.response || result.text);
       if (!response || !String(response).trim()) {
         throw new Error('The backend returned an empty response. The model may not be trained yet.');
@@ -437,5 +484,5 @@ window.chat = (function () {
     }
   }
 
-  return { render, sendMessage, openConversation, startNew, toggleSidebar, insertPrompt, clearCurrent };
+  return { render, selectModel, sendMessage, openConversation, startNew, toggleSidebar, insertPrompt, clearCurrent };
 })();

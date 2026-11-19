@@ -4,7 +4,9 @@ This document describes the device-based training upgrade that extends (and does
 not replace) the existing training architecture. It records what is implemented,
 what is deliberately **not** implemented, and how to verify each part.
 
-Branch: `arena/f551c2c8-llm-corpus` · migrations `007`, `008` · build `2026-11-19.1`
+Historical implementation notes for migrations `007`/`008`. Current status:
+[STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md); current build identity:
+`frontend/version.json` and `GET /api/v1/version`.
 
 ---
 
@@ -266,5 +268,6 @@ Frontend (`npm test`, jsdom, real modules):
   worker process.
 * Deleting a job with `?hard=true` also removes its device-task rows (FK
   cascade); the UI only performs soft deletes.
-* Applying migrations `007`/`008` to the production Supabase project is **not**
-  done by this branch — it needs explicit approval (Phase H).
+* Applying any SQL migration to a production Supabase project is a separate,
+  explicitly approved operation; see
+  [MIGRATIONS_AND_ROLLBACK.md](MIGRATIONS_AND_ROLLBACK.md).

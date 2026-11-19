@@ -253,7 +253,7 @@ test('dataset preview renders real backend text', async () => {
   assert.equal(app.net.calls.some((c) => c.route === '/api/v1/datasets/ds_uploaded/preview'), true);
 });
 
-test('training progress socket carries the auth token and real event vocabulary', async () => {
+test('training progress socket authenticates in-band, not in the URL', async () => {
   const fx = datasetFixtures();
   const app = createApp(fx);
   await app.window.training.render();
@@ -263,7 +263,10 @@ test('training progress socket carries the auth token and real event vocabulary'
     onMetric() {},
   });
   assert.ok(socket, 'socket created');
-  assert.match(socket.url, /\/api\/v1\/training\/ws\/job_x\?token=test-token/);
+  assert.doesNotMatch(socket.url, /token=/);
+  assert.match(socket.url, /\/api\/v1\/training\/ws\/job_x$/);
+  socket.onopen();
+  assert.deepEqual(JSON.parse(socket.sent[0]), { type: 'auth', token: 'test-token' });
   assert.equal(app.WebSocketStub.opened.length >= 1, true);
 });
 

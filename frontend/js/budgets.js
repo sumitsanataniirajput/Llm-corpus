@@ -129,15 +129,15 @@ window.budgets = (function () {
             <form class="card-body form-grid" onsubmit="budgets.save(event, '${esc(provider.id)}')">
               <label>Daily spend cap (USD)
                 <input name="max_spend_usd_per_day" type="number" min="0" step="0.01"
-                  value="${provider.budget && provider.budget.max_spend_usd_per_day != null ? provider.budget.max_spend_usd_per_day : ''}">
+                  value="${provider.budget && provider.budget.max_spend_usd_per_day != null ? provider.budget.max_spend_usd_per_day : ''}" inputmode="decimal" enterkeyhint="done" autocapitalize="off" spellcheck="false">
               </label>
               <label>Daily request cap
                 <input name="max_requests_per_day" type="number" min="0" step="1"
-                  value="${provider.budget && provider.budget.max_requests_per_day != null ? provider.budget.max_requests_per_day : ''}">
+                  value="${provider.budget && provider.budget.max_requests_per_day != null ? provider.budget.max_requests_per_day : ''}" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
               </label>
               <label>Max concurrent requests
                 <input name="max_concurrent_requests" type="number" min="1" max="8"
-                  value="${provider.budget && provider.budget.max_concurrent_requests != null ? provider.budget.max_concurrent_requests : ''}">
+                  value="${provider.budget && provider.budget.max_concurrent_requests != null ? provider.budget.max_concurrent_requests : ''}" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
               </label>
               <button class="btn btn-sm btn-primary" type="submit"><i class="fas fa-shield-halved"></i> Save limits</button>
             </form></div>`).join('')}</div>` : '<p class="muted">Connect a provider first.</p>'}

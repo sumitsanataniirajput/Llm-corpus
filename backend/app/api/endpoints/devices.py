@@ -31,6 +31,12 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models import Model, TrainingDevice, TrainingDeviceTask, TrainingJob
+from app.core.ownership import (
+    normalize_owner_id,
+    owner_column_matches,
+    require_user_uuid,
+    same_owner,
+)
 from app.dependencies import get_db_session, require_user
 
 router = APIRouter()
@@ -170,7 +176,7 @@ def _job_summary(job: TrainingJob) -> Dict[str, Any]:
 async def _get_device(db: AsyncSession, device_id: str, owner_id: uuid.UUID) -> TrainingDevice:
     result = await db.execute(select(TrainingDevice).where(TrainingDevice.id == device_id))
     device = result.scalar_one_or_none()
-    if not device or device.owner_id != owner_id:
+    if not device or not same_owner(device.owner_id, owner_id):
         raise HTTPException(status_code=404, detail="Device not found for this account.")
     return device
 
@@ -178,7 +184,7 @@ async def _get_device(db: AsyncSession, device_id: str, owner_id: uuid.UUID) -> 
 async def _get_task(db: AsyncSession, device_id: str, task_id: str, owner_id: uuid.UUID) -> TrainingDeviceTask:
     result = await db.execute(select(TrainingDeviceTask).where(TrainingDeviceTask.id == task_id))
     task = result.scalar_one_or_none()
-    if not task or task.device_id != device_id or task.owner_id != owner_id:
+    if not task or task.device_id != device_id or not same_owner(task.owner_id, owner_id):
         raise HTTPException(status_code=404, detail="Task not found for this device.")
     return task
 
@@ -186,7 +192,7 @@ async def _get_task(db: AsyncSession, device_id: str, task_id: str, owner_id: uu
 async def _get_owned_job(db: AsyncSession, job_id: str, owner_id: uuid.UUID) -> TrainingJob:
     result = await db.execute(select(TrainingJob).where(TrainingJob.id == job_id))
     job = result.scalar_one_or_none()
-    if not job or job.owner_id != owner_id or job.deleted_at is not None:
+    if not job or not same_owner(job.owner_id, owner_id) or job.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Training job not found for this account.")
     return job
 
@@ -199,6 +205,7 @@ async def sweep_expired(db: AsyncSession, owner_id: uuid.UUID) -> Dict[str, int]
     same job or shard can be assigned again. Nothing is deleted — the history of
     what a device was doing stays intact.
     """
+    owner_key = normalize_owner_id(owner_id)
     now = _now()
     cutoff = now - timedelta(seconds=HEARTBEAT_TIMEOUT_SECONDS)
 
@@ -206,12 +213,12 @@ async def sweep_expired(db: AsyncSession, owner_id: uuid.UUID) -> Dict[str, int]
         text("""
             UPDATE public.training_devices
             SET status = 'offline', updated_at = now()
-            WHERE owner_id = :owner_id
+            WHERE lower(cast(owner_id as varchar)) = :owner_id
               AND status IN ('online', 'busy')
               AND (last_heartbeat IS NULL OR last_heartbeat < :cutoff)
             RETURNING id
         """),
-        {"owner_id": owner_id, "cutoff": cutoff},
+        {"owner_id": owner_key, "cutoff": cutoff},
     )
     offline_ids = [row[0] for row in stale_devices.fetchall()]
 
@@ -219,13 +226,13 @@ async def sweep_expired(db: AsyncSession, owner_id: uuid.UUID) -> Dict[str, int]
         text("""
             UPDATE public.training_device_tasks
             SET status = 'expired', lease_expires_at = NULL, updated_at = now()
-            WHERE owner_id = :owner_id
+            WHERE lower(cast(owner_id as varchar)) = :owner_id
               AND status IN ('assigned', 'running')
               AND ((lease_expires_at IS NOT NULL AND lease_expires_at < :now)
                    OR device_id = ANY(:offline_ids))
             RETURNING id
         """),
-        {"owner_id": owner_id, "now": now, "offline_ids": offline_ids},
+        {"owner_id": owner_key, "now": now, "offline_ids": offline_ids},
     )
     expired_ids = [row[0] for row in expired.fetchall()]
     if offline_ids or expired_ids:
@@ -267,7 +274,7 @@ async def register_device(
     db: AsyncSession = Depends(get_db_session),
 ):
     """Register this browser as a training device for the signed-in account."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     device = TrainingDevice(
         id="dev_" + uuid.uuid4().hex[:10],
         owner_id=owner_id,
@@ -290,17 +297,17 @@ async def register_device(
 @router.get("/", tags=["devices"])
 async def list_devices(user=Depends(require_user), db: AsyncSession = Depends(get_db_session)):
     """All devices for this account, with their current task and job."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     sweep = await sweep_expired(db, owner_id)
 
     devices = (await db.execute(
-        select(TrainingDevice).where(TrainingDevice.owner_id == owner_id)
+        select(TrainingDevice).where(owner_column_matches(TrainingDevice.owner_id, owner_id))
         .order_by(TrainingDevice.created_at.asc())
     )).scalars().all()
 
     tasks = (await db.execute(
         select(TrainingDeviceTask)
-        .where(TrainingDeviceTask.owner_id == owner_id, TrainingDeviceTask.status.in_(ACTIVE_TASK_STATUSES))
+        .where(owner_column_matches(TrainingDeviceTask.owner_id, owner_id), TrainingDeviceTask.status.in_(ACTIVE_TASK_STATUSES))
         .order_by(TrainingDeviceTask.created_at.desc())
     )).scalars().all()
     active_by_device = {}
@@ -310,7 +317,12 @@ async def list_devices(user=Depends(require_user), db: AsyncSession = Depends(ge
     job_ids = {t.job_id for t in active_by_device.values() if t.job_id}
     jobs = {}
     if job_ids:
-        for job in (await db.execute(select(TrainingJob).where(TrainingJob.id.in_(job_ids)))).scalars().all():
+        for job in (await db.execute(
+            select(TrainingJob).where(
+                TrainingJob.id.in_(job_ids),
+                owner_column_matches(TrainingJob.owner_id, owner_id),
+            )
+        )).scalars().all():
             jobs[job.id] = job
 
     return {
@@ -332,7 +344,7 @@ async def heartbeat(
     db: AsyncSession = Depends(get_db_session),
 ):
     """Keep the device alive; optionally report the state of its current task."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     device = await _get_device(db, device_id, owner_id)
 
     now = _now()
@@ -362,12 +374,18 @@ async def heartbeat(
     active = (await db.execute(
         select(TrainingDeviceTask).where(
             TrainingDeviceTask.device_id == device.id,
+            owner_column_matches(TrainingDeviceTask.owner_id, owner_id),
             TrainingDeviceTask.status.in_(ACTIVE_TASK_STATUSES),
         ).order_by(TrainingDeviceTask.created_at.desc())
     )).scalars().first()
     job = None
     if active and active.job_id:
-        job = (await db.execute(select(TrainingJob).where(TrainingJob.id == active.job_id))).scalar_one_or_none()
+        job = (await db.execute(
+            select(TrainingJob).where(
+                TrainingJob.id == active.job_id,
+                owner_column_matches(TrainingJob.owner_id, owner_id),
+            )
+        )).scalar_one_or_none()
     return _device_out(device, active, job)
 
 
@@ -379,7 +397,7 @@ async def update_device(
     db: AsyncSession = Depends(get_db_session),
 ):
     """Rename a device, or pause/resume it. Pausing releases its leases."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     device = await _get_device(db, device_id, owner_id)
     now = _now()
 
@@ -391,9 +409,11 @@ async def update_device(
             text("""
                 UPDATE public.training_device_tasks
                 SET status = 'expired', lease_expires_at = NULL, updated_at = now()
-                WHERE device_id = :device_id AND status IN ('assigned', 'running')
+                WHERE device_id = :device_id
+                  AND lower(cast(owner_id as varchar)) = :owner_id
+                  AND status IN ('assigned', 'running')
             """),
-            {"device_id": device.id},
+            {"device_id": device.id, "owner_id": normalize_owner_id(owner_id)},
         )
     elif body.status == "online":
         device.status = "online"
@@ -411,7 +431,7 @@ async def disconnect_device(
     db: AsyncSession = Depends(get_db_session),
 ):
     """Take a device offline now and release its tasks (it can come back)."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     device = await _get_device(db, device_id, owner_id)
     device.status = "offline"
     device.updated_at = _now()
@@ -419,10 +439,12 @@ async def disconnect_device(
         text("""
             UPDATE public.training_device_tasks
             SET status = 'expired', lease_expires_at = NULL, updated_at = now()
-            WHERE device_id = :device_id AND status IN ('assigned', 'running')
+            WHERE device_id = :device_id
+              AND lower(cast(owner_id as varchar)) = :owner_id
+              AND status IN ('assigned', 'running')
             RETURNING id
         """),
-        {"device_id": device.id},
+        {"device_id": device.id, "owner_id": normalize_owner_id(owner_id)},
     )
     released_ids = [row[0] for row in released.fetchall()]
     await db.commit()
@@ -440,9 +462,12 @@ async def delete_device(
     Only the device registration and its task rows go away. Models, datasets,
     checkpoints and training history are separate resources and are untouched.
     """
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     device = await _get_device(db, device_id, owner_id)
-    await db.execute(text("DELETE FROM public.training_device_tasks WHERE device_id = :device_id"), {"device_id": device.id})
+    await db.execute(text(
+        "DELETE FROM public.training_device_tasks "
+        "WHERE device_id = :device_id AND lower(cast(owner_id as varchar)) = :owner_id"
+    ), {"device_id": device.id, "owner_id": normalize_owner_id(owner_id)})
     await db.delete(device)
     await db.commit()
     return {"ok": True, "device_id": device_id, "removed": True}
@@ -458,7 +483,7 @@ async def assign_task(
     db: AsyncSession = Depends(get_db_session),
 ):
     """Assign a job (``train``) or dataset shards (``preprocess``) to one device."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     device = await _get_device(db, device_id, owner_id)
     job = await _get_owned_job(db, body.job_id, owner_id)
 
@@ -471,6 +496,7 @@ async def assign_task(
         select(TrainingDeviceTask).where(
             TrainingDeviceTask.device_id == device.id,
             TrainingDeviceTask.job_id == job.id,
+            owner_column_matches(TrainingDeviceTask.owner_id, owner_id),
             TrainingDeviceTask.kind == body.kind,
             TrainingDeviceTask.status.in_(ACTIVE_TASK_STATUSES),
         )
@@ -511,13 +537,13 @@ async def plan_collaborative(
     the coordinator aggregates the shard results. It is not distributed gradient
     training, and the response says so.
     """
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     job = await _get_owned_job(db, body.job_id, owner_id)
     if not job.dataset_id:
         raise HTTPException(status_code=400, detail="This job has no dataset to shard.")
 
     devices = (await db.execute(
-        select(TrainingDevice).where(TrainingDevice.owner_id == owner_id)
+        select(TrainingDevice).where(owner_column_matches(TrainingDevice.owner_id, owner_id))
         .order_by(TrainingDevice.created_at.asc())
     )).scalars().all()
     if body.device_ids:
@@ -540,10 +566,11 @@ async def plan_collaborative(
                 detail = coalesce(detail, '{}'::jsonb) || '{"superseded": true}'::jsonb,
                 updated_at = now()
             WHERE job_id = :job_id AND kind = 'preprocess'
+              AND lower(cast(owner_id as varchar)) = :owner_id
               AND status IN ('assigned', 'running')
             RETURNING id
         """),
-        {"job_id": job.id},
+        {"job_id": job.id, "owner_id": normalize_owner_id(owner_id)},
     )
     superseded_ids = [row[0] for row in superseded.fetchall()]
 
@@ -605,12 +632,12 @@ async def auto_assign(
     The ranking uses only capabilities the browsers reported (WebGPU, cores,
     memory). A job is skipped when it already has a live task or is finished.
     """
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     await sweep_expired(db, owner_id)
 
     devices = (await db.execute(
         select(TrainingDevice).where(
-            TrainingDevice.owner_id == owner_id,
+            owner_column_matches(TrainingDevice.owner_id, owner_id),
             TrainingDevice.status.in_(("online", "busy")),
         )
     )).scalars().all()
@@ -621,7 +648,7 @@ async def auto_assign(
     load = {d.id: 0 for d in ranked}
     busy = (await db.execute(
         select(TrainingDeviceTask).where(
-            TrainingDeviceTask.owner_id == owner_id,
+            owner_column_matches(TrainingDeviceTask.owner_id, owner_id),
             TrainingDeviceTask.status.in_(ACTIVE_TASK_STATUSES),
         )
     )).scalars().all()
@@ -663,10 +690,13 @@ async def list_device_tasks(
     user=Depends(require_user),
     db: AsyncSession = Depends(get_db_session),
 ):
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     device = await _get_device(db, device_id, owner_id)
     tasks = (await db.execute(
-        select(TrainingDeviceTask).where(TrainingDeviceTask.device_id == device.id)
+        select(TrainingDeviceTask).where(
+            TrainingDeviceTask.device_id == device.id,
+            owner_column_matches(TrainingDeviceTask.owner_id, owner_id),
+        )
         .order_by(TrainingDeviceTask.created_at.desc()).limit(50)
     )).scalars().all()
     return {"tasks": [_task_out(t) for t in tasks]}
@@ -681,7 +711,7 @@ async def task_progress(
     db: AsyncSession = Depends(get_db_session),
 ):
     """Report real progress of a leased task and renew its lease."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     task = await _get_task(db, device_id, task_id, owner_id)
     if task.status not in ACTIVE_TASK_STATUSES:
         raise HTTPException(status_code=409, detail=f"Task is {task.status}; progress is no longer accepted.")
@@ -710,7 +740,7 @@ async def complete_task(
     aggregated result is recorded once as a job event, so the job's history says
     what the devices contributed.
     """
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     task = await _get_task(db, device_id, task_id, owner_id)
     if task.status not in ACTIVE_TASK_STATUSES and task.status != "expired":
         raise HTTPException(status_code=409, detail=f"Task is already {task.status}.")
@@ -730,6 +760,7 @@ async def complete_task(
         siblings = (await db.execute(
             select(TrainingDeviceTask).where(
                 TrainingDeviceTask.job_id == task.job_id,
+                owner_column_matches(TrainingDeviceTask.owner_id, owner_id),
                 TrainingDeviceTask.kind == "preprocess",
             )
         )).scalars().all()
@@ -773,16 +804,24 @@ async def list_job_tasks(
     db: AsyncSession = Depends(get_db_session),
 ):
     """Which devices worked on this job, and what each of them finished."""
-    owner_id = uuid.UUID(user["user_id"])
+    owner_id = require_user_uuid(user)
     job = await _get_owned_job(db, job_id, owner_id)
     tasks = (await db.execute(
-        select(TrainingDeviceTask).where(TrainingDeviceTask.job_id == job.id)
+        select(TrainingDeviceTask).where(
+            TrainingDeviceTask.job_id == job.id,
+            owner_column_matches(TrainingDeviceTask.owner_id, owner_id),
+        )
         .order_by(TrainingDeviceTask.created_at.asc())
     )).scalars().all()
     device_ids = {t.device_id for t in tasks}
     names = {}
     if device_ids:
-        for device in (await db.execute(select(TrainingDevice).where(TrainingDevice.id.in_(device_ids)))).scalars().all():
+        for device in (await db.execute(
+            select(TrainingDevice).where(
+                TrainingDevice.id.in_(device_ids),
+                owner_column_matches(TrainingDevice.owner_id, owner_id),
+            )
+        )).scalars().all():
             names[device.id] = device.name
     return {
         "job": _job_summary(job),

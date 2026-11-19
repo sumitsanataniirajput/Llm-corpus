@@ -1,6 +1,9 @@
 # CORPUS ULTIMATE — Hopeweb Installation (Beginner-Friendly)
 
 This guide walks you through uploading the frontend to Hopeweb, step by step.
+It is a historical beginner guide: current deployment details and limits are in
+[DEPLOYMENT.md](DEPLOYMENT.md) and
+[STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md).
 
 ## What is Hopeweb?
 
@@ -42,10 +45,11 @@ frontend/
 │   └── settings.js          (Settings page)
 ├── css/
 │   ├── variables.css   (Design tokens: colors, spacing, radius)
-│   ├── layout.css      (Layout: app bar, sidebar, bottom nav)
+│   ├── layout.css      (Layout: app bar, hamburger sidebar)
 │   ├── components.css  (Components: cards, buttons, stat cards)
 │   ├── pages.css       (Page-specific styles)
 │   └── responsive.css  (Mobile/responsive overrides)
+├── version.json        (Deployed build identity)
 └── assets/             (images, icons — if any)
 ```
 
@@ -70,33 +74,12 @@ Upload files into the correct folders:
 
 ### Root (upload first)
 1. `index.html` — from `frontend/index.html`
+2. `version.json` — from `frontend/version.json`
 
-### `js/` folder (upload ALL of these)
-From `frontend/js/`:
-1. `app-bootstrap.js`
-2. `app-context.js`
-3. `ai-information.js`
-4. `config.js`
-5. `supabase-client.js`
-6. `api.js`
-7. `auth.js`
-8. `state.js`
-9. `components.js`
-10. `charts.js`
-11. `router.js`
-12. `dashboard.js`
-13. `models.js`
-14. `training.js`
-15. `statistics.js`
-16. `chat.js`
-17. `prediction.js`
-18. `neural-lab.js`
-19. `datasets.js`
-20. `evaluation.js`
-21. `compute.js`
-22. `storage.js`
-23. `experiments.js`
-24. `settings.js`
+### `js/` folder
+
+Upload **every file** from `frontend/js/`; `index.html` is the source of truth
+for which scripts are required. Do not rely on an old hand-copied list.
 
 ### `css/` folder (upload ALL of these)
 From `frontend/css/`:
@@ -107,7 +90,8 @@ From `frontend/css/`:
 5. `responsive.css`
 
 ### `assets/` folder
-Upload any image/icon files from `frontend/assets/` if present.
+There is no committed `frontend/assets/` directory; create it only if you add
+your own image/icon files.
 
 ---
 
@@ -131,7 +115,9 @@ If you don't have Supabase yet, leave the placeholder values. The app will run i
 ## Step 5: Configure Supabase (for data features)
 
 1. In Supabase, go to SQL Editor.
-2. Paste and run `supabase/migrations/001_initial_schema.sql`.
+2. Apply every SQL file in `supabase/migrations/` in filename order; see
+   [MIGRATIONS_AND_ROLLBACK.md](MIGRATIONS_AND_ROLLBACK.md) for the snapshot
+   and rollback steps.
 3. In Storage, create a private bucket named `corpus-storage`.
 4. Enable Row Level Security (the migration does this automatically).
 
@@ -141,7 +127,7 @@ If you don't have Supabase yet, leave the placeholder values. The app will run i
 
 1. Open your Hopeweb site URL in a browser.
 2. You should see the CORPUS ULTIMATE app with the purple brain logo.
-3. Click each bottom navigation item — every section should display its content.
+3. Open the hamburger sidebar and click each page — every section should display its content.
 4. Try `?debug=1` at the end of your URL to see diagnostic information.
 5. Check the browser's developer console (F12) for errors — should be clean.
 

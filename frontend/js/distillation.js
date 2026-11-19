@@ -122,7 +122,9 @@ window.distillation = (function () {
               <select id="kd-dataset">${datasetOptions() || '<option value="">No dataset uploaded yet</option>'}</select>
             </label>
             <label>Extra source text (optional)
-              <textarea id="kd-extra" rows="4" placeholder="Paste notes or a specification to distill from"></textarea>
+              <textarea id="kd-extra" rows="4" inputmode="text" enterkeyhint="enter"
+                        autocapitalize="sentences" spellcheck="true"
+                        placeholder="Paste notes or a specification to distill from"></textarea>
             </label>
             <button class="btn btn-sm btn-outline" type="button" onclick="distillation.previewSource(this)">
               <i class="fas fa-eye"></i> Show exactly what will be sent
@@ -146,8 +148,8 @@ window.distillation = (function () {
             <label>Evaluator (separate provider)
               <select id="kd-evaluator"><option value="">— none — </option></select>
             </label>
-            <label>Examples <input id="kd-count" type="number" min="1"
-              max="${Number(options.max_examples_per_run || 200)}" value="10"></label>
+            <label>Examples <input id="kd-count" type="number" min="1" inputmode="numeric"
+              enterkeyhint="done" max="${Number(options.max_examples_per_run || 200)}" value="10" autocapitalize="off" spellcheck="false"></label>
             <label>Task
               <select id="kd-task">${Object.entries(options.task_types || { instruction: { label: 'Instruction' } }).map(([key, meta]) =>
                 `<option value="${esc(key)}">${esc(meta.label || key)}</option>`).join('')}</select>
@@ -156,8 +158,10 @@ window.distillation = (function () {
               <select id="kd-format">${(options.output_formats || []).map((format) =>
                 `<option value="${esc(format.key)}">${esc(format.label)}</option>`).join('')}</select>
             </label>
-            <label>Max spend this run (USD) <input id="kd-spend" type="number" min="0" step="0.01" value="5"></label>
-            <label>Max requests <input id="kd-requests" type="number" min="1" value="200"></label>
+            <label>Max spend this run (USD) <input id="kd-spend" type="number" min="0" step="0.01"
+              inputmode="decimal" enterkeyhint="done" value="5" autocapitalize="off" spellcheck="false"></label>
+            <label>Max requests <input id="kd-requests" type="number" min="1" inputmode="numeric"
+              enterkeyhint="done" value="200" autocapitalize="off" spellcheck="false"></label>
           </div>
         </div>
       </div>
@@ -276,10 +280,10 @@ window.distillation = (function () {
       ${STATE.error ? `<div class="alert alert-error"><i class="fas fa-circle-exclamation"></i><div>${esc(STATE.error)}</div></div>` : ''}
       ${planBanner()}
       ${renderCreate()}
-      ${progressBlock(STATE.job)}
+      <div id="kd-progress">${progressBlock(STATE.job)}</div>
       <div class="section-block">
         <h2 class="section-heading">Runs</h2>
-        ${renderJobsTable()}
+        <div id="kd-jobs">${renderJobsTable()}</div>
       </div>`;
     await fillTeacherSelects();
     prefillFromPlan();
@@ -439,6 +443,18 @@ window.distillation = (function () {
     }
   }
 
+  // Only the two live sections are repainted. Rebuilding the whole page here
+  // used to replace the form — and the focused input / soft keyboard — every
+  // five seconds while a run was active, which is the reported "I can't type
+  // into the fields" behaviour. The shared form-state guard in components.js
+  // is a second line of defence for the user-initiated full renders.
+  function updateLiveSections() {
+    const progress = document.getElementById('kd-progress');
+    if (progress) progress.innerHTML = progressBlock(STATE.job);
+    const jobs = document.getElementById('kd-jobs');
+    if (jobs) jobs.innerHTML = renderJobsTable();
+  }
+
   function watch(jobId) {
     stopTimer();
     STATE.timer = setInterval(async () => {
@@ -449,9 +465,9 @@ window.distillation = (function () {
           stopTimer();
           await loadOverview();
         }
-        // Repaint from the freshly read job so the counters, status pill and
-        // progress bar can never disagree with each other.
-        if (currentRoute() === 'knowledge-distillation') await renderDistillation();
+        // Counters, status pill and progress bar are repainted from the freshly
+        // read job so they can never disagree with each other.
+        if (currentRoute() === 'knowledge-distillation') updateLiveSections();
       } catch (err) { stopTimer(); }
     }, 5000);
   }
@@ -595,9 +611,12 @@ window.distillation = (function () {
               ${['', 'pending', 'accepted', 'rejected', 'duplicate'].map((value) =>
                 `<option value="${value}" ${STATE.filters.status === value ? 'selected' : ''}>${value || 'any status'}</option>`).join('')}
             </select>
-            <input id="kd-filter-language" placeholder="language" value="${esc(STATE.filters.language)}">
-            <input id="kd-filter-subject" placeholder="subject" value="${esc(STATE.filters.subject)}">
-            <input id="kd-filter-search" placeholder="search text" value="${esc(STATE.filters.search)}">
+            <input id="kd-filter-language" placeholder="language" inputmode="text" enterkeyhint="search"
+                   autocomplete="off" autocapitalize="off" value="${esc(STATE.filters.language)}" spellcheck="true">
+            <input id="kd-filter-subject" placeholder="subject" inputmode="text" enterkeyhint="search"
+                   autocomplete="off" autocapitalize="off" value="${esc(STATE.filters.subject)}" spellcheck="true">
+            <input id="kd-filter-search" placeholder="search text" inputmode="search" enterkeyhint="search"
+                   autocomplete="off" autocapitalize="off" value="${esc(STATE.filters.search)}" spellcheck="true">
             <button class="btn btn-sm btn-outline" type="button" onclick="distillation.applyFilters()">Filter</button>
           </div>
           <div class="bulk-row">

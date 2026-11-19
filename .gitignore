@@ -6,24 +6,50 @@ __pycache__/
 .Python
 venv/
 env/
-.env
-.venv
+.venv/
 .python-version
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
+.nox/
 .eggs/
 *.egg-info/
 dist/
 build/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
 
 # Node
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
+# package-lock.json is intentionally committed for reproducible CI installs.
+
+# Test / tool caches
+.cache/
+.mypy_cache/
+.ruff_cache/
+.playwright-cli/
+.pytest_cache/
+
+# Model/checkpoint artifacts (never commit trained weights or datasets)
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+*.gguf
+*.db
+*.sqlite
+*.sqlite3
 
 # OS
 .DS_Store
@@ -40,12 +66,9 @@ Thumbs.db
 *.log
 logs/
 
-# Supabase
+# Supabase local state
 supabase/.temp/
 supabase/config.toml
-
-# Docker
-.dockerignore
 
 # Misc
 *.tmp

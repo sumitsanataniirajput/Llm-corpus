@@ -292,6 +292,10 @@ window.statistics = (function () {
         empty.innerHTML = '<i class="fas fa-chart-line"></i><span>No metrics recorded for this job yet.</span>';
         empty.classList.remove('hidden');
       }
+      // Remove the line-chart instance and its zoom toolbar as well.
+      if (window.charts && typeof window.charts.destroyChart === 'function') {
+        window.charts.destroyChart('stats-loss-chart');
+      }
       return;
     }
     canvas.style.display = 'block';
@@ -321,6 +325,9 @@ window.statistics = (function () {
     if (!rows.length) {
       canvas.style.display = 'none';
       if (empty) empty.classList.remove('hidden');
+      if (window.charts && typeof window.charts.destroyChart === 'function') {
+        window.charts.destroyChart('stats-params-chart');
+      }
       return;
     }
     canvas.style.display = 'block';

@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import text
 from starlette.testclient import TestClient
 
-from app.api.endpoints import training as training_endpoints
+from app.core import websocket_auth
 from app.core.database import dispose_engine, get_session_factory
 from app.main import app
 from tests.conftest import USER_ID
@@ -60,11 +60,12 @@ async def test_ws_streams_real_metrics_and_closes(http, monkeypatch):
     async def fake_verify(token):
         return {"id": USER_ID, "email": "tester@example.com"}
 
-    monkeypatch.setattr(training_endpoints, "verify_supabase_token", fake_verify)
+    monkeypatch.setattr(websocket_auth, "verify_supabase_token", fake_verify)
     await dispose_engine()  # recreate the engine inside the TestClient loop
 
     with TestClient(app) as test_client:
-        with test_client.websocket_connect(f"/api/v1/training/ws/{job['id']}?token=test-token") as ws:
+        with test_client.websocket_connect(f"/api/v1/training/ws/{job['id']}") as ws:
+            ws.send_json({"type": "auth", "token": "test-token"})
             status_msg = ws.receive_json()
             assert status_msg["event"] == "status"
             assert status_msg["data"]["status"] == "completed"
@@ -87,11 +88,12 @@ async def test_ws_streams_real_metrics_and_closes(http, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ws_rejects_missing_token():
+async def test_ws_rejects_missing_auth_frame():
     await dispose_engine()
     with TestClient(app) as test_client:
         with pytest.raises(Exception):
             with test_client.websocket_connect("/api/v1/training/ws/job_missing") as ws:
+                ws.send_json({"type": "subscribe"})
                 ws.receive_json()
 
 
@@ -102,11 +104,12 @@ async def test_ws_rejects_foreign_job(http, monkeypatch):
     async def fake_verify_other(token):
         return {"id": str(uuid.uuid4()), "email": "other@example.com"}
 
-    monkeypatch.setattr(training_endpoints, "verify_supabase_token", fake_verify_other)
+    monkeypatch.setattr(websocket_auth, "verify_supabase_token", fake_verify_other)
     await dispose_engine()
 
     with TestClient(app) as test_client:
-        with test_client.websocket_connect(f"/api/v1/training/ws/{job['id']}?token=other") as ws:
+        with test_client.websocket_connect(f"/api/v1/training/ws/{job['id']}") as ws:
+            ws.send_json({"type": "auth", "token": "other-token"})
             msg = ws.receive_json()
             assert msg["event"] == "error"
             assert "not found" in msg["data"]["message"]

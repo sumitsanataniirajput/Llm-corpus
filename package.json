@@ -7,6 +7,10 @@
     "test": "node --test frontend/tests/*.test.mjs scripts/tests/*.test.mjs",
     "test:frontend": "node --test frontend/tests/*.test.mjs",
     "test:deployment": "node --test scripts/tests/*.test.mjs",
+    "test:docs": "node --test scripts/tests/repo-hygiene.test.mjs",
+    "test:baseline": "node scripts/check-test-baseline.mjs",
+    "check:migrations": "node scripts/check-migrations.mjs",
+    "test:ci": "npm run check:migrations && npm run test:docs && npm run test:baseline",
     "verify:deployment": "node scripts/verify-deployment.mjs"
   },
   "devDependencies": {

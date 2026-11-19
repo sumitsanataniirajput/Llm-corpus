@@ -155,21 +155,21 @@ window.training = (function () {
             <div class="input-field">
               <label for="t-compute">Compute</label>
               <select id="t-compute" onchange="training.updateEstimate()">
-                <option value="local">Local (this device)</option>
-                <option value="cloud">Cloud worker</option>
+                <option value="local">Local (backend in-process CPU)</option>
               </select>
+              <span class="field-hint">Training runs in the backend process on CPU. Connected devices currently preprocess data only — they do not run gradient training or synchronize gradients.</span>
             </div>
             <div class="input-field">
               <label for="t-batch">Batch size</label>
-              <input type="number" id="t-batch" value="16" min="1" step="1" inputmode="numeric">
+              <input type="number" id="t-batch" value="16" min="1" step="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
             </div>
             <div class="input-field">
               <label for="t-lr">Learning rate</label>
-              <input type="number" id="t-lr" value="0.001" step="0.0001" min="0" inputmode="decimal">
+              <input type="number" id="t-lr" value="0.001" step="0.0001" min="0" inputmode="decimal" enterkeyhint="done" autocapitalize="off" spellcheck="false">
             </div>
             <div class="input-field">
               <label for="t-epochs">Epochs</label>
-              <input type="number" id="t-epochs" value="10" min="1" step="1" inputmode="numeric">
+              <input type="number" id="t-epochs" value="10" min="1" step="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
             </div>
           </div>
 
@@ -179,17 +179,17 @@ window.training = (function () {
               <div class="form-grid">
                 <div class="input-field">
                   <label for="t-accum">Gradient accumulation</label>
-                  <input type="number" id="t-accum" value="1" min="1" step="1" inputmode="numeric">
+                  <input type="number" id="t-accum" value="1" min="1" step="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Micro-batches per optimiser step.</span>
                 </div>
                 <div class="input-field">
                   <label for="t-clip">Gradient clipping</label>
-                  <input type="number" id="t-clip" value="1.0" step="0.1" min="0" inputmode="decimal">
+                  <input type="number" id="t-clip" value="1.0" step="0.1" min="0" inputmode="decimal" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Max gradient norm.</span>
                 </div>
                 <div class="input-field">
                   <label for="t-seed">Random seed</label>
-                  <input type="number" id="t-seed" value="42" min="0" step="1" inputmode="numeric">
+                  <input type="number" id="t-seed" value="42" min="0" step="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false">
                   <span class="field-hint">Reproducibility seed.</span>
                 </div>
               </div>
@@ -692,12 +692,13 @@ window.training = (function () {
         </div>
         <div class="estimate-item">
           <div class="estimate-label">Compute</div>
-          <div class="estimate-value">${escapeHtml(compute === 'cloud' ? 'Cloud worker' : 'Local device')}</div>
+          <div class="estimate-value">Backend in-process CPU</div>
         </div>
       </div>
       <p class="estimate-note" id="t-estimate-text" style="margin-bottom:var(--space-2);">
         Parameter count and memory are computed from the stored architecture (weights only — optimizer state,
-        activations and the tokenizer are not included). Token count is an estimate from file size; the backend
+        activations and the tokenizer are not included). Training executes in the backend process on CPU;
+        connected-device tasks preprocess data only. Token count is an estimate from file size; the backend
         tokenizer is authoritative. ${hardware.length ? 'Hardware reported by this browser: ' + escapeHtml(hardware.join(', ')) + '.' : 'This browser does not report hardware details.'}
       </p>
       <p class="estimate-note">${dataset ? 'Training on <strong>' + escapeHtml(dataset.name || dataset.id) + '</strong>.' : 'No dataset selected yet.'}</p>

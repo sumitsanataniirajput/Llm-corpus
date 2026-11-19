@@ -1,7 +1,7 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-20.1",
+  "buildId": "2026-11-20.7",
   "sourceRef": "main",
   "navigation": "All application routes are in the hamburger sidebar; bottom navigation removed.",
   "notes": [
@@ -10,7 +10,16 @@
     "The drawer scrolls with momentum, honours safe-area insets on notched phones, locks the page behind it, closes on Escape or a tap on the scrim, and returns focus to the hamburger.",
     "AI Teacher Network and Dataset Quality Review load again: two routes share one module, and the router now passes the route into the renderer instead of calling it with no arguments (which produced a 'module not loaded' panel even though the script had loaded).",
     "Every route, module global and script file is declared once in js/routes.js; the router, the bootstrap module check and the test suite all read that table, so a page cannot be added to the menu without a working render().",
-    "Fixed a duplicate global: js/components.js replaced window.ui instead of extending it, silently dropping the auth helpers (ui.showOffline/hideOffline/setLoading) that js/auth.js calls."
+    "Fixed a duplicate global: js/components.js replaced window.ui instead of extending it, silently dropping the auth helpers (ui.showOffline/hideOffline/setLoading) that js/auth.js calls.",
+    "Phase 1 global typing/focus repair: a shared form-state guard in js/components.js preserves values, caret, selection and focus across any page-container repaint; the Knowledge Distillation poller now repaints only its live sections; auth re-renders only when the signed-in identity actually changes; the Chat composer is never disabled; Enter is IME-composition safe; label-tap focusing, visible caret/focus rings, Android keyboard hints, 16px mobile font size and 44px targets now apply to every form, including bare-label provider/API-key and review fields; busy containers can no longer swallow taps on editable controls.",
+    "Phase 1 completion: every hand-written editable input and textarea across all page modules now declares inputmode, enterkeyhint, autocapitalize and spellcheck, and the regression suite renders 24 major forms at 360x800, 390x844 and 1440x900 to verify they are enabled, focusable and keyboard-ready.",
+    "P1 Operations: each operation row has a real Clear control (and Cancel for active work), and Clear all requires explicit confirmation before cancelling active work and emptying the persisted list.",
+    "P1 truthfulness: the backend evaluation endpoint no longer fabricates a completed score, worker registration requires a real owner instead of a nil UUID, and training accepts only the in-process CPU mode that the worker actually executes; connected-device preprocessing is described accurately.",
+    "P1 infrastructure: the rate limiter is bounded, exempts health probes and only trusts forwarded IPs from configured proxies; example environment values are non-default placeholders, CORS includes local dev origins, and pgserver/httpx are declared as test dependencies.",
+    "P2 security slice 1: Supabase tokens are never placed in WebSocket URLs; general, training and inference sockets share a first-frame auth handshake, and device/task/job ownership uses canonical UUID/text-safe helpers so another account cannot see or sweep rows.",
+    "P2 charts slice 2: Dashboard, Statistics, Training and Intelligence now share numeric line charts with linear step axes, readable x/y ranges, min/max-preserving downsampling for long metric series, drag/ctrl-wheel zoom and an explicit Reset that also removes live listeners on dispose.",
+    "P2 / Phase 2 inference: Chat and Prediction Lab offer an account-scoped model selector with per-user active-model persistence; after training, the backend loads the owner's private PyTorch checkpoint and tokenizer for real generation, tokenization, next-token logits and authenticated token streaming. Untrained models report unavailable instead of returning canned text.",
+    "P2 repository hygiene: docs and CI now distinguish implemented CPU training/checkpoint inference from unimplemented cloud gradient workers, enumerate all ten forward-only SQL migrations with a snapshot-based rollback playbook, commit the npm lockfile for reproducible installs, and run backend/frontend tests plus a baseline-aware test gate on every push."
   ],
   "howToVerify": "GET <frontend-url>/version.json \u2014 the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }

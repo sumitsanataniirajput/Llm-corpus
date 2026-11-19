@@ -13,12 +13,14 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
-from app.dependencies import require_user, get_db_session, verify_supabase_token
+from app.dependencies import require_user, get_db_session
 from app.core.database import get_session_factory
+from app.core.websocket_auth import authenticate_socket
+from app.core.ownership import same_owner
 from app.core.models import Dataset, Model, TrainingJob
 from app.api.endpoints.datasets import latest_file_for_dataset, UNUSABLE_STATUSES
 
@@ -45,6 +47,24 @@ class TrainingConfig(BaseModel):
     gradient_accumulation_steps: int = 1
     gradient_clip: float = 1.0
     seed: int = 42
+
+    @field_validator("compute")
+    @classmethod
+    def validate_compute(cls, value: str) -> str:
+        """Refuse compute modes the worker cannot actually execute.
+
+        `training_worker._train_sync` constructs `PyTorchTrainer(device="cpu")`
+        in the API process. Browser/device agents only preprocess data; they do
+        not run gradient steps or synchronize gradients. Offering a "cloud"
+        option therefore claimed a workflow that does not exist.
+        """
+        if value != "local":
+            raise ValueError(
+                "Only local in-process CPU training is implemented. "
+                "Connected devices preprocess data only; cloud gradient workers "
+                "and multi-device gradient synchronization are not available."
+            )
+        return value
 
 
 class JobOut(BaseModel):
@@ -537,33 +557,21 @@ async def list_logs(
 async def training_ws(
     websocket: WebSocket,
     job_id: str,
-    token: Optional[str] = Query(default=None),
     interval: float = Query(default=1.5, ge=0.5, le=10.0),
 ):
     """Stream real job status and real metric rows for one training job.
 
-    The token is passed as a query parameter because browsers cannot set an
-    Authorization header on WebSocket connections. Every message is read from
-    the database — nothing is simulated. The socket closes once the job reaches
-    a terminal state.
+    Browsers cannot set an Authorization header on a WebSocket, but putting the
+    Supabase access token in the URL leaks it into proxy logs and Referer
+    headers. The client therefore sends a short ``{"type":"auth","token":...}``
+    frame as the FIRST message after the socket opens. Every subsequent message
+    is read from the database — nothing is simulated. The socket closes once the
+    job reaches a terminal state.
     """
-    user = None
-    if token:
-        try:
-            user = await verify_supabase_token(token)
-        except HTTPException:
-            user = None
-    if not user or not user.get("id"):
-        await websocket.close(code=1008)
+    identity = await authenticate_socket(websocket)
+    if not identity:
         return
-
-    try:
-        owner_id = uuid.UUID(user["id"])
-    except (ValueError, TypeError):
-        await websocket.close(code=1008)
-        return
-
-    await websocket.accept()
+    owner_id = identity["owner_id"]
     last_step = 0
     last_status = None
     last_progress = None
@@ -574,7 +582,7 @@ async def training_ws(
             async with factory() as db:
                 result = await db.execute(select(TrainingJob).where(TrainingJob.id == job_id))
                 job = result.scalar_one_or_none()
-                if not job or job.owner_id != owner_id:
+                if not job or not same_owner(job.owner_id, owner_id):
                     await websocket.send_json({
                         "type": subscription, "event": "error",
                         "data": {"message": "Training job not found for this account."},
