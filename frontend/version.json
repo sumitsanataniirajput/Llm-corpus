@@ -1,7 +1,7 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-19.2",
+  "buildId": "2026-11-19.3",
   "sourceRef": "main",
   "notes": [
     "AI Teacher Network: providers (OpenAI, Gemini, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks or a custom OpenAI-compatible endpoint) are connected once, verified against the real API, and their models are discovered live. No model list or price is hardcoded anywhere: specs appear only where the provider reports them and prices only where you enter them.",
