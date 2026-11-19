@@ -10,7 +10,7 @@ changed for presentation reasons; the only backend additions are described in
 
 ```
 frontend/css/variables.css     design tokens, reset, buttons, inputs, grids
-frontend/css/layout.css        app bar, sidebar, page container, modals, toasts, bottom nav
+frontend/css/layout.css        app bar, navigation drawer, page container, modals, toasts
 frontend/css/components.css    cards, stats, lists, tables, progress, charts, accordions
 frontend/css/pages.css         per-page layout (dashboard, models, training, chat, …)
 frontend/css/responsive.css    breakpoints 1023 / 900 / 768 / 430 / 379, landscape, ≥1280
@@ -66,11 +66,14 @@ to the platform chrome and 16px intrinsic height.
 - `index.html` viewport is `width=device-width, initial-scale=1, viewport-fit=cover`
   with `interactive-widget=resizes-content` so the Android keyboard resizes the
   layout instead of covering the composer.
-- `--safe-bottom: env(safe-area-inset-bottom, 0px)`; `.bottom-nav` pads by it and
-  `.main-content` reserves `calc(var(--bottom-nav-height) + var(--safe-bottom))`,
-  so page content never hides under the nav or the gesture bar.
-- The sidebar drawer only closes/appears below 1024px; on desktop `.sidebar.hidden`
-  is overridden back to visible (the app bar that could reopen it is hidden there).
+- `--safe-bottom: env(safe-area-inset-bottom, 0px)`; the navigation drawer pads
+  by it (and by `--safe-top`) and `.main-content` reserves
+  `calc(var(--safe-bottom) + var(--space-4))`, so page content never hides under
+  the gesture bar.
+- Navigation is a single hamburger-opened drawer at every width — see
+  `docs/NAVIGATION.md`. The mobile bottom bar, `--bottom-nav-height` and the
+  "desktop pins the sidebar open" rule described in earlier versions of this
+  document no longer exist.
 
 **Breakpoints verified structurally** (rules present and exercised by tests):
 379 (small phones), 429, 430–768 (large phones/small tablets), 768, 900, 1023,

@@ -84,19 +84,33 @@
   top: 0;
   left: 0;
   bottom: 0;
-  width: min(var(--sidebar-width), 86vw);
+  width: min(var(--sidebar-width), 88vw);
+  max-width: 24rem;
+  height: 100vh;
+  height: 100dvh;
   padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
   background: var(--color-bg-soft);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  z-index: 200;
+  overflow: hidden;
+  z-index: 300;
   transform: translateX(0);
-  transition: transform var(--transition-base);
+  transition: transform var(--transition-base), visibility var(--transition-base);
   box-shadow: var(--elevation-4);
+  will-change: transform;
 }
 
-.sidebar.hidden { transform: translateX(-102%); }
+/* The drawer is hidden, untabbable (inert is set by the router) and invisible
+   to assistive technology while closed. */
+.sidebar.hidden {
+  transform: translateX(-102%);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body.nav-open { overflow: hidden; }
 
 .sidebar-header {
   display: flex;
@@ -124,13 +138,76 @@
 .sidebar-close:hover { color: var(--color-text); background: var(--color-surface-elevated); }
 
 .sidebar-nav {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
-  padding: var(--space-3) var(--space-3) var(--space-6);
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding: var(--space-2) var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  touch-action: pan-y;
+  scroll-padding-block: var(--space-4);
+}
+
+/* ---------- Sidebar sections ---------- */
+.nav-group {
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+.nav-group + .nav-group { margin-top: 2px; }
+
+.nav-group-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: var(--text-label-medium);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nav-group-summary::-webkit-details-marker { display: none; }
+.nav-group-summary::marker { content: ''; }
+
+.nav-group-summary:hover { background: var(--color-surface-elevated); color: var(--color-text); }
+
+.nav-group-summary > i:first-child { font-size: 0.85rem; }
+
+.nav-group-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-group-chevron {
+  font-size: 0.7rem;
+  transition: transform var(--transition-fast);
+}
+
+.nav-group[open] > .nav-group-summary .nav-group-chevron { transform: rotate(180deg); }
+
+.nav-group[open] > .nav-group-summary { color: var(--color-text-variant); }
+
+.nav-group-items {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 2px 0 var(--space-2) 0;
 }
 
 .nav-item {
@@ -138,14 +215,19 @@
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
+  background: transparent;
   color: var(--color-text-variant);
+  font-family: inherit;
   font-size: var(--text-body-medium);
   font-weight: 500;
   text-align: left;
   border: 1px solid transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
@@ -177,7 +259,9 @@
 .sidebar-footer {
   padding: var(--space-3);
   border-top: 1px solid var(--color-border);
-  padding-bottom: calc(var(--space-3) + var(--safe-bottom));
+  /* The drawer itself already pads by --safe-bottom; adding it twice would
+     leave a dead 30–60 px strip under the sign-out button. */
+  padding-bottom: var(--space-3);
 }
 
 .user-info {
@@ -231,7 +315,7 @@
   min-height: 100vh;
   min-height: 100dvh;
   padding-top: calc(var(--top-bar-height) + var(--safe-top));
-  padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-4));
+  padding-bottom: calc(var(--safe-bottom) + var(--space-4));
   overflow-x: hidden;
 }
 
@@ -303,7 +387,7 @@
 .connection-indicator {
   position: fixed;
   right: var(--space-3);
-  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-3));
+  bottom: calc(var(--safe-bottom) + var(--space-3));
   background: var(--color-surface-elevated);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-full);
@@ -323,7 +407,7 @@
 .toast-container {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-3));
+  bottom: calc(var(--safe-bottom) + var(--space-3));
   transform: translateX(-50%);
   z-index: 1200;
   display: flex;
@@ -415,7 +499,7 @@
 .operation-center {
   position: fixed;
   right: var(--space-4);
-  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-4));
+  bottom: calc(var(--safe-bottom) + var(--space-4));
   z-index: 1150;
   display: flex;
   flex-direction: column;
@@ -653,65 +737,10 @@
 
 .auth-help:hover { text-decoration: underline; }
 
-/* ---------- Bottom navigation ---------- */
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: calc(var(--bottom-nav-height) + var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
-  background: rgba(28, 27, 31, 0.97);
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  justify-content: space-around;
-  align-items: stretch;
-  z-index: 140;
-  backdrop-filter: saturate(120%) blur(6px);
-}
-
-[data-theme="light"] .bottom-nav { background: rgba(255, 255, 255, 0.97); }
-
-.nav-link {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: var(--space-2) 2px;
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--color-text-muted);
-  position: relative;
-  transition: color var(--transition-fast);
-  -webkit-tap-highlight-color: transparent;
-}
-
-.nav-link span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nav-link i { font-size: 1.05rem; line-height: 1; }
-
-.nav-link.active { color: var(--color-accent); }
-
-.nav-link.active::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  width: 22px;
-  height: 3px;
-  border-radius: 0 0 3px 3px;
-  background: var(--color-brand-soft);
-}
-
-.nav-link:active { background: var(--color-surface-elevated); }
+/* ---------- (bottom navigation removed) ----------
+   Navigation lives only in the sidebar drawer, opened by the hamburger. The
+   old bottom bar duplicated five routes, overlapped page content on phones
+   with a home indicator, and drifted out of sync with the real route list. */
 
 /* ---------- Confirm dialog ---------- */
 .confirm-card {
@@ -747,37 +776,30 @@
   margin-top: var(--space-5);
 }
 
-/* ---------- Desktop layout ---------- */
-@media (min-width: 1024px) {
-  .app-bar { display: none; }
+/* ---------- Desktop layout ----------
 
+   The desktop keeps the same navigation model as the phone: one hamburger in
+   the app bar, one drawer it opens. The difference is breathing room — the
+   drawer is a little wider and the page column gets the large-screen padding.
+   ------------------------------------------------------------------------ */
+@media (min-width: 1024px) {
   .sidebar {
-    top: 0;
-    bottom: 0;
-    transform: translateX(0);
-    box-shadow: none;
-    z-index: 90;
+    width: min(var(--sidebar-width), 24rem);
+    box-shadow: var(--elevation-4);
   }
 
-  /* Desktop always shows the sidebar, even if the drawer class is still set
-     from a narrow viewport (the app bar that could reopen it is hidden). */
-  .sidebar.hidden { transform: translateX(0); }
-
-  .sidebar-close { display: none; }
-
-  .sidebar-overlay { display: none !important; }
+  /* The scrim is only needed while a pointer could reach the page behind the
+     drawer; on desktop it stays, because the drawer is not permanent either. */
+  .sidebar-overlay { display: block; }
 
   .main-content {
-    margin-left: var(--sidebar-width);
-    padding-top: var(--space-2);
+    padding-top: calc(var(--top-bar-height) + var(--space-2));
     padding-bottom: var(--space-6);
   }
 
   .page-container {
     padding: var(--space-6) var(--space-8) var(--space-10);
   }
-
-  .bottom-nav { display: none; }
 
   .toast-container {
     left: auto;
@@ -789,6 +811,7 @@
 
   .connection-indicator { bottom: var(--space-6); }
 
-  /* Offline banner offset on desktop */
-  .offline-banner { top: 0; }
+  /* The app bar is present on desktop too, so the offline banner sits under it
+     rather than on top of the hamburger. */
+  .offline-banner { top: calc(var(--top-bar-height) + var(--safe-top)); }
 }

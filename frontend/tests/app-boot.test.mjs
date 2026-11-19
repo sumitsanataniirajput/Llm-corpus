@@ -41,22 +41,15 @@ function localScripts() {
   return scripts;
 }
 
-const PAGE_GLOBALS = {
-  dashboard: 'js/dashboard.js',
-  models: 'js/models.js',
-  training: 'js/training.js',
-  statistics: 'js/statistics.js',
-  aiInfo: 'js/ai-information.js',
-  chat: 'js/chat.js',
-  prediction: 'js/prediction.js',
-  neuralLab: 'js/neural-lab.js',
-  datasets: 'js/datasets.js',
-  evaluation: 'js/evaluation.js',
-  compute: 'js/compute.js',
-  storage: 'js/storage.js',
-  experiments: 'js/experiments.js',
-  settings: 'js/settings.js',
-};
+/** Every page module, taken from the route registry (js/routes.js). */
+const PAGE_GLOBALS = (() => {
+  const sandbox = { window: {} };
+  // eslint-disable-next-line no-new-func
+  new Function('window', fs.readFileSync(path.join(FRONTEND_DIR, 'js', 'routes.js'), 'utf8'))(sandbox.window);
+  const out = {};
+  sandbox.window.CORPUS_ROUTES.ROUTES.forEach((entry) => { out[entry.module] = entry.script; });
+  return out;
+})();
 
 function fakeIndexedDB() {
   const store = new Map();
@@ -315,6 +308,35 @@ test('a wiped module global is re-requested with a cache-busting query and recov
     'the re-request carries the build id');
   assert.match(requested[0], /retry=\d+/, 'and a unique retry marker so no cache can answer it');
   assert.match(app.doc.getElementById('page-container').textContent, /Dataset Manager/);
+  assert.doesNotMatch(app.doc.body.textContent, /module not loaded/i);
+  app.dom.window.close();
+});
+
+test('a route that shares a module recovers that module once, not once per route', async () => {
+  const app = bootApp();
+  await startApp(app);
+
+  // teachers backs both #/ai-teachers and #/ai-api-keys.
+  const realTeachers = app.window.teachers;
+  delete app.window.teachers;
+
+  const requested = [];
+  app.window.CORPUS_MODULE_LOADER = (src) => {
+    requested.push(src);
+    app.window.teachers = realTeachers;
+    return true;
+  };
+
+  await goTo(app.window, 'ai-teachers');
+  assert.deepEqual(requested.length, 1, 'the shared module is re-requested once');
+  assert.match(requested[0], /^js\/teachers\.js\?v=/);
+  assert.match(app.doc.getElementById('page-container').textContent, /Who teaches your models/,
+    'AI Teacher Network recovers and renders');
+
+  await goTo(app.window, 'provider-management');
+  assert.equal(requested.length, 1, 'the second route reuses the recovered module');
+  assert.match(app.doc.getElementById('page-container').textContent, /Connect an AI teacher/,
+    'AI API Keys renders its own view');
   assert.doesNotMatch(app.doc.body.textContent, /module not loaded/i);
   app.dom.window.close();
 });

@@ -108,31 +108,25 @@ window.CORPUS_BOOTSTRAP = (function () {
     // Page modules are optional for boot but each one that failed to register
     // is named here, with the script that should have defined it, so the
     // console says exactly which file is broken instead of leaving the user
-    // with a generic "module not loaded" page later. The router can also
-    // recover such a module on demand (see frontend/js/router.js).
-    const pageModules = {
-      dashboard: 'js/dashboard.js',
-      models: 'js/models.js',
-      training: 'js/training.js',
-      statistics: 'js/statistics.js',
-      aiInfo: 'js/ai-information.js',
-      chat: 'js/chat.js',
-      prediction: 'js/prediction.js',
-      neuralLab: 'js/neural-lab.js',
-      datasets: 'js/datasets.js',
-      evaluation: 'js/evaluation.js',
-      compute: 'js/compute.js',
-      storage: 'js/storage.js',
-      experiments: 'js/experiments.js',
-      settings: 'js/settings.js',
-    };
-    const missingPages = Object.keys(pageModules).filter(name => typeof window[name] === 'undefined');
-    if (missingPages.length) {
+    // with a generic "module not loaded" page later. The list comes from the
+    // same registry the router and the sidebar use (js/routes.js), so a module
+    // added to the menu is verified here automatically.
+    const registry = window.CORPUS_ROUTES;
+    if (!registry) {
+      error('Route registry (js/routes.js) did not load — no page can be routed.');
+      return true;
+    }
+    const pageModules = registry.modules();
+    const broken = pageModules.filter((entry) => {
+      const page = window[entry.module];
+      return !page || typeof page.render !== 'function';
+    });
+    if (broken.length) {
       error('Page modules not registered: ' +
-        missingPages.map(name => name + ' (' + pageModules[name] + ')').join(', ') +
+        broken.map((entry) => entry.module + ' (' + entry.script + ', route #/' + entry.route + ')').join(', ') +
         ' — those pages will try to reload their script, then show diagnostics.');
     } else {
-      log('All page modules registered');
+      log('All ' + pageModules.length + ' page modules registered with a render() function');
     }
     return true;
   }

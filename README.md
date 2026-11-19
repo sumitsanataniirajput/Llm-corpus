@@ -125,6 +125,11 @@ migration `004`, and the real-device Android file-picker checklist).
 Design tokens, mobile/layout contract, data-honesty rules, dataset formats and
 test commands are documented in [docs/UI_MODERNIZATION.md](docs/UI_MODERNIZATION.md).
 
+Navigation is one hamburger-opened drawer at every screen size, with every page
+declared once in `frontend/js/routes.js`; the shell, the route registry and the
+automated route/module checks are documented in
+[docs/NAVIGATION.md](docs/NAVIGATION.md).
+
 ## License
 
 MIT License — see LICENSE file.

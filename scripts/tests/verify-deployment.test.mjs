@@ -70,8 +70,16 @@ function json(res, status, body) {
 const SHIPPED_ASSETS = {
   '/js/datasets.js': 'const overlay = "drop-zone-input"; const zone = "datasets-drop";',
   '/js/router.js': 'if (typeof window.CORPUS_MODULE_LOADER === \'function\') { /* recovery */ }',
+  '/js/routes.js': 'window.CORPUS_ROUTES = (function () { return { ROUTES: [] }; })();',
   '/css/responsive.css': '@media (min-aspect-ratio: 21/9) and (min-width: 1600px) { :root { --page-max: min(2100px, 78vw); } }',
-  '/index.html': '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">',
+  '/index.html': '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">' +
+    '<button id="menu-toggle" aria-controls="sidebar"></button>',
+};
+
+// The shell this checkout replaced; a host still serving it must fail.
+const STALE_SHELL_ASSETS = {
+  ...SHIPPED_ASSETS,
+  '/index.html': SHIPPED_ASSETS['/index.html'] + '<nav class="bottom-nav" id="bottom-nav"></nav>',
 };
 
 function serveShippedAssets(req, res) {
@@ -209,6 +217,62 @@ test('missing feature markers fail (proves the deployed build predates the fix)'
     assert.equal(result.code, 1, result.stdout);
     assert.match(result.stdout, /feature markers are missing/);
     assert.match(result.stdout, /predates the fix/);
+  } finally {
+    await site.close();
+  }
+});
+
+test('a host still serving the removed bottom navigation fails', async () => {
+  const builds = expectedBuilds();
+  const site = await startSite((req, res) => {
+    if (req.url === '/api/v1/version') {
+      return json(res, 200, {
+        service: 'corpus-ultimate-api',
+        build_id: builds.backend,
+        commit: 'a'.repeat(40),
+        features: builds.features,
+      });
+    }
+    if (req.url === '/version.json') return json(res, 200, { buildId: builds.frontend });
+    const body = STALE_SHELL_ASSETS[req.url];
+    if (body === undefined) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': req.url.endsWith('.js') ? 'application/javascript' : 'text/html' });
+    return res.end(body);
+  });
+
+  try {
+    const result = await runVerify(['--api', site.url, '--web', site.url], { EXPECTED_COMMIT: 'a'.repeat(40) });
+    assert.notEqual(result.code, 0, 'a stale shell must fail the freshness check');
+    assert.match(result.stdout + result.stderr, /bottom-nav|bottom navigation/i);
+  } finally {
+    await site.close();
+  }
+});
+
+test('a host missing the route registry fails', async () => {
+  const builds = expectedBuilds();
+  const withoutRegistry = { ...SHIPPED_ASSETS };
+  delete withoutRegistry['/js/routes.js'];
+  const site = await startSite((req, res) => {
+    if (req.url === '/api/v1/version') {
+      return json(res, 200, {
+        service: 'corpus-ultimate-api',
+        build_id: builds.backend,
+        commit: 'a'.repeat(40),
+        features: builds.features,
+      });
+    }
+    if (req.url === '/version.json') return json(res, 200, { buildId: builds.frontend });
+    const body = withoutRegistry[req.url];
+    if (body === undefined) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': req.url.endsWith('.js') ? 'application/javascript' : 'text/html' });
+    return res.end(body);
+  });
+
+  try {
+    const result = await runVerify(['--api', site.url, '--web', site.url], { EXPECTED_COMMIT: 'a'.repeat(40) });
+    assert.notEqual(result.code, 0);
+    assert.match(result.stdout + result.stderr, /routes\.js/);
   } finally {
     await site.close();
   }

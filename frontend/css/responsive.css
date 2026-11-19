@@ -5,23 +5,39 @@
    safe-area aware chrome.
    ======================================== */
 
-/* ---------- Below desktop (sidebar becomes drawer) ---------- */
+/* ---------- Navigation shell (every width) ----------
+   One hamburger, one drawer. Below the desktop breakpoint the drawer takes the
+   safe areas into account, keeps 44px touch targets and lets the page behind
+   it stay put (the router locks body scroll while it is open).
+   ------------------------------------------------------------ */
+.sidebar {
+  z-index: 300;
+}
+
+.sidebar .nav-group-summary,
+.sidebar .nav-item {
+  min-height: 2.75rem;
+}
+
 @media (max-width: 1023px) {
   .sidebar {
-    transform: translateX(-102%);
-    z-index: 210;
+    width: min(var(--sidebar-width), 88vw);
+    /* Drawer surface follows the notch/home-indicator insets on phones. */
+    padding-top: max(var(--safe-top), var(--space-2));
+    padding-bottom: max(var(--safe-bottom), var(--space-2));
+    border-top-right-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-lg);
+    box-shadow: var(--elevation-4);
   }
 
-  .sidebar.hidden { transform: translateX(-102%); }
+  .sidebar-header { padding-top: var(--space-3); }
 
   .main-content {
     margin-left: 0;
-    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-4));
+    padding-bottom: calc(var(--safe-bottom) + var(--space-4));
   }
 
   .app-bar { display: flex; }
-
-  .bottom-nav { display: flex; }
 }
 
 /* ---------- Tablet and below ---------- */
@@ -90,7 +106,7 @@
   .table-wrapper { border-radius: var(--radius-md); }
   th, td { padding: var(--space-2) var(--space-3); }
 
-  .toast-container { bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-2)); }
+  .toast-container { bottom: calc(var(--safe-bottom) + var(--space-2)); }
 }
 
 /* ---------- Large phones / small tablets (430–768) ---------- */
@@ -141,20 +157,18 @@
   .btn { padding: 0 var(--space-3); font-size: var(--text-label-medium); }
   .btn-sm { padding: 0 var(--space-2); }
   .chip { font-size: 0.6rem; }
-  .nav-link { font-size: 0.55rem; }
-  .nav-link i { font-size: 1rem; }
+  .nav-group-summary { letter-spacing: 0.06em; }
   .app-logo { font-size: 0.95rem; }
 }
 
 /* ---------- Landscape phones ---------- */
 @media (max-height: 520px) and (orientation: landscape) {
   :root {
-    --bottom-nav-height: 52px;
     --top-bar-height: 52px;
   }
 
-  .nav-link i { font-size: 0.95rem; }
-  .nav-link span { font-size: 0.55rem; }
+  .sidebar-nav { padding-top: 2px; }
+  .sidebar .nav-item { min-height: 2.5rem; }
 
   .chat-container { height: calc(100dvh - 170px); }
 
@@ -226,7 +240,7 @@
   .card-title { font-size: var(--text-title-large); }
   .btn { min-height: 2.9rem; }
   .btn-sm { min-height: 2.4rem; }
-  .nav-link { min-height: 3rem; }
+  .nav-item { min-height: 3rem; }
 }
 
 /* ---------- 4K / very large panels (2560+) ---------- */
@@ -292,7 +306,8 @@
   a:focus-visible,
   button:focus-visible,
   .btn:focus-visible,
-  .nav-link:focus-visible,
+  .nav-item:focus-visible,
+  .nav-group-summary:focus-visible,
   .icon-btn:focus-visible,
   input:focus-visible,
   select:focus-visible,
@@ -307,7 +322,6 @@
 @media print {
   .sidebar,
   .app-bar,
-  .bottom-nav,
   .toast-container,
   .connection-indicator,
   .page-header-actions { display: none !important; }
@@ -383,11 +397,9 @@ code {
 }
 
 
-/* CORPUS ULTIMATE 2026-11-19.4: one navigation system on every screen.
-   Mobile routes are available from the hamburger drawer; never reserve a bottom bar. */
-.bottom-nav { display: none !important; }
-@media (max-width: 1023px) {
-  .main-content { padding-bottom: calc(var(--safe-bottom) + var(--space-4)) !important; }
-  .toast-container { bottom: calc(var(--safe-bottom) + var(--space-3)) !important; }
-  .sidebar { height: 100dvh; overflow-y: auto; padding-bottom: calc(var(--safe-bottom) + var(--space-4)); }
-}
+/* ---------- (superseded patch removed) ----------
+   An earlier patch force-hid a bottom bar that no longer exists in the markup
+   and overrode the drawer with `overflow-y: auto` + `!important` paddings. The
+   drawer is defined once, above: `.sidebar` is a fixed 100dvh column with an
+   inner scrolling `.sidebar-nav`, and `.main-content`/`.toast-container`
+   already reserve the safe area without `!important`. */

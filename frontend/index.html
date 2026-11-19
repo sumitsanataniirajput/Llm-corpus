@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="description" content="CORPUS ULTIMATE — Personal LLM development, training, and monitoring platform">
-  <meta name="corpus-build" content="2026-11-19.4">
+  <meta name="corpus-build" content="2026-11-20.1">
   <meta name="theme-color" content="#16151a">
   <meta name="color-scheme" content="dark light">
   <title>CORPUS ULTIMATE</title>
@@ -35,11 +35,11 @@
   <script src="https://unpkg.com/aos@2.3.4/dist/aos.js" defer></script>
   <!-- Application styles and scripts are versioned with ?v=<buildId> so a
        cached stylesheet can never hide a shipped fix (mobile file picker). -->
-  <link rel="stylesheet" href="css/variables.css?v=2026-11-19.4">
-  <link rel="stylesheet" href="css/layout.css?v=2026-11-19.4">
-  <link rel="stylesheet" href="css/components.css?v=2026-11-19.4">
-  <link rel="stylesheet" href="css/pages.css?v=2026-11-19.4">
-  <link rel="stylesheet" href="css/responsive.css?v=2026-11-19.4">
+  <link rel="stylesheet" href="css/variables.css?v=2026-11-20.1">
+  <link rel="stylesheet" href="css/layout.css?v=2026-11-20.1">
+  <link rel="stylesheet" href="css/components.css?v=2026-11-20.1">
+  <link rel="stylesheet" href="css/pages.css?v=2026-11-20.1">
+  <link rel="stylesheet" href="css/responsive.css?v=2026-11-20.1">
 </head>
 <body>
 
@@ -81,10 +81,12 @@
     <span id="connection-text">Connected</span>
   </div>
 
-  <!-- Top app bar (mobile) -->
+  <!-- Top app bar — present at every size; the hamburger is the only
+       navigation control in the app (no bottom bar, no floating duplicates). -->
   <header class="app-bar" role="banner">
-    <button class="menu-toggle" id="menu-toggle" aria-label="Open menu">
-      <i class="fas fa-bars"></i>
+    <button class="menu-toggle" id="menu-toggle" type="button"
+            aria-label="Open menu" aria-controls="sidebar" aria-expanded="false">
+      <i class="fas fa-bars" aria-hidden="true"></i>
     </button>
     <div class="app-bar-title">
       <div class="app-logo">
@@ -104,19 +106,21 @@
     </div>
   </header>
 
-  <!-- Desktop sidebar -->
-  <aside class="sidebar hidden" id="sidebar" aria-label="Main navigation">
+  <!-- Navigation drawer (every screen size, opened by the hamburger).
+       Sections and items are rendered from js/routes.js by router.js. -->
+  <aside class="sidebar hidden" id="sidebar" aria-label="Main navigation"
+         aria-hidden="true" tabindex="-1" inert>
     <div class="sidebar-header">
       <div class="app-logo">
-        <i class="fas fa-brain"></i>
+        <i class="fas fa-brain" aria-hidden="true"></i>
         <span>CORPUS ULTIMATE</span>
       </div>
-      <button class="sidebar-close" id="sidebar-close" aria-label="Close sidebar">
-        <i class="fas fa-times"></i>
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close menu">
+        <i class="fas fa-times" aria-hidden="true"></i>
       </button>
     </div>
-    <nav class="sidebar-nav" id="sidebar-nav">
-      <!-- navigation items injected by router.js -->
+    <nav class="sidebar-nav" id="sidebar-nav" aria-label="Sections">
+      <!-- grouped navigation injected by router.js from CORPUS_ROUTES -->
     </nav>
     <div class="sidebar-footer">
       <div class="user-info" id="sidebar-user-info" style="display:none;">
@@ -133,8 +137,8 @@
     </div>
   </aside>
 
-  <!-- Sidebar overlay -->
-  <div class="sidebar-overlay hidden" id="sidebar-overlay" onclick="router.closeSidebar()"></div>
+  <!-- Drawer scrim: tapping outside the menu closes it -->
+  <div class="sidebar-overlay hidden" id="sidebar-overlay" aria-hidden="true"></div>
 
   <!-- Main content -->
   <main class="main-content" id="main-content" tabindex="-1">
@@ -143,8 +147,6 @@
       <!-- Pages injected by router.js -->
     </div>
   </main>
-
-  <!-- Mobile bottom navigation removed: all routes live in the hamburger sidebar. -->
 
   <!-- Confirmation dialog -->
   <div id="confirm-dialog" class="modal hidden">
@@ -163,40 +165,41 @@
   </div>
 
   <!-- Application JavaScript -->
-  <script src="js/config.js?v=2026-11-19.4" defer></script>
-  <script src="js/utils.js?v=2026-11-19.4" defer></script>
-  <script src="js/perf.js?v=2026-11-19.4" defer></script>
-  <script src="js/supabase-client.js?v=2026-11-19.4" defer></script>
-  <script src="js/api.js?v=2026-11-19.4" defer></script>
-  <script src="js/auth.js?v=2026-11-19.4" defer></script>
-  <script src="js/state.js?v=2026-11-19.4" defer></script>
-  <script src="js/components.js?v=2026-11-19.4" defer></script>
-  <script src="js/actions.js?v=2026-11-19.4" defer></script>
-  <script src="js/charts.js?v=2026-11-19.4" defer></script>
-  <script src="js/app-context.js?v=2026-11-19.4" defer></script>
-  <script src="js/router.js?v=2026-11-19.4" defer></script>
-  <script src="js/dashboard.js?v=2026-11-19.4" defer></script>
-  <script src="js/models.js?v=2026-11-19.4" defer></script>
-  <script src="js/training.js?v=2026-11-19.4" defer></script>
-  <script src="js/statistics.js?v=2026-11-19.4" defer></script>
-  <script src="js/chat.js?v=2026-11-19.4" defer></script>
-  <script src="js/prediction.js?v=2026-11-19.4" defer></script>
-  <script src="js/neural-lab.js?v=2026-11-19.4" defer></script>
-  <script src="js/ai-information.js?v=2026-11-19.4" defer></script>
-  <script src="js/datasets.js?v=2026-11-19.4" defer></script>
-  <script src="js/evaluation.js?v=2026-11-19.4" defer></script>
-  <script src="js/compute.js?v=2026-11-19.4" defer></script>
-  <script src="js/device-agent.js?v=2026-11-19.4" defer></script>
-  <script src="js/devices.js?v=2026-11-19.4" defer></script>
-  <script src="js/storage.js?v=2026-11-19.4" defer></script>
-  <script src="js/experiments.js?v=2026-11-19.4" defer></script>
-  <script src="js/settings.js?v=2026-11-19.4" defer></script>
-  <script src="js/teachers.js?v=2026-11-19.4" defer></script>
-  <script src="js/teacher-selection.js?v=2026-11-19.4" defer></script>
-  <script src="js/distillation.js?v=2026-11-19.4" defer></script>
-  <script src="js/students.js?v=2026-11-19.4" defer></script>
-  <script src="js/intelligence.js?v=2026-11-19.4" defer></script>
-  <script src="js/budgets.js?v=2026-11-19.4" defer></script>
-  <script src="js/app-bootstrap.js?v=2026-11-19.4" defer></script>
+  <script src="js/config.js?v=2026-11-20.1" defer></script>
+  <script src="js/utils.js?v=2026-11-20.1" defer></script>
+  <script src="js/perf.js?v=2026-11-20.1" defer></script>
+  <script src="js/supabase-client.js?v=2026-11-20.1" defer></script>
+  <script src="js/api.js?v=2026-11-20.1" defer></script>
+  <script src="js/auth.js?v=2026-11-20.1" defer></script>
+  <script src="js/state.js?v=2026-11-20.1" defer></script>
+  <script src="js/components.js?v=2026-11-20.1" defer></script>
+  <script src="js/actions.js?v=2026-11-20.1" defer></script>
+  <script src="js/charts.js?v=2026-11-20.1" defer></script>
+  <script src="js/app-context.js?v=2026-11-20.1" defer></script>
+  <script src="js/routes.js?v=2026-11-20.1" defer></script>
+  <script src="js/router.js?v=2026-11-20.1" defer></script>
+  <script src="js/dashboard.js?v=2026-11-20.1" defer></script>
+  <script src="js/models.js?v=2026-11-20.1" defer></script>
+  <script src="js/training.js?v=2026-11-20.1" defer></script>
+  <script src="js/statistics.js?v=2026-11-20.1" defer></script>
+  <script src="js/chat.js?v=2026-11-20.1" defer></script>
+  <script src="js/prediction.js?v=2026-11-20.1" defer></script>
+  <script src="js/neural-lab.js?v=2026-11-20.1" defer></script>
+  <script src="js/ai-information.js?v=2026-11-20.1" defer></script>
+  <script src="js/datasets.js?v=2026-11-20.1" defer></script>
+  <script src="js/evaluation.js?v=2026-11-20.1" defer></script>
+  <script src="js/compute.js?v=2026-11-20.1" defer></script>
+  <script src="js/device-agent.js?v=2026-11-20.1" defer></script>
+  <script src="js/devices.js?v=2026-11-20.1" defer></script>
+  <script src="js/storage.js?v=2026-11-20.1" defer></script>
+  <script src="js/experiments.js?v=2026-11-20.1" defer></script>
+  <script src="js/settings.js?v=2026-11-20.1" defer></script>
+  <script src="js/teachers.js?v=2026-11-20.1" defer></script>
+  <script src="js/teacher-selection.js?v=2026-11-20.1" defer></script>
+  <script src="js/distillation.js?v=2026-11-20.1" defer></script>
+  <script src="js/students.js?v=2026-11-20.1" defer></script>
+  <script src="js/intelligence.js?v=2026-11-20.1" defer></script>
+  <script src="js/budgets.js?v=2026-11-20.1" defer></script>
+  <script src="js/app-bootstrap.js?v=2026-11-20.1" defer></script>
 </body>
 </html>

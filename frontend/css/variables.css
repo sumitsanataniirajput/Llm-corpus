@@ -164,7 +164,6 @@
   /* ---- Layout ---- */
   --sidebar-width: 264px;
   --top-bar-height: 60px;
-  --bottom-nav-height: 64px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
   --page-max: 1280px;

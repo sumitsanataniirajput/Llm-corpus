@@ -1,17 +1,16 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-19.4",
+  "buildId": "2026-11-20.1",
   "sourceRef": "main",
   "navigation": "All application routes are in the hamburger sidebar; bottom navigation removed.",
   "notes": [
-    "AI Teacher Network: providers (OpenAI, Gemini, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks or a custom OpenAI-compatible endpoint) are connected once, verified against the real API, and their models are discovered live. No model list or price is hardcoded anywhere: specs appear only where the provider reports them and prices only where you enter them.",
-    "Credential security: API keys are encrypted with AES-256-GCM before storage, returned only as a last-four hint plus a short fingerprint, redacted from provider errors, and refused outright when CREDENTIAL_ENCRYPTION_KEY is not configured on the backend.",
-    "Teacher Selection Studio: modes A single, B multiple independent answers, C teacher + separate evaluator, D competition, E specialised by domain, with hard per-run budgets (requests, tokens, spend, concurrency) and a daily cap per provider that stops a run mid-flight and records why.",
-    "Knowledge Distillation and Dataset Quality Review: instruction/QA/coding/multilingual/summarization/classification/preference tasks, per-record provenance (provider, model, request ID, tokens, latency), duplicate and near-duplicate filtering, language and format validation, contradiction and teacher-disagreement analysis, human approval, and conversion of accepted records only into chat JSONL / Alpaca / QA / classification / preference datasets.",
-    "Student Model Studio: inspects the real architecture (CORPUS models are instantiated and counted; Hugging Face models are read through AutoConfig) and gates SFT, LoRA, QLoRA, DPO and continued training on the libraries and hardware that are actually present.",
-    "Training Intelligence: architecture, training configuration, dataset analytics, hardware telemetry, live optimizer-step metrics and charts are all read from persisted rows; anything the runtime could not measure is shown as Unavailable.",
-    "API Usage and Budgets: per-provider requests, failures, rate-limit errors, input/output/cached tokens, estimated spend, average latency and last request, with owner-configured hard limits."
+    "One navigation system: the hamburger opens the sidebar on every screen size \u2014 phone, tablet, desktop, TV. The mobile bottom bar and its five duplicate links are gone, and nothing else floats over the page as navigation.",
+    "The sidebar now lists all 24 pages inside seven expandable sections (Workspace, Build & Data, AI & Intelligence, Compute & Devices, Teaching & Distillation, Observability, System). Sections remember whether you left them open, the section holding the current page opens itself, and every entry is a real button for keyboard, screen reader and remote control.",
+    "The drawer scrolls with momentum, honours safe-area insets on notched phones, locks the page behind it, closes on Escape or a tap on the scrim, and returns focus to the hamburger.",
+    "AI Teacher Network and Dataset Quality Review load again: two routes share one module, and the router now passes the route into the renderer instead of calling it with no arguments (which produced a 'module not loaded' panel even though the script had loaded).",
+    "Every route, module global and script file is declared once in js/routes.js; the router, the bootstrap module check and the test suite all read that table, so a page cannot be added to the menu without a working render().",
+    "Fixed a duplicate global: js/components.js replaced window.ui instead of extending it, silently dropping the auth helpers (ui.showOffline/hideOffline/setLoading) that js/auth.js calls."
   ],
   "howToVerify": "GET <frontend-url>/version.json \u2014 the deployed buildId must equal the buildId committed in frontend/version.json on main."
 }

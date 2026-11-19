@@ -11,12 +11,30 @@ window.router = (function () {
     return window.CORPUS_APP ? window.CORPUS_APP.getPageContainer() : null;
   }
 
+  // The sidebar is the only navigation on every screen size: the hamburger
+  // opens it as a drawer on phones, tablets and desktops alike.
   function getNavLinks() {
-    return document.querySelectorAll('.nav-link');
+    return document.querySelectorAll('.nav-item[data-route]');
   }
 
   function getSidebarNav() {
     return document.getElementById('sidebar-nav');
+  }
+
+  function getSidebar() {
+    return document.getElementById('sidebar');
+  }
+
+  function getOverlay() {
+    return document.getElementById('sidebar-overlay');
+  }
+
+  function getMenuToggle() {
+    return document.getElementById('menu-toggle');
+  }
+
+  function routeRegistry() {
+    return window.CORPUS_ROUTES || null;
   }
 
   let ignoreHashChange = false;
@@ -30,63 +48,77 @@ window.router = (function () {
   let renderingRoute = null;
   let currentPageController = null;
 
-  // Route → page module. Modules may expose dispose() to release sockets/timers.
-  const PAGE_MODULES = {
-    dashboard: 'dashboard',
-    models: 'models',
-    training: 'training',
-    statistics: 'statistics',
-    'ai-information': 'aiInfo',
-    chat: 'chat',
-    'prediction-lab': 'prediction',
-    'neural-lab': 'neuralLab',
-    datasets: 'datasets',
-    evaluation: 'evaluation',
-    compute: 'compute',
-    'device-compute': 'devices',
-    'multi-device': 'devices',
-    'cloud-storage': 'storage',
-    experiments: 'experiments',
-    settings: 'settings',
-    'ai-teachers': 'teachers',
-    'provider-management': 'teachers',
-    'teacher-selection': 'teacherSelection',
-    'knowledge-distillation': 'distillation',
-    'dataset-review': 'distillation',
-    'student-models': 'students',
-    'training-intelligence': 'intelligence',
-    'api-usage': 'budgets',
-  };
+  // Route → page module and route → script come from the single registry in
+  // js/routes.js, so the sidebar, the renderer lookup, the bootstrap's module
+  // check and the tests can never disagree about what a route maps to.
+  const registry = routeRegistry();
+  const PAGE_MODULES = Object.create(null);
+  const MODULE_SCRIPTS = Object.create(null);
 
-  // Route → script that registers the module. Used to recover from a module
-  // that is not registered (stale Android cache, a 404, or a truncated file)
-  // by requesting the exact file again with a cache-busting query.
-  const MODULE_SCRIPTS = {
-    dashboard: 'js/dashboard.js',
-    models: 'js/models.js',
-    training: 'js/training.js',
-    statistics: 'js/statistics.js',
-    'ai-information': 'js/ai-information.js',
-    chat: 'js/chat.js',
-    'prediction-lab': 'js/prediction.js',
-    'neural-lab': 'js/neural-lab.js',
-    datasets: 'js/datasets.js',
-    evaluation: 'js/evaluation.js',
-    compute: 'js/compute.js',
-    'device-compute': 'js/devices.js',
-    'multi-device': 'js/devices.js',
-    'cloud-storage': 'js/storage.js',
-    experiments: 'js/experiments.js',
-    settings: 'js/settings.js',
-    'ai-teachers': 'js/teachers.js',
-    'provider-management': 'js/teachers.js',
-    'teacher-selection': 'js/teacher-selection.js',
-    'knowledge-distillation': 'js/distillation.js',
-    'dataset-review': 'js/distillation.js',
-    'student-models': 'js/students.js',
-    'training-intelligence': 'js/intelligence.js',
-    'api-usage': 'js/budgets.js',
-  };
+  if (registry) {
+    registry.ROUTES.forEach((entry) => {
+      PAGE_MODULES[entry.route] = entry.module;
+      MODULE_SCRIPTS[entry.route] = entry.script;
+    });
+  } else {
+    // Without the registry nothing can be routed; say so loudly instead of
+    // rendering 24 "module not loaded" panels with no explanation.
+    try {
+      window.CORPUS_APP.recordError(
+        'router.registry',
+        'js/routes.js did not load, so no route can be resolved. Check that it is included before js/router.js.',
+        null
+      );
+    } catch (e) { /* diagnostics are optional */ }
+  }
+
+  /* Sidebar open/closed state, per group, remembered between visits. A stored
+     value is a list of group ids the user left open; anything else falls back
+     to the group defaults. */
+  const NAV_STATE_KEY = 'corpus_nav_groups';
+
+  function readOpenGroups() {
+    try {
+      const raw = window.localStorage.getItem(NAV_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.filter((id) => typeof id === 'string');
+      }
+    } catch (e) { /* private mode, disabled storage: use defaults */ }
+    if (!registry) return [];
+    return registry.GROUPS.filter((group) => group.defaultOpen).map((group) => group.id);
+  }
+
+  function writeOpenGroups(ids) {
+    try {
+      window.localStorage.setItem(NAV_STATE_KEY, JSON.stringify(ids));
+    } catch (e) { /* storage is optional */ }
+  }
+
+  function openGroupsInDom() {
+    const nav = getSidebarNav();
+    if (!nav) return [];
+    return Array.from(nav.querySelectorAll('.nav-group[open]')).map((el) => el.dataset.group);
+  }
+
+  function openGroup(groupId) {
+    const nav = getSidebarNav();
+    if (!nav || !groupId) return;
+    const el = nav.querySelector('.nav-group[data-group="' + cssEscape(groupId) + '"]');
+    if (!el) return;
+    if (!el.open) {
+      el.open = true;
+      const summary = el.querySelector('summary');
+      if (summary) summary.setAttribute('aria-expanded', 'true');
+      writeOpenGroups(openGroupsInDom());
+    }
+  }
+
+  // Minimal attribute-value escape for querySelector. Group ids are internal
+  // (a-z, dash) but this keeps the helper safe if that ever changes.
+  function cssEscape(value) {
+    return String(value).replace(/["\\]/g, '\\$&');
+  }
 
   // One recovery attempt per route per page load: retrying in a loop would only
   // hammer the server when the file is genuinely broken.
@@ -180,74 +212,153 @@ window.router = (function () {
     }
   }
 
-  const routes = {
-    dashboard: renderDashboard,
-    models: renderModels,
-    training: renderTraining,
-    statistics: renderStatistics,
-    'ai-information': renderAIInformation,
-    chat: renderChat,
-    'prediction-lab': renderPredictionLab,
-    'neural-lab': renderNeuralLab,
-    datasets: renderDatasets,
-    evaluation: renderEvaluation,
-    compute: renderCompute,
-    'device-compute': renderDeviceCompute,
-    'multi-device': renderMultiDevice,
-    'cloud-storage': renderStorage,
-    experiments: renderExperiments,
-    settings: renderSettings,
-    auth: renderAuth,
-    'ai-teachers': renderTeachers,
-    'provider-management': renderTeachers,
-    'teacher-selection': renderTeacherSelection,
-    'knowledge-distillation': renderDistillation,
-    'dataset-review': renderDistillation,
-    'student-models': renderStudents,
-    'training-intelligence': renderIntelligence,
-    'api-usage': renderBudgets,
-  };
+  // Route → renderer. Every registry route is served by renderPage(); `auth`
+  // is the one page that is not in the menu.
+  const routes = Object.create(null);
+  if (registry) {
+    registry.ROUTES.forEach((entry) => {
+      routes[entry.route] = renderPage;
+    });
+  }
+  routes.auth = renderAuth;
+
+  /* ---------- Sidebar rendering ----------
+
+     One <details> per group, one <button> per page. Buttons (not divs) so the
+     menu is reachable and operable by keyboard, screen readers and TV remotes;
+     `data-route` is the only thing active-state code has to compare, which is
+     what used to break when a label was renamed.
+  ------------------------------------------------------------------------ */
+
+  function navItemMarkup(entry, activeRoute) {
+    const active = entry.route === activeRoute;
+    return '<button type="button" class="nav-item' + (active ? ' active' : '') + '"' +
+      ' data-route="' + escapeHtml(entry.route) + '"' +
+      ' title="' + escapeHtml(entry.label) + '"' +
+      (active ? ' aria-current="page"' : '') +
+      ' onclick="router.navigate(\'' + escapeHtml(entry.route) + '\')">' +
+        '<i class="fas ' + escapeHtml(entry.icon) + '" aria-hidden="true"></i>' +
+        '<span>' + escapeHtml(entry.label) + '</span>' +
+      '</button>';
+  }
+
+  function renderSidebar(activeRoute) {
+    const nav = getSidebarNav();
+    const reg = routeRegistry();
+    if (!nav || !reg) return;
+    const openIds = readOpenGroups();
+
+    nav.innerHTML = reg.GROUPS.map((group) => {
+      const items = reg.routesInGroup(group.id);
+      if (!items.length) return '';
+      const hasActive = items.some((item) => item.route === activeRoute);
+      // A group holding the page you are on is always open, even if it was
+      // collapsed last time: otherwise the menu hides the current location.
+      const open = hasActive || openIds.indexOf(group.id) !== -1;
+      return '<details class="nav-group" data-group="' + escapeHtml(group.id) + '"' + (open ? ' open' : '') + '>' +
+        '<summary class="nav-group-summary" aria-expanded="' + (open ? 'true' : 'false') + '">' +
+          '<i class="fas ' + escapeHtml(group.icon) + '" aria-hidden="true"></i>' +
+          '<span class="nav-group-label">' + escapeHtml(group.label) + '</span>' +
+          '<i class="fas fa-chevron-down nav-group-chevron" aria-hidden="true"></i>' +
+        '</summary>' +
+        '<div class="nav-group-items">' +
+          items.map((entry) => navItemMarkup(entry, activeRoute)).join('') +
+        '</div>' +
+      '</details>';
+    }).join('');
+  }
+
+  function initNavGroups() {
+    const nav = getSidebarNav();
+    if (!nav) return;
+    // Persist a group the moment the user opens or closes it.
+    nav.addEventListener('toggle', (event) => {
+      const details = event.target;
+      if (!details || !details.classList || !details.classList.contains('nav-group')) return;
+      if (event.target !== details) return;
+      const summary = details.querySelector('summary');
+      if (summary) summary.setAttribute('aria-expanded', details.open ? 'true' : 'false');
+      writeOpenGroups(openGroupsInDom());
+    }, true);
+  }
+
+  /* ---------- Drawer behaviour (all screen sizes) ---------- */
+
+  let lastFocusedBeforeOpen = null;
+
+  function isSidebarOpen() {
+    const sidebar = getSidebar();
+    return Boolean(sidebar && !sidebar.classList.contains('hidden'));
+  }
+
+  function syncDrawerState(open) {
+    const sidebar = getSidebar();
+    const overlay = getOverlay();
+    const toggle = getMenuToggle();
+    if (sidebar) {
+      sidebar.classList.toggle('hidden', !open);
+      sidebar.setAttribute('aria-hidden', open ? 'false' : 'true');
+      // A closed drawer must not keep focusable children in the tab order.
+      sidebar.toggleAttribute('inert', !open);
+    }
+    if (overlay) overlay.classList.toggle('hidden', !open);
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+    }
+    document.body.classList.toggle('nav-open', open);
+  }
+
+  function openSidebar() {
+    if (isSidebarOpen()) return;
+    lastFocusedBeforeOpen = document.activeElement;
+    syncDrawerState(true);
+    const sidebar = getSidebar();
+    const target = sidebar ? (sidebar.querySelector('.nav-item.active') || sidebar) : null;
+    if (target && typeof target.focus === 'function') {
+      try { target.focus({ preventScroll: true }); } catch (e) { try { target.focus(); } catch (e2) {} }
+    }
+  }
+
+  function closeSidebar(options) {
+    const restoreFocus = !options || options.restoreFocus !== false;
+    const wasOpen = isSidebarOpen();
+    syncDrawerState(false);
+    document.body.classList.remove('nav-open');
+    if (wasOpen && restoreFocus) {
+      const toggle = getMenuToggle();
+      const back = toggle || lastFocusedBeforeOpen;
+      if (back && typeof back.focus === 'function' && document.contains(back)) {
+        try { back.focus({ preventScroll: true }); } catch (e) { try { back.focus(); } catch (e2) {} }
+      }
+    }
+    lastFocusedBeforeOpen = null;
+  }
+
+  function toggleSidebar() {
+    if (isSidebarOpen()) closeSidebar();
+    else openSidebar();
+  }
+
+  function onKeydown(event) {
+    if (!event || event.key !== 'Escape') return;
+    if (isSidebarOpen()) {
+      closeSidebar();
+      event.stopPropagation();
+    }
+  }
 
   function init() {
     if (initialized) return;
     initialized = true;
     window.CORPUS_APP.logDiagnostic('router.init called');
 
-    const navItems = [
-      { route: 'dashboard', label: 'Dashboard', icon: 'fa-home' },
-      { route: 'models', label: 'Models', icon: 'fa-cube' },
-      { route: 'training', label: 'Training Center', icon: 'fa-flask' },
-      { route: 'statistics', label: 'Statistics', icon: 'fa-chart-line' },
-      { route: 'ai-information', label: 'AI Information', icon: 'fa-info-circle' },
-      { route: 'chat', label: 'AI Chat', icon: 'fa-comments' },
-      { route: 'prediction-lab', label: 'Prediction Lab', icon: 'fa-microscope' },
-      { route: 'neural-lab', label: 'Neural Lab', icon: 'fa-microchip' },
-      { route: 'datasets', label: 'Datasets', icon: 'fa-database' },
-      { route: 'evaluation', label: 'Evaluation', icon: 'fa-check-double' },
-      { route: 'compute', label: 'Compute', icon: 'fa-server' },
-      { route: 'device-compute', label: 'Device Compute', icon: 'fa-microchip' },
-      { route: 'multi-device', label: 'Multi-Device Training', icon: 'fa-network-wired' },
-      { route: 'cloud-storage', label: 'Cloud Storage', icon: 'fa-cloud' },
-      { route: 'experiments', label: 'Experiments', icon: 'fa-flask' },
-      { route: 'ai-teachers', label: 'AI Teacher Network', icon: 'fa-graduation-cap' },
-      { route: 'provider-management', label: 'Provider Management', icon: 'fa-key' },
-      { route: 'teacher-selection', label: 'Teacher Selection', icon: 'fa-users-gear' },
-      { route: 'knowledge-distillation', label: 'Knowledge Distillation', icon: 'fa-droplet' },
-      { route: 'dataset-review', label: 'Dataset Quality Review', icon: 'fa-list-check' },
-      { route: 'student-models', label: 'Student Model Studio', icon: 'fa-graduation-cap' },
-      { route: 'training-intelligence', label: 'Training Intelligence', icon: 'fa-gauge-high' },
-      { route: 'api-usage', label: 'API Usage & Budgets', icon: 'fa-wallet' },
-      { route: 'settings', label: 'Settings', icon: 'fa-cog' },
-    ];
-
-    const sidebarNav = getSidebarNav();
-    if (sidebarNav) {
-      sidebarNav.innerHTML = navItems.map(item => `
-        <div class="nav-item ${item.route === window.state.getRoute() ? 'active' : ''}" onclick="router.navigate('${item.route}')">
-          <i class="fas ${item.icon}"></i><span>${item.label}</span>
-        </div>
-      `).join('');
+    const reg = routeRegistry();
+    if (!reg) {
+      window.CORPUS_APP.recordError('router.init', 'Route registry missing (js/routes.js).', null);
     }
+
+    renderSidebar(getRouteFromHash());
 
     getNavLinks().forEach(link => {
       link.addEventListener('click', (e) => {
@@ -258,18 +369,19 @@ window.router = (function () {
     });
 
     const closeBtn = document.getElementById('sidebar-close');
-    const overlay = document.getElementById('sidebar-overlay');
-    const menuToggle = document.getElementById('menu-toggle');
-    const sidebar = document.getElementById('sidebar');
+    const overlay = getOverlay();
+    const menuToggle = getMenuToggle();
 
-    if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
-    if (overlay) overlay.addEventListener('click', closeSidebar);
-    if (menuToggle && sidebar && overlay) {
-      menuToggle.addEventListener('click', () => {
-        sidebar.classList.remove('hidden');
-        overlay.classList.remove('hidden');
-      });
-    }
+    if (closeBtn) closeBtn.addEventListener('click', () => closeSidebar());
+    if (overlay) overlay.addEventListener('click', () => closeSidebar());
+    if (menuToggle) menuToggle.addEventListener('click', toggleSidebar);
+
+    document.addEventListener('keydown', onKeydown);
+    initNavGroups();
+
+    // The drawer is closed on load at every size: navigation starts from the
+    // hamburger, and the page you land on is the page you see.
+    syncDrawerState(false);
 
     window.addEventListener('hashchange', (e) => {
       if (ignoreHashChange) return;
@@ -284,6 +396,7 @@ window.router = (function () {
   function getRouteFromHash() {
     try {
       const hash = window.location.hash;
+      const reg = routeRegistry();
       if (!hash) {
         // Android may recreate the web process when returning from the system
         // file picker. Restore the last SPA page instead of unexpectedly
@@ -299,11 +412,15 @@ window.router = (function () {
       let route = hash.replace(/^#\/?/, '');
       route = route.trim().replace(/\/+$/, '');
       if (!route) return 'dashboard';
-      if (routes[route]) return route;
+
       // Deep links carry an id for a page to read (e.g. #/dataset-review/<id>):
       // the router resolves the page and the page parses the id from the hash.
-      const base = route.split('/')[0];
-      if (base && routes[base]) return base;
+      const direct = route.split('/')[0];
+      const resolved = reg ? reg.canonical(direct) : direct;
+
+      if (routes[resolved]) return resolved;
+      // An alias with an id (e.g. #/ai-api-keys/<provider>) resolves too.
+      if (reg && reg.canonical(route) && routes[reg.canonical(direct)]) return reg.canonical(direct);
       return 'dashboard';
     } catch (err) {
       window.CORPUS_APP.recordError('router.getRouteFromHash', err.message, err);
@@ -311,7 +428,9 @@ window.router = (function () {
     }
   }
 
-  async function navigate(route) {
+  async function navigate(requestedRoute) {
+    const reg = routeRegistry();
+    let route = reg ? reg.canonical(requestedRoute) : requestedRoute;
     if (!routes[route]) route = 'dashboard';
     // Re-rendering the page that is already rendering is the only case we skip
     // (a double tap on the same nav item).
@@ -362,14 +481,18 @@ window.router = (function () {
       currentRoute = route;
 
       setActiveNav(route);
-      closeSidebar();
+      closeSidebar({ restoreFocus: false });
 
       const container = window.CORPUS_APP.requirePageContainer('router.navigate');
       if (container) container.setAttribute('aria-busy', 'true');
 
       try {
         const renderer = routes[route];
-        const result = renderer();
+        // The route is passed explicitly: several routes share one module
+        // (teachers backs AI Teacher Network and AI API Keys; distillation
+        // backs Knowledge Distillation and Dataset Quality Review), so a page
+        // cannot know which view it must draw without being told.
+        const result = renderer(route);
         if (result && typeof result.then === 'function') {
           await result;
         }
@@ -504,49 +627,23 @@ window.router = (function () {
 
   function setActiveNav(route) {
     try {
-      getNavLinks().forEach(link => {
-        const isActive = link.dataset.route === route;
-        link.classList.toggle('active', isActive);
-        if (isActive) {
-          link.setAttribute('aria-current', 'page');
-        } else {
-          link.removeAttribute('aria-current');
-        }
+      const canonical = routeRegistry() ? routeRegistry().canonical(route) : route;
+      const nav = getSidebarNav();
+      if (!nav) return;
+      nav.querySelectorAll('.nav-item[data-route]').forEach((item) => {
+        const isActive = item.dataset.route === canonical;
+        item.classList.toggle('active', isActive);
+        if (isActive) item.setAttribute('aria-current', 'page');
+        else item.removeAttribute('aria-current');
       });
-      const sidebarNav = getSidebarNav();
-      if (!sidebarNav) return;
-      const items = sidebarNav.querySelectorAll('.nav-item');
-      items.forEach(item => {
-        const label = item.querySelector('span');
-        if (label) {
-          const known = {
-            'Dashboard': 'dashboard', 'Models': 'models', 'Training Center': 'training',
-            'Statistics': 'statistics', 'AI Information': 'ai-information', 'AI Chat': 'chat',
-            'Prediction Lab': 'prediction-lab', 'Neural Lab': 'neural-lab', 'Datasets': 'datasets',
-            'Evaluation': 'evaluation', 'Compute': 'compute', 'Cloud Storage': 'cloud-storage',
-            'Device Compute': 'device-compute', 'Multi-Device Training': 'multi-device',
-            'Experiments': 'experiments', 'Settings': 'settings',
-            'AI Teacher Network': 'ai-teachers', 'Provider Management': 'provider-management',
-            'Teacher Selection': 'teacher-selection', 'Knowledge Distillation': 'knowledge-distillation',
-            'Dataset Quality Review': 'dataset-review', 'Student Model Studio': 'student-models',
-            'Training Intelligence': 'training-intelligence', 'API Usage & Budgets': 'api-usage',
-          };
-          item.classList.toggle('active', known[label.textContent] === route);
-        }
-      });
+      // Keyboard/remote users must be able to see where they are, so the
+      // section holding the current page is expanded after every navigation.
+      if (routeRegistry()) {
+        const group = routeRegistry().groupOf(canonical);
+        if (group) openGroup(group.id);
+      }
     } catch (e) {
       window.CORPUS_APP.recordError('router.setActiveNav', e.message, e);
-    }
-  }
-
-  function closeSidebar() {
-    try {
-      const sidebar = document.getElementById('sidebar');
-      const overlay = document.getElementById('sidebar-overlay');
-      if (sidebar) sidebar.classList.add('hidden');
-      if (overlay) overlay.classList.add('hidden');
-    } catch (e) {
-      window.CORPUS_APP.recordError('router.closeSidebar', e.message, e);
     }
   }
 
@@ -587,93 +684,17 @@ window.router = (function () {
     }
   }
 
-  async function renderDashboard() {
-    return renderModulePage('dashboard', 'Dashboard', 'fa-home', 'renderDashboard');
-  }
-
-  async function renderModels() {
-    return renderModulePage('models', 'Models', 'fa-cube', 'renderModels');
-  }
-
-  async function renderTraining() {
-    return renderModulePage('training', 'Training Center', 'fa-flask', 'renderTraining');
-  }
-
-  async function renderStatistics() {
-    return renderModulePage('statistics', 'Statistics', 'fa-chart-line', 'renderStatistics');
-  }
-
-  async function renderAIInformation() {
-    return renderModulePage('ai-information', 'AI Information', 'fa-info-circle', 'renderAIInformation');
-  }
-
-  async function renderChat() {
-    return renderModulePage('chat', 'AI Chat', 'fa-comments', 'renderChat');
-  }
-
-  async function renderPredictionLab() {
-    return renderModulePage('prediction-lab', 'Prediction Lab', 'fa-microscope', 'renderPredictionLab');
-  }
-
-  async function renderNeuralLab() {
-    return renderModulePage('neural-lab', 'Neural Lab', 'fa-microchip', 'renderNeuralLab');
-  }
-
-  async function renderDatasets() {
-    return renderModulePage('datasets', 'Datasets', 'fa-database', 'renderDatasets');
-  }
-
-  async function renderEvaluation() {
-    return renderModulePage('evaluation', 'Evaluation', 'fa-check-double', 'renderEvaluation');
-  }
-
-  async function renderCompute() {
-    return renderModulePage('compute', 'Compute', 'fa-server', 'renderCompute');
-  }
-
-  async function renderDeviceCompute() {
-    return renderModulePage('device-compute', 'Device Compute', 'fa-microchip', 'renderDeviceCompute');
-  }
-
-  async function renderMultiDevice() {
-    return renderModulePage('multi-device', 'Multi-Device Training', 'fa-network-wired', 'renderMultiDevice');
-  }
-
-  async function renderStorage() {
-    return renderModulePage('cloud-storage', 'Cloud Storage', 'fa-cloud', 'renderStorage');
-  }
-
-  async function renderExperiments() {
-    return renderModulePage('experiments', 'Experiments', 'fa-flask', 'renderExperiments');
-  }
-
-  async function renderSettings() {
-    return renderModulePage('settings', 'Settings', 'fa-cog', 'renderSettings');
-  }
-
-  function renderTeachers(route) {
-    return renderModulePage(route, 'AI Teacher Network', 'fa-graduation-cap', 'renderTeachers');
-  }
-
-  async function renderTeacherSelection() {
-    return renderModulePage('teacher-selection', 'Teacher Selection', 'fa-users-gear', 'renderTeacherSelection');
-  }
-
-  function renderDistillation(route) {
-    const label = route === 'dataset-review' ? 'Dataset Quality Review' : 'Knowledge Distillation';
-    return renderModulePage(route, label, 'fa-droplet', 'renderDistillation');
-  }
-
-  async function renderStudents() {
-    return renderModulePage('student-models', 'Student Model Studio', 'fa-graduation-cap', 'renderStudents');
-  }
-
-  async function renderIntelligence() {
-    return renderModulePage('training-intelligence', 'Training Intelligence', 'fa-gauge-high', 'renderIntelligence');
-  }
-
-  async function renderBudgets() {
-    return renderModulePage('api-usage', 'API Usage & Budgets', 'fa-wallet', 'renderBudgets');
+  /**
+   * The renderer for every page route. Label and icon come from the registry,
+   * and the route itself is forwarded to the page module — a page shared by
+   * two routes (teachers, distillation) needs it to pick its own view.
+   */
+  async function renderPage(route) {
+    const reg = routeRegistry();
+    const entry = reg ? reg.byRoute(route) : null;
+    const label = entry ? entry.label : route;
+    const icon = entry ? entry.icon : 'fa-triangle-exclamation';
+    return renderModulePage(route, label, icon, 'renderPage:' + route);
   }
 
   async function renderAuth() {
@@ -694,10 +715,14 @@ window.router = (function () {
     init,
     getRouteFromHash,
     navigate,
+    openSidebar,
+    closeSidebar,
+    toggleSidebar,
+    renderSidebar,
+    isSidebarOpen,
     render,
     renderErrorPanel,
     setActiveNav,
-    closeSidebar,
     get initialized() {
       return initialized;
     },
