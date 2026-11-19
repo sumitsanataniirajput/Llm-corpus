@@ -145,32 +145,3 @@ automated route/module checks are documented in
 ## License
 
 MIT License — see LICENSE file.
-
-## Aria — Android floating AI voice assistant (included)
-
-The repository also vendors **Aria**, a floating AI voice assistant for Android
-(screen reading and phone task automation), imported from a Google AI Studio
-export, together with an experimental training pipeline under `training/`
-(dataset generation, QLoRA fine-tuning, evaluation, and a from-scratch CPU
-trainer with a hybrid slot layer).
-
-- Android app sources: the Gradle project rooted at this directory (`app/src/main/…`, `settings.gradle.kts`, `gradle/`)
-- Training pipeline: `training/`
-- AI Studio project: https://ai.studio/apps/29fa7b70-bfe7-473a-95cd-8341d54fa805
-- `.env.example` documents `GEMINI_API_KEY`. Real keys stay in a local, gitignored `.env` — never commit them.
-
-### Run Aria locally
-
-**Prerequisites:** [Android Studio](https://developer.android.com/studio)
-
-1. Open Android Studio
-2. Select **Open** and choose this repository's root directory (it is the Android Gradle project root)
-3. Allow Android Studio to fix any incompatibilities as it imports the project
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` to your Gemini API key (see `.env.example`)
-5. Remove this line from the app's `app/build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-
-> Aria is an independent component tracked in this repository alongside CORPUS
-> ULTIMATE (frontend/backend). The two share no build system: Android Studio
-> opens the Gradle project rooted here, while CORPUS ULTIMATE is run as
-> described in the sections above.
