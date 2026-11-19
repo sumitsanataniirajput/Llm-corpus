@@ -90,6 +90,9 @@ window.training = (function () {
           <p class="section-subtitle">Pick a model and one of your uploaded datasets, tune the configuration, then start a real backend job.</p>
         </div>
         <div class="page-header-actions">
+          <a class="btn btn-outline" href="#/provider-management" onclick="router.navigate('provider-management')"><i class="fas fa-key"></i> Connect AI API</a>
+          <a class="btn btn-outline" href="#/ai-teachers" onclick="router.navigate('ai-teachers')"><i class="fas fa-graduation-cap"></i> AI Teachers</a>
+          <a class="btn btn-outline" href="#/knowledge-distillation" onclick="router.navigate('knowledge-distillation')"><i class="fas fa-brain"></i> AI Training Studio</a>
           <button class="btn btn-outline" type="button" onclick="training.loadJobs(this)">
             <i class="fas fa-rotate"></i> Refresh jobs
           </button>
