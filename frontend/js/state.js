@@ -21,6 +21,10 @@ window.state = (function () {
   let connectionStatus = 'disconnected';
   const ACTIVE_MODEL_KEY = 'corpus:active-model:v1';
 
+  function asArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
   // Authentication initialization state
   let authReady = false;        // Set to true once initial Supabase session restore completes
   let authInitializing = false; // Set to true while the initial session check is in flight
@@ -146,22 +150,23 @@ window.state = (function () {
   // ========================================
 
   function setModels(list) {
-    models = list || [];
+    models = asArray(list);
     restoreActiveModel();
   }
-  function getModels() { return models; }
-  function addModel(m) { models.push(m); }
+  function getModels() { return asArray(models); }
+  function addModel(m) { models = asArray(models); models.push(m); }
   function updateModel(id, changes) {
+    models = asArray(models);
     const idx = models.findIndex(m => m.id === id);
     if (idx >= 0) models[idx] = { ...models[idx], ...changes };
     if (activeModel && activeModel.id === id && idx >= 0) activeModel = models[idx];
   }
   function removeModel(id) {
-    models = models.filter(m => m.id !== id);
+    models = asArray(models).filter(m => m.id !== id);
     if (activeModel && activeModel.id === id) setActiveModel(null);
   }
   function getModel(id) {
-    return models.find(m => m.id === id) || null;
+    return asArray(models).find(m => m.id === id) || null;
   }
   function setActiveModel(m) {
     activeModel = m || null;
@@ -183,7 +188,7 @@ window.state = (function () {
     try {
       const token = await getAccessToken();
       const result = await window.CORPUS_API.listModels(token);
-      const list = Array.isArray(result) ? result : (result && result.models) || [];
+      const list = Array.isArray(result) ? result : asArray(result && result.models);
       setModels(list);
     } catch (e) {
       // A failed list must not blank the UI or the user's current selection.
@@ -195,11 +200,11 @@ window.state = (function () {
   // Datasets
   // ========================================
 
-  function setDatasets(list) { datasets = list || []; }
-  function getDatasets() { return datasets; }
-  function addDataset(d) { datasets.push(d); }
-  function removeDataset(id) { datasets = datasets.filter(d => d.id !== id); }
-  function getDataset(id) { return datasets.find(d => d.id === id) || null; }
+  function setDatasets(list) { datasets = asArray(list); }
+  function getDatasets() { return asArray(datasets); }
+  function addDataset(d) { datasets = asArray(datasets); datasets.push(d); }
+  function removeDataset(id) { datasets = asArray(datasets).filter(d => d.id !== id); }
+  function getDataset(id) { return asArray(datasets).find(d => d.id === id) || null; }
   function setPendingDatasetId(id) { pendingDatasetId = id || null; }
   function getPendingDatasetId() { return pendingDatasetId; }
   function clearPendingDatasetId() { pendingDatasetId = null; }
@@ -208,17 +213,18 @@ window.state = (function () {
   // Training jobs
   // ========================================
 
-  function setTrainingJobs(list) { trainingJobs = list || []; }
-  function getTrainingJobs() { return trainingJobs; }
-  function addTrainingJob(j) { trainingJobs.push(j); }
+  function setTrainingJobs(list) { trainingJobs = asArray(list); }
+  function getTrainingJobs() { return asArray(trainingJobs); }
+  function addTrainingJob(j) { trainingJobs = asArray(trainingJobs); trainingJobs.push(j); }
   function updateTrainingJob(id, changes) {
+    trainingJobs = asArray(trainingJobs);
     const idx = trainingJobs.findIndex(j => j.id === id);
     if (idx >= 0) trainingJobs[idx] = { ...trainingJobs[idx], ...changes };
   }
   function removeTrainingJob(id) {
-    trainingJobs = trainingJobs.filter(j => j.id !== id);
+    trainingJobs = asArray(trainingJobs).filter(j => j.id !== id);
   }
-  function getTrainingJob(id) { return trainingJobs.find(j => j.id === id) || null; }
+  function getTrainingJob(id) { return asArray(trainingJobs).find(j => j.id === id) || null; }
   function setActiveJob(j) { activeJob = j; }
   function getActiveJob() { return activeJob; }
 

@@ -14,15 +14,46 @@ window.charts = (function () {
   const lineMeta = {};
   const MAX_POINTS = 240;
 
+  let missingChartReported = false;
+
   // Chart.js is a deferred third-party script. If it failed to load (offline,
   // CDN blocked, corporate proxy) the page must still work, just without charts.
   function chartLib() {
-    if (typeof Chart !== 'undefined' && Chart) return Chart;
+    const Lib = window.Chart;
+    if (typeof Lib === 'function') return Lib;
+    if (!missingChartReported) {
+      missingChartReported = true;
+      reportChartFailure('init', 'Chart.js is not available, skipping chart render');
+    }
+    return null;
+  }
+
+  // Diagnostics are best-effort: an optional chart must never be able to turn
+  // into a fatal page render or hide the controls that own its canvas.
+  function reportChartFailure(source, error) {
+    const detail = error && error.message ? error.message : String(error || 'unknown chart error');
     try {
       if (window.CORPUS_APP && typeof window.CORPUS_APP.logDiagnostic === 'function') {
-        window.CORPUS_APP.logDiagnostic('charts: Chart.js is not available, skipping chart render');
+        window.CORPUS_APP.logDiagnostic('charts:' + source + ': ' + detail);
       }
     } catch (e) { /* diagnostics are optional */ }
+  }
+
+  function asArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  // Chart.js exposes `chart.options` as a resolver Proxy. Its live `config.options`
+  // is the plain object that should be edited; deleting `min`/`max` through the
+  // resolver Proxy is unsafe (Chart.js 4 can create a sub-resolver from a
+  // non-iterable scope and throw `t is not iterable`).
+  function configOptions(inst) {
+    if (inst && inst.config && isEditableConfigObject(inst.config.options)) {
+      return inst.config.options;
+    }
+    // Lightweight test doubles sometimes keep options directly on the instance.
+    // Live Chart.js resolver proxies are intentionally rejected here.
+    if (inst && isEditableConfigObject(inst.options)) return inst.options;
     return null;
   }
 
@@ -68,6 +99,20 @@ window.charts = (function () {
 
   function clamp(value, low, high) {
     return Math.max(low, Math.min(high, value));
+  }
+
+  function isEditableConfigObject(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    try {
+      // Chart.js resolver/context proxies expose these internal properties. A
+      // plain `Object.create(null)` scale config is safe to edit.
+      if (Object.prototype.hasOwnProperty.call(value, '_scopes')) return false;
+      if (Object.prototype.hasOwnProperty.call(value, '_rootScopes')) return false;
+      if (Object.prototype.hasOwnProperty.call(value, '_proxy')) return false;
+      return Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null;
+    } catch (e) {
+      return false;
+    }
   }
 
   function numericLabel(label) {
@@ -265,22 +310,26 @@ window.charts = (function () {
   }
 
   function setScaleRange(options, meta) {
-    if (!options || !options.scales) return;
-    options.scales.x = options.scales.x || {};
+    // Only plain config objects are writable. `inst.options` in Chart.js 4 is a
+    // resolver Proxy; deleting min/max through it was the Training Center crash.
+    if (!isEditableConfigObject(options) || !meta) return;
+    if (!isEditableConfigObject(options.scales)) options.scales = {};
+    if (!isEditableConfigObject(options.scales.x)) options.scales.x = {};
+    const scale = options.scales.x;
     const { start, end, last } = viewIndices(meta);
     if (meta.labels.length === 0) {
-      delete options.scales.x.min;
-      delete options.scales.x.max;
+      delete scale.min;
+      delete scale.max;
       return;
     }
     if (meta.numeric) {
       const min = meta.positions[start];
       const max = meta.positions[end];
-      options.scales.x.min = min;
-      options.scales.x.max = max === min ? min + Math.max(1, Math.abs(min) * 0.001) : max;
+      scale.min = min;
+      scale.max = max === min ? min + Math.max(1, Math.abs(min) * 0.001) : max;
     } else {
-      options.scales.x.min = start;
-      options.scales.x.max = last === 0 ? 0 : end;
+      scale.min = start;
+      scale.max = last === 0 ? 0 : end;
     }
   }
 
@@ -335,10 +384,16 @@ window.charts = (function () {
     const meta = lineMeta[ctxId];
     const inst = instances[ctxId];
     if (!meta || !inst) return;
-    setScaleRange(inst.options, meta);
-    if (inst.config) inst.config.options = inst.options;
+    // Edit the plain config, never Chart.js's live resolver Proxy. update()
+    // rebuilds the resolver from config.options and clears cached scopes.
+    setScaleRange(configOptions(inst), meta);
+    if (inst.config && typeof inst.config.clearCache === 'function') {
+      try { inst.config.clearCache(); } catch (e) { /* optional Chart.js API */ }
+    }
     updateToolbar(meta);
-    if (shouldUpdate !== false && typeof inst.update === 'function') inst.update('none');
+    if (shouldUpdate !== false && typeof inst.update === 'function') {
+      try { inst.update('none'); } catch (err) { failChart(ctxId, 'update', err); }
+    }
   }
 
   function zoomChart(ctxId, factor, center) {
@@ -482,119 +537,163 @@ window.charts = (function () {
   }
 
   function replaceOptions(inst, options) {
-    const target = inst.options || (inst.options = {});
-    try {
-      Object.keys(target).forEach((key) => { delete target[key]; });
-      Object.assign(target, clone(options));
-    } catch (e) {
-      inst.options = clone(options);
+    // Replacing config.options keeps a plain object as the source of truth.
+    // Mutating/deleting keys on inst.options (a resolver Proxy in Chart.js 4)
+    // can corrupt Chart.js's scope cache and throw `t is not iterable`.
+    const next = clone(options || {});
+    if (inst.config && typeof inst.config === 'object') {
+      inst.config.options = next;
+      if (typeof inst.config.clearCache === 'function') {
+        try { inst.config.clearCache(); } catch (e) { /* optional Chart.js API */ }
+      }
+    } else {
+      inst.options = next;
     }
-    if (inst.config) inst.config.options = inst.options;
   }
 
   function destroyChart(ctxId) {
     detachControls(lineMeta[ctxId]);
     delete lineMeta[ctxId];
-    if (instances[ctxId]) {
-      try { instances[ctxId].destroy(); } catch (e) { /* already gone */ }
-      delete instances[ctxId];
+    const inst = instances[ctxId];
+    delete instances[ctxId];
+    if (inst) {
+      try { inst.destroy(); } catch (err) { reportChartFailure('destroy:' + ctxId, err); }
+    }
+  }
+
+  function failChart(ctxId, stage, error) {
+    reportChartFailure(stage + ':' + ctxId, error);
+    try {
+      const Lib = chartLib();
+      const canvas = document.getElementById(ctxId);
+      if (Lib && typeof Lib.getChart === 'function' && canvas) {
+        const orphan = Lib.getChart(canvas);
+        if (orphan && typeof orphan.destroy === 'function') orphan.destroy();
+      }
+    } catch (e) { /* the optional chart is already being discarded */ }
+    destroyChart(ctxId);
+  }
+
+  function makeChartInstance(ctxId, cfg, meta) {
+    const canvas = document.getElementById(ctxId);
+    const Lib = chartLib();
+    if (!canvas || !Lib) return null;
+    try {
+      const context = canvas.getContext('2d');
+      if (!context) {
+        reportChartFailure('context:' + ctxId, 'Canvas 2D context is unavailable');
+        destroyChart(ctxId);
+        return null;
+      }
+      const inst = new Lib(context, cfg);
+      if (!inst) {
+        destroyChart(ctxId);
+        return null;
+      }
+      instances[ctxId] = inst;
+      if (meta) lineMeta[ctxId] = meta;
+      return inst;
+    } catch (err) {
+      failChart(ctxId, 'constructor', err);
+      return null;
     }
   }
 
   function createLineChart(ctxId, labels, datasets, options = {}) {
-    const canvas = document.getElementById(ctxId);
-    if (!canvas) return null;
-    const Lib = chartLib();
-    if (!Lib) return null;
+    if (!document.getElementById(ctxId)) return null;
+    if (!chartLib()) { destroyChart(ctxId); return null; }
     const previousView = lineMeta[ctxId] ? lineMeta[ctxId].view.slice() : null;
     destroyChart(ctxId);
-    const prepared = prepareLine(labels, datasets, options, previousView);
+    const prepared = prepareLine(asArray(labels), asArray(datasets), options, previousView);
     setScaleRange(prepared.options, prepared.meta);
     const cfg = {
       type: 'line',
       data: { labels: prepared.labels, datasets: prepared.datasets },
       options: prepared.options,
     };
-    instances[ctxId] = new Lib(canvas.getContext('2d'), cfg);
-    lineMeta[ctxId] = prepared.meta;
-    attachControls(ctxId);
-    updateToolbar(prepared.meta);
-    return instances[ctxId];
+    const inst = makeChartInstance(ctxId, cfg, prepared.meta);
+    if (inst) {
+      attachControls(ctxId);
+      updateToolbar(prepared.meta);
+    }
+    return inst;
   }
 
   function updateChart(ctxId, labels, datasets, options = {}) {
     const inst = instances[ctxId];
     if (!inst) return;
-    const oldMeta = lineMeta[ctxId];
-    const previousView = oldMeta ? oldMeta.view.slice() : null;
-    if (inst.config && inst.config.type === 'line') {
-      const prepared = prepareLine(labels, datasets, options, previousView);
-      detachControls(oldMeta);
-      inst.data.labels = prepared.labels;
-      inst.data.datasets = prepared.datasets;
-      if (inst.config) inst.config.data = inst.data;
-      replaceOptions(inst, prepared.options);
-      lineMeta[ctxId] = prepared.meta;
-      attachControls(ctxId);
-      applyView(ctxId, false);
-      // Live metrics update frequently; skip animation so a metric stream
-      // cannot queue one full re-layout/draw per event on mobile.
+    const safeLabels = asArray(labels);
+    const safeDatasets = asArray(datasets);
+    try {
+      const oldMeta = lineMeta[ctxId];
+      const previousView = oldMeta ? oldMeta.view.slice() : null;
+      if (inst.config && inst.config.type === 'line') {
+        const prepared = prepareLine(safeLabels, safeDatasets, options, previousView);
+        detachControls(oldMeta);
+        inst.data = inst.data || {};
+        inst.data.labels = prepared.labels;
+        inst.data.datasets = prepared.datasets;
+        if (inst.config) inst.config.data = inst.data;
+        replaceOptions(inst, prepared.options);
+        lineMeta[ctxId] = prepared.meta;
+        attachControls(ctxId);
+        applyView(ctxId, false);
+        // Live metrics update frequently; skip animation so a metric stream
+        // cannot queue one full re-layout/draw per event on mobile.
+        inst.update('none');
+        return;
+      }
+      inst.data = inst.data || {};
+      inst.data.labels = safeLabels;
+      inst.data.datasets = safeDatasets;
       inst.update('none');
-      return;
+    } catch (err) {
+      failChart(ctxId, 'update', err);
     }
-    inst.data.labels = labels;
-    inst.data.datasets = datasets;
-    inst.update('none');
   }
 
   function createBarChart(ctxId, labels, datasets, options = {}) {
-    const ctx = document.getElementById(ctxId);
-    if (!ctx) return null;
-    const Lib = chartLib();
-    if (!Lib) return null;
+    if (!document.getElementById(ctxId)) return null;
+    if (!chartLib()) { destroyChart(ctxId); return null; }
     destroyChart(ctxId);
     const cfg = {
       type: 'bar',
-      data: { labels, datasets },
+      data: { labels: asArray(labels), datasets: asArray(datasets) },
       options: deepMerge(commonOptions, options),
     };
-    instances[ctxId] = new Lib(ctx.getContext('2d'), cfg);
-    return instances[ctxId];
+    return makeChartInstance(ctxId, cfg);
   }
 
   function createDonutChart(ctxId, labels, data, options = {}) {
-    const ctx = document.getElementById(ctxId);
-    if (!ctx) return null;
-    const Lib = chartLib();
-    if (!Lib) return null;
+    if (!document.getElementById(ctxId)) return null;
+    if (!chartLib()) { destroyChart(ctxId); return null; }
     destroyChart(ctxId);
     const cfg = {
       type: 'doughnut',
-      data: { labels, datasets: [{ data, backgroundColor: ['#6750a4', '#7d5260', '#625b71', '#00b8a9'] }] },
+      data: { labels: asArray(labels), datasets: [{ data: asArray(data), backgroundColor: ['#6750a4', '#7d5260', '#625b71', '#00b8a9'] }] },
       options: deepMerge(commonOptions, {
         ...options,
         cutout: '70%',
         plugins: { legend: { position: 'bottom', labels: { color: '#cac4d0' } } },
       }),
     };
-    instances[ctxId] = new Lib(ctx.getContext('2d'), cfg);
-    return instances[ctxId];
+    return makeChartInstance(ctxId, cfg);
   }
 
   function createProbabilityChart(ctxId, tokens, probabilities) {
-    const ctx = document.getElementById(ctxId);
-    if (!ctx) return null;
-    const Lib = chartLib();
-    if (!Lib) return null;
+    if (!document.getElementById(ctxId)) return null;
+    if (!chartLib()) { destroyChart(ctxId); return null; }
     destroyChart(ctxId);
+    const safeTokens = asArray(tokens);
+    const safeProbabilities = asArray(probabilities);
     const cfg = {
       type: 'bar',
       data: {
-        labels: tokens,
+        labels: safeTokens,
         datasets: [{
           label: 'Probability',
-          data: probabilities,
-          backgroundColor: probabilities.map((p, i) => (i === 0 ? '#6750a4' : 'rgba(103, 80, 164, 0.4)')),
+          data: safeProbabilities,
+          backgroundColor: safeProbabilities.map((p, i) => (i === 0 ? '#6750a4' : 'rgba(103, 80, 164, 0.4)')),
         }],
       },
       options: deepMerge(commonOptions, {
@@ -606,8 +705,7 @@ window.charts = (function () {
         plugins: { legend: { display: false } },
       }),
     };
-    instances[ctxId] = new Lib(ctx.getContext('2d'), cfg);
-    return instances[ctxId];
+    return makeChartInstance(ctxId, cfg);
   }
 
   function instances_() {
@@ -622,7 +720,8 @@ window.charts = (function () {
     const meta = lineMeta[ctxId];
     const inst = instances[ctxId];
     if (!meta || !inst) return null;
-    const scales = (inst.options && inst.options.scales) || {};
+    const options = configOptions(inst) || {};
+    const scales = (options.scales && isEditableConfigObject(options.scales)) ? options.scales : {};
     return {
       numeric: meta.numeric,
       total: meta.total,
@@ -636,8 +735,7 @@ window.charts = (function () {
       yType: scales.y && scales.y.type,
       xMin: scales.x && scales.x.min,
       xMax: scales.x && scales.x.max,
-      paddingTop: inst.options && inst.options.layout && inst.options.layout.padding
-        ? inst.options.layout.padding.top : null,
+      paddingTop: options.layout && options.layout.padding ? options.layout.padding.top : null,
     };
   }
 

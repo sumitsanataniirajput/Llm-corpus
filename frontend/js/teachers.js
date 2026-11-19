@@ -174,34 +174,36 @@ window.teachers = (function () {
     return `
       <div class="card provider-card" data-provider="${esc(provider.id)}">
         <div class="card-header">
-          <div>
+          <div class="provider-head-copy">
             <h3>${esc(provider.name)}</h3>
-            <span class="muted">${esc(provider.provider_type)}${provider.base_url ? ' · ' + esc(provider.base_url) : ''}</span>
+            <span class="muted provider-type-line">${esc(provider.provider_type)}${provider.base_url ? ' · <span class="provider-endpoint">' + esc(provider.base_url) + '</span>' : ''}</span>
           </div>
           ${statusPill(provider)}
         </div>
         <div class="card-body">
           <dl class="kv-list">
             <div><dt>Credential</dt><dd><code>${esc(provider.credential_hint || '—')}</code>
-              <span class="muted"> · fingerprint ${esc(provider.credential_fingerprint || '—')}</span></dd></div>
-            <div><dt>Default teacher model</dt><dd>${esc(defaultModel || 'Not set')}</dd></div>
+              <span class="muted"> · fingerprint <span class="provider-fingerprint">${esc(provider.credential_fingerprint || '—')}</span></span></dd></div>
+            <div><dt>Default teacher model</dt><dd class="provider-model-ref">${esc(defaultModel || 'Not set')}</dd></div>
             <div><dt>Last verified</dt><dd>${provider.last_tested_at ? ui.timeAgo(provider.last_tested_at) : 'Never tested'}</dd></div>
             <div><dt>Last error</dt><dd>${provider.last_error ? esc(provider.last_error) : 'None'}</dd></div>
           </dl>
           <div class="chip-row">${capabilityChips(provider)}</div>
-          <table class="table compact">
-            <thead><tr><th>Model ID</th><th>Context</th><th>Max output</th><th>Price (1M tokens)</th><th>Source</th></tr></thead>
-            <tbody>
-              ${models.length ? models.map((model) => `
-                <tr>
-                  <td><code>${esc(model.model_id)}</code>${model.enabled ? '' : ' <span class="muted">(disabled)</span>'}</td>
-                  <td>${na(model.context_window)}</td>
-                  <td>${na(model.max_output_tokens)}</td>
-                  <td>${priceLabel(model)}</td>
-                  <td>${model.discovered ? 'Discovered' : 'Manual'}</td>
-                </tr>`).join('') : `<tr><td colspan="5" class="muted">No models yet. Run discovery or add a model ID.</td></tr>`}
-            </tbody>
-          </table>
+          <div class="model-card-list">
+            ${models.length ? models.map((model) => `
+              <div class="model-card">
+                <div class="model-card-head">
+                  <code class="model-card-id">${esc(model.model_id)}</code>
+                  ${model.enabled ? '' : '<span class="chip chip-off">disabled</span>'}
+                </div>
+                <dl class="kv-list model-card-specs">
+                  <div><dt>Context</dt><dd>${na(model.context_window)}</dd></div>
+                  <div><dt>Max output</dt><dd>${na(model.max_output_tokens)}</dd></div>
+                  <div><dt>Price</dt><dd>${priceLabel(model)}</dd></div>
+                  <div><dt>Source</dt><dd>${model.discovered ? 'Discovered' : 'Manual'}</dd></div>
+                </dl>
+              </div>`).join('') : '<p class="muted">No models yet. Run discovery or add a model ID.</p>'}
+          </div>
         </div>
         <div class="card-footer actions-row">
           <button class="btn btn-sm btn-outline" type="button" onclick="teachers.testProvider('${esc(provider.id)}', this)">
@@ -650,5 +652,6 @@ window.teachers = (function () {
     _statusPill: statusPill,
     _capabilityChips: capabilityChips,
     _budgetSummary: budgetSummary,
+    _providerCard: providerCard,
   };
 })();

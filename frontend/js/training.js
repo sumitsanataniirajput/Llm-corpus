@@ -11,6 +11,9 @@ window.training = (function () {
   'use strict';
 
   let chartInstances = {};
+  // Every mounted Training Center gets a generation token. Async reads started
+  // by an older visit must not write into a newly opened page.
+  let pageGeneration = 0;
   let wsJobId = null;
   let activeSocket = null;
   let pollTimer = null;
@@ -27,10 +30,82 @@ window.training = (function () {
   let checkpointsCache = [];
   let checkpointsModelId = null;
   let reportedFailureJobId = null;
+  let reportedFailureMessage = null;
   // A confirmed deletion stays hidden for this page session even if a stale
   // list response races the DELETE response. The backend remains authoritative
   // across reloads; this set only prevents an already-confirmed row reappearing.
   const confirmedDeletedJobIds = new Set();
+
+  function isCurrentPage(generation) {
+    try {
+      const container = window.CORPUS_APP && typeof window.CORPUS_APP.getPageContainer === 'function'
+        ? window.CORPUS_APP.getPageContainer()
+        : null;
+      const marker = container ? container.getAttribute('data-training-page-generation') : null;
+      // A null marker is allowed for direct diagnostic/test invocations on the
+      // currently mounted page; a mismatched marker always means a stale visit.
+      return generation === pageGeneration
+        && !!document.getElementById('t-model')
+        && !!container
+        && (marker === null || marker === String(generation));
+    } catch (err) {
+      // A scheduled flush can fire while the document is being torn down;
+      // that visit is definitionally no longer current.
+      return false;
+    }
+  }
+
+  // Backend list endpoints have used bare arrays and keyed envelopes. Normalize
+  // without assuming a response is iterable, so a malformed/error object can
+  // never trigger `for ... of` or `.map()` on a non-array.
+  function normalizeList(data, key) {
+    if (Array.isArray(data)) return data.filter(item => item && typeof item === 'object');
+    if (!data || typeof data !== 'object') return [];
+    const candidates = [key, 'items', 'data', 'results'].filter(Boolean);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const value = data[candidates[index]];
+      if (Array.isArray(value)) return value.filter(item => item && typeof item === 'object');
+    }
+    return [];
+  }
+
+  function normalizeEvents(data) {
+    const onlyObjects = (list) => list.filter(item => item && typeof item === 'object');
+    if (Array.isArray(data)) return onlyObjects(data);
+    if (!data || typeof data !== 'object') return [];
+    const keys = ['events', 'logs', 'metrics', 'checkpoints', 'items', 'data', 'results'];
+    for (let index = 0; index < keys.length; index += 1) {
+      if (Array.isArray(data[keys[index]])) return onlyObjects(data[keys[index]]);
+    }
+    return [];
+  }
+
+  // Charts are optional. A missing helper, CDN failure, or constructor/update
+  // exception must leave the form, controls and live job information intact.
+  function callChart(method) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    if (!window.charts || typeof window.charts[method] !== 'function') return null;
+    try {
+      return window.charts[method].apply(window.charts, args);
+    } catch (err) {
+      try {
+        if (window.CORPUS_APP && typeof window.CORPUS_APP.logDiagnostic === 'function') {
+          window.CORPUS_APP.logDiagnostic('training.charts:' + method + ': ' + (err && err.message ? err.message : err));
+        }
+      } catch (e) { /* diagnostics are optional */ }
+      return null;
+    }
+  }
+
+  function resetPageResources() {
+    disconnectJobStream();
+    stopPolling();
+    callChart('destroyChart', 'training-loss-chart');
+    callChart('destroyChart', 'training-throughput-chart');
+    chartInstances = {};
+    pendingLogLines = [];
+    startInFlight = false;
+  }
 
   const DATASET_UNUSABLE_STATUSES = ['failed', 'deleted'];
   const ACTIVE_STATUSES = ['queued', 'running', 'pausing', 'paused', 'stopping', 'preparing', 'finalizing'];
@@ -58,6 +133,9 @@ window.training = (function () {
   };
 
   async function render() {
+    // Invalidate work from the previous visit before touching the new DOM.
+    const generation = ++pageGeneration;
+    resetPageResources();
     const user = state.getUser();
     const container = window.CORPUS_APP.getPageContainer();
     if (!container) return;
@@ -74,13 +152,15 @@ window.training = (function () {
     }
 
     // Reset any stream/series state from a previous visit to this page.
-    dispose();
+    // (resetPageResources() above already detached those resources without
+    // advancing the generation token for this newly mounted page.)
     wsJobId = null;
     metricSeries = { steps: [], loss: [], throughput: [] };
     seenSteps = new Set();
     checkpointsCache = [];
     checkpointsModelId = null;
     reportedFailureJobId = null;
+    reportedFailureMessage = null;
 
     container.innerHTML = `
       <div class="page-header">
@@ -315,15 +395,17 @@ window.training = (function () {
         </div>
       </section>
     `;
+    container.setAttribute('data-training-page-generation', String(generation));
 
     // Live-refresh the dataset selector whenever a dataset is uploaded/deleted.
-    bindDatasetRefreshListener();
+    bindDatasetRefreshListener(generation);
 
     const datasetSelect = document.getElementById('t-dataset');
     if (datasetSelect) datasetSelect.addEventListener('change', onDatasetChange);
 
-    renderCharts();
-    await Promise.all([loadModels(), refreshDatasets(), loadJobs()]);
+    renderCharts(generation);
+    await Promise.all([loadModels(generation), refreshDatasets(generation), loadJobs(null, generation)]);
+    if (!isCurrentPage(generation)) return;
 
     const pendingId = state.getPendingDatasetId ? state.getPendingDatasetId() : null;
     if (pendingId) applySelectedDataset(pendingId);
@@ -333,7 +415,7 @@ window.training = (function () {
       const modelSelect = document.getElementById('t-model');
       if (modelSelect && modelsCache.some(m => m.id === activeModel.id)) {
         modelSelect.value = activeModel.id;
-        onModelChange();
+        onModelChange(generation);
       }
     }
 
@@ -369,12 +451,6 @@ window.training = (function () {
 
   /* ---------------- Datasets ---------------- */
 
-  function normalizeList(data, key) {
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data[key])) return data[key];
-    return [];
-  }
-
   function isDatasetUsable(dataset) {
     if (!dataset) return false;
     if (DATASET_UNUSABLE_STATUSES.indexOf(dataset.status) !== -1) return false;
@@ -394,19 +470,20 @@ window.training = (function () {
     return parts.join('  ·  ');
   }
 
-  async function loadModels() {
+  async function loadModels(generation = pageGeneration) {
     try {
       const token = await state.getAccessToken();
       const data = await window.CORPUS_API.listModels(token);
+      if (!isCurrentPage(generation)) return;
       modelsCache = normalizeList(data, 'models');
       state.setModels(modelsCache);
     } catch (err) {
-      if (ui.isAborted && ui.isAborted(err)) return;
+      if (!isCurrentPage(generation) || (ui.isAborted && ui.isAborted(err))) return;
       modelsCache = [];
       state.setModels([]);
       log('Could not load models: ' + (err.message || 'unknown error'), 'error');
     }
-    populateModelSelect();
+    if (isCurrentPage(generation)) populateModelSelect();
   }
 
   function populateModelSelect() {
@@ -424,23 +501,29 @@ window.training = (function () {
     if (previous && modelsCache.some(m => m.id === previous)) select.value = previous;
   }
 
-  async function refreshDatasets() {
+  async function refreshDatasets(generation = pageGeneration) {
     const select = document.getElementById('t-dataset');
     const hint = document.getElementById('t-dataset-hint');
-    const token = await state.getAccessToken();
     try {
+      const token = await state.getAccessToken();
       const data = await window.CORPUS_API.listDatasets(token);
-      datasetsCache = window.CORPUS_API.asDatasetList
-        ? window.CORPUS_API.asDatasetList(data)
-        : normalizeList(data, 'datasets');
+      if (!isCurrentPage(generation)) return;
+      const apiList = window.CORPUS_API.asDatasetList
+        ? window.CORPUS_API.asDatasetList(data) : null;
+      datasetsCache = normalizeList(
+        Array.isArray(apiList) && apiList.length ? apiList : data,
+        'datasets'
+      );
       state.setDatasets(datasetsCache);
       datasetsError = null;
     } catch (err) {
+      if (!isCurrentPage(generation)) return;
       datasetsCache = [];
       state.setDatasets([]);
       datasetsError = err && err.message ? err.message : 'Could not load datasets';
       log('Could not load datasets: ' + datasetsError, 'error');
     }
+    if (!isCurrentPage(generation)) return;
     if (select) populateDatasetSelect();
     if (hint && !select) {
       hint.textContent = datasetsCache.length === 0 && !datasetsError
@@ -605,22 +688,22 @@ window.training = (function () {
     if (listRefreshBound) return;
     listRefreshBound = true;
     window.addEventListener('corpus:datasets-changed', () => {
-      // Only refresh when the Training page is actually mounted.
-      if (document.getElementById('t-dataset')) {
-        // An upload/rollback just changed dataset state: drop cached reads so
-        // the selector shows the real (post-change) file status, not a copy
-        // that is up to one cache TTL old.
-        if (window.CORPUS_API && typeof window.CORPUS_API.invalidateCache === 'function') {
-          window.CORPUS_API.invalidateCache();
-        }
-        refreshDatasets();
+      // Only refresh when this exact Training Center generation is mounted.
+      const generation = pageGeneration;
+      if (!isCurrentPage(generation)) return;
+      // An upload/rollback just changed dataset state: drop cached reads so
+      // the selector shows the real (post-change) file status, not a copy
+      // that is up to one cache TTL old.
+      if (window.CORPUS_API && typeof window.CORPUS_API.invalidateCache === 'function') {
+        window.CORPUS_API.invalidateCache();
       }
+      refreshDatasets(generation);
     });
   }
 
   /* ---------------- Models ---------------- */
 
-  async function onModelChange() {
+  async function onModelChange(generation = pageGeneration) {
     const select = document.getElementById('t-model');
     const id = select ? select.value : '';
     const model = modelsCache.find(item => item.id === id) || state.getModel(id);
@@ -629,7 +712,7 @@ window.training = (function () {
     clearFormError();
     updateStartButtonState();
     if (id) {
-      await loadCheckpoints(id);
+      await loadCheckpoints(id, generation);
     } else {
       checkpointsCache = [];
       checkpointsModelId = null;
@@ -707,35 +790,59 @@ window.training = (function () {
 
   /* ---------------- Jobs ---------------- */
 
-  async function loadJobs(sourceButton) {
+  // Terminal states (completed/failed/cancelled/stopped/interrupted) never
+  // revert to an active state for the same job id — the backend starts a new
+  // job instead. A REST read can be in flight when the terminal WebSocket
+  // event arrives; that read predates the terminal write and must not clobber
+  // the truthful terminal status the stream already reported.
+  function reconcileJobStatus(fresh) {
+    if (!fresh || !fresh.id) return fresh;
+    const known = state.getTrainingJob(fresh.id);
+    if (!known) return fresh;
+    const knownStatus = String(known.status || '').toLowerCase();
+    const freshStatus = String(fresh.status || '').toLowerCase();
+    if (DELETABLE_STATUSES.indexOf(knownStatus) !== -1
+        && DELETABLE_STATUSES.indexOf(freshStatus) === -1) {
+      return Object.assign({}, fresh, {
+        status: known.status,
+        failure_reason: fresh.failure_reason || known.failure_reason,
+        stage: fresh.stage || known.stage,
+      });
+    }
+    return fresh;
+  }
+
+  async function loadJobs(sourceButton, generation = pageGeneration) {
     if (sourceButton) {
       // The refresh control says what it is doing and comes back afterwards.
       window.CORPUS_ACTIONS.refresh({
         name: 'Refresh training jobs',
         element: sourceButton,
-        run: function () { return loadJobsData(); },
+        run: function () { return loadJobsData(generation); },
       });
       return;
     }
-    return loadJobsData();
+    return loadJobsData(generation);
   }
 
-  async function loadJobsData() {
+  async function loadJobsData(generation = pageGeneration) {
     let token;
     try {
       token = await state.getAccessToken();
       // Job state is live: never serve it from the read cache.
       const data = await window.CORPUS_API.listTrainingJobs(token, { noCache: true });
-      const jobs = normalizeList(data, 'jobs');
+      if (!isCurrentPage(generation)) return;
+      const jobs = normalizeList(data, 'jobs').map(reconcileJobStatus);
       state.setTrainingJobs(jobs.filter(item => item && !confirmedDeletedJobIds.has(item.id)));
     } catch (err) {
-      if (ui.isAborted && ui.isAborted(err)) return;
+      if (!isCurrentPage(generation) || (ui.isAborted && ui.isAborted(err))) return;
       state.setTrainingJobs([]);
       log('Could not load training jobs: ' + (err.message || 'unknown error'), 'error');
       renderJobList();
       return;
     }
 
+    if (!isCurrentPage(generation)) return;
     renderJobList();
     const jobs = state.getTrainingJobs() || [];
     if (!jobs.length) {
@@ -743,7 +850,7 @@ window.training = (function () {
       metricSeries = { steps: [], loss: [], throughput: [] };
       seenSteps = new Set();
       updateMetricTiles();
-      updateCharts();
+      updateCharts(generation);
       updateMonitorStatus(null);
       return;
     }
@@ -758,7 +865,7 @@ window.training = (function () {
       metricSeries = { steps: [], loss: [], throughput: [] };
       seenSteps = new Set();
       updateMetricTiles();
-      updateCharts();
+      updateCharts(generation);
     }
 
     updateMonitorStatus(selected);
@@ -768,20 +875,30 @@ window.training = (function () {
     // event history, checkpoints, then the model's checkpoints again). They are
     // independent reads, so they run together and the page settles in one
     // backend latency instead of four.
-    const historyPromise = window.CORPUS_API.listTrainingLogs && !isActiveStatus(selected.status)
-      ? window.CORPUS_API.listTrainingLogs(selected.id, token, { limit: 200 })
-      : Promise.resolve(null);
+    let historyEnabled = false;
+    let historyPromise = Promise.resolve(null);
+    if (window.CORPUS_API.listTrainingLogs && !isActiveStatus(selected.status)) {
+      historyEnabled = true;
+      try {
+        historyPromise = Promise.resolve(
+          window.CORPUS_API.listTrainingLogs(selected.id, token, { limit: 200 })
+        ).catch(() => null);
+      } catch (err) {
+        historyPromise = Promise.resolve(null);
+      }
+    }
     await Promise.all([
-      refreshJob(selected.id, true),
+      refreshJob(selected.id, true, generation),
       historyPromise,
-      selected.model_id ? loadCheckpoints(selected.model_id) : Promise.resolve(),
+      selected.model_id ? loadCheckpoints(selected.model_id, generation) : Promise.resolve(),
     ]);
+    if (!isCurrentPage(generation)) return;
 
-    if (historyPromise) {
+    if (historyEnabled) {
       try {
         // Already resolved above; awaiting it again costs nothing.
-        const events = await historyPromise;
-        (events || []).forEach(entry => {
+        const events = normalizeEvents(await historyPromise);
+        events.forEach(entry => {
           if (!entry || !entry.event) return;
           if (entry.event === 'started') {
             log('Worker started training from the selected stored dataset.', 'info');
@@ -797,8 +914,8 @@ window.training = (function () {
     }
 
     const latest = state.getTrainingJob(selected.id) || selected;
-    if (isActiveStatus(latest.status) && !startInFlight) {
-      connectJobStream(selected.id);
+    if (isCurrentPage(generation) && isActiveStatus(latest.status) && !startInFlight) {
+      connectJobStream(selected.id, generation);
     }
   }
 
@@ -853,9 +970,9 @@ window.training = (function () {
     }).join('');
   }
 
-  async function loadCheckpoints(modelId) {
+  async function loadCheckpoints(modelId, generation = pageGeneration) {
     const container = document.getElementById('t-checkpoints');
-    if (!container) return;
+    if (!container || !isCurrentPage(generation)) return;
     if (checkpointsModelId === modelId && checkpointsCache.length) {
       renderCheckpoints();
       return;
@@ -864,13 +981,15 @@ window.training = (function () {
     try {
       const token = await state.getAccessToken();
       const data = await window.CORPUS_API.listCheckpoints(modelId, token);
-      checkpointsCache = Array.isArray(data) ? data : (data && Array.isArray(data.checkpoints) ? data.checkpoints : []);
+      if (!isCurrentPage(generation)) return;
+      checkpointsCache = normalizeEvents(data);
       checkpointsModelId = modelId;
     } catch (err) {
+      if (!isCurrentPage(generation)) return;
       checkpointsCache = [];
       checkpointsModelId = modelId;
     }
-    renderCheckpoints();
+    if (isCurrentPage(generation)) renderCheckpoints();
   }
 
   function renderCheckpoints() {
@@ -920,6 +1039,7 @@ window.training = (function () {
 
   async function startTraining() {
     if (startInFlight) return;
+    const generation = pageGeneration;
     const check = validateSelection();
     if (!check.ok) {
       showFormError(check.message);
@@ -956,6 +1076,7 @@ window.training = (function () {
         return job;
       },
       onSuccess: async function (job) {
+        if (!isCurrentPage(generation)) return;
         state.addTrainingJob(job);
         state.setActiveJob(job);
         wsJobId = job.id;
@@ -967,11 +1088,12 @@ window.training = (function () {
         log('Dataset: ' + (dataset.name || dataset.id) + ' (' + dataset.id + ')');
         updateControls(job);
         updateMonitorStatus(job);
-        await loadJobs();
-        connectJobStream(job.id);
+        await loadJobs(null, generation);
+        if (isCurrentPage(generation)) connectJobStream(job.id, generation);
       },
     });
 
+    if (!isCurrentPage(generation)) return;
     startInFlight = false;
     if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
       const message = outcome.message || 'Failed to start training';
@@ -982,7 +1104,7 @@ window.training = (function () {
     updateControls(state.getTrainingJob(wsJobId) || null);
   }
 
-  async function runControl(btnId, action, label) {
+  async function runControl(btnId, action, label, generation = pageGeneration) {
     const jobId = wsJobId;
     if (!jobId) return;
     const btn = document.getElementById(btnId);
@@ -1001,6 +1123,7 @@ window.training = (function () {
         return action(jobId, token);
       },
       onSuccess: function (response) {
+        if (!isCurrentPage(generation)) return;
         if (response && response.status) {
           const current = state.getTrainingJob(jobId) || { id: jobId };
           state.updateTrainingJob(jobId, { ...current, status: response.status });
@@ -1013,10 +1136,11 @@ window.training = (function () {
           (response && response.status ? ' — status: ' + response.status : ''));
       },
       onFailure: function (err) {
-        if (ui.isAborted && ui.isAborted(err)) return;
+        if (!isCurrentPage(generation) || (ui.isAborted && ui.isAborted(err))) return;
         log(label + ' failed: ' + ((err && err.message) || 'unknown error'), 'error');
       },
     });
+    if (!isCurrentPage(generation)) return outcome;
     if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
       ui.toast(outcome.message || (label + ' failed'), 'error');
     }
@@ -1034,6 +1158,7 @@ window.training = (function () {
 
   function stopTraining() {
     if (!wsJobId) return;
+    const generation = pageGeneration;
     ui.confirm('Stop training', 'Stop this training job? The worker saves a checkpoint before it exits.', function () {
       const btn = document.getElementById('t-stop');
       const jobId = wsJobId;
@@ -1050,6 +1175,7 @@ window.training = (function () {
           return window.CORPUS_API.stopTrainingJob(jobId, token);
         },
         onSuccess: function (response) {
+          if (!isCurrentPage(generation)) return;
           if (response && response.status) {
             const current = state.getTrainingJob(jobId) || { id: jobId };
             state.updateTrainingJob(jobId, { ...current, status: response.status });
@@ -1062,6 +1188,7 @@ window.training = (function () {
             (response && response.status ? ' — status: ' + response.status : ''));
         },
       }).then(function (outcome) {
+        if (!isCurrentPage(generation)) return outcome;
         if (!outcome.ok && outcome.state !== window.CORPUS_ACTIONS.STATES.CANCELLED) {
           ui.toast(outcome.message || 'Stop failed', 'error');
         }
@@ -1262,8 +1389,8 @@ window.training = (function () {
   }
 
   /** Update the panel from fresh backend fields; never invents a number. */
-  function applyProgress(jobId, payload) {
-    if (!payload) return;
+  function applyProgress(jobId, payload, generation = pageGeneration) {
+    if (!payload || !isCurrentPage(generation)) return;
     const patch = {
       progress_percent: payload.progress_percent,
       stage: payload.stage,
@@ -1309,6 +1436,7 @@ window.training = (function () {
 
   async function deleteJob(jobId, sourceButton) {
     if (!jobId) return null;
+    const generation = pageGeneration;
     const job = state.getTrainingJob(jobId) || (state.getTrainingJobs() || []).find(item => item.id === jobId) || {};
     const status = String(job.status || '').toLowerCase();
     if (DELETABLE_STATUSES.indexOf(status) === -1) {
@@ -1335,9 +1463,10 @@ window.training = (function () {
               return window.CORPUS_API.deleteTrainingJob(jobId, token);
             },
             onSuccess: async function () {
+              confirmedDeletedJobIds.add(jobId);
+              if (!isCurrentPage(generation)) return;
               // Remove the visible card immediately after the server confirms
               // deletion. Do not wait for a second list request to finish.
-              confirmedDeletedJobIds.add(jobId);
               state.setTrainingJobs((state.getTrainingJobs() || []).filter(item => item.id !== jobId));
               const row = document.querySelector('[data-job-row="' + jobId.replace(/["\\]/g, '') + '"]');
               if (row && row.parentNode) row.parentNode.removeChild(row);
@@ -1348,16 +1477,17 @@ window.training = (function () {
                 metricSeries = { steps: [], loss: [], throughput: [] };
                 seenSteps = new Set();
                 updateMetricTiles();
-                updateCharts();
+                updateCharts(generation);
                 updateMonitorStatus(null);
               }
               renderJobList();
               // Reconcile with the backend; loadJobsData also filters any stale
               // response for this just-deleted id during the current page visit.
-              await loadJobs();
-              ui.toast('Training job removed from your history.', 'success');
+              await loadJobs(null, generation);
+              if (isCurrentPage(generation)) ui.toast('Training job removed from your history.', 'success');
             },
             onFailure: function (err) {
+              if (!isCurrentPage(generation)) return;
               const detail = err && err.data && err.data.detail;
               const message = typeof detail === 'string' && detail
                 ? detail
@@ -1373,12 +1503,17 @@ window.training = (function () {
 
   function reportJobFailure(jobId, message) {
     const text = message || 'Training job failed.';
-    if (reportedFailureJobId !== jobId) {
-      reportedFailureJobId = jobId;
-      log('Job ' + jobId + ' failed: ' + text, 'error');
-      showFormError(text);
-      ui.toast(text, 'error');
+    // A generic report must never mask the backend's real message arriving
+    // later on the same job (e.g. status frame first, error detail second).
+    if (reportedFailureJobId === jobId && reportedFailureMessage && reportedFailureMessage !== 'Training job failed.') {
+      return;
     }
+    if (reportedFailureJobId === jobId && reportedFailureMessage === text) return;
+    reportedFailureJobId = jobId;
+    reportedFailureMessage = text;
+    log('Job ' + jobId + ' failed: ' + text, 'error');
+    showFormError(text);
+    ui.toast(text, 'error');
   }
 
   function extractStreamError(err) {
@@ -1390,46 +1525,67 @@ window.training = (function () {
     return 'unknown';
   }
 
-  function connectJobStream(jobId) {
+  function connectJobStream(jobId, generation = pageGeneration) {
+    if (!isCurrentPage(generation) || !window.CORPUS_API || typeof window.CORPUS_API.connectTrainingWS !== 'function') return;
+    const streamGeneration = generation;
     disconnectJobStream();
-    startPolling(jobId);
-    window.CORPUS_API.connectTrainingWS(jobId, {
-      onMetric: (metric) => applyMetric(metric),
-      onProgress: (payload) => applyProgress(jobId, payload),
-      onStatus: (payload) => applyStatus(jobId, payload),
-      onComplete: (payload) => {
-        log('Job ' + jobId + ' finished: ' + ((payload && payload.status) || 'completed'), 'success');
-        refreshJob(jobId);
-      },
-      onError: (err) => {
-        const message = extractStreamError(err);
-        if (err && err.status === 'failed') {
-          applyStatus(jobId, err);
-          reportJobFailure(jobId, message);
-          return;
-        }
-        log('Live stream error: ' + message, 'error');
-        if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
-      },
-      onClose: () => {
-        if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
-      },
-    }).then((socket) => {
+    startPolling(jobId, streamGeneration);
+    const guard = () => isCurrentPage(streamGeneration);
+    let pending;
+    try {
+      pending = window.CORPUS_API.connectTrainingWS(jobId, {
+        onMetric: (metric) => applyMetric(metric, streamGeneration),
+        onProgress: (payload) => applyProgress(jobId, payload, streamGeneration),
+        onStatus: (payload) => applyStatus(jobId, payload, streamGeneration),
+        onComplete: (payload) => {
+          if (!guard()) return;
+          log('Job ' + jobId + ' finished: ' + ((payload && payload.status) || 'completed'), 'success');
+          refreshJob(jobId, false, streamGeneration);
+        },
+        onError: (err) => {
+          if (!guard()) return;
+          const message = extractStreamError(err);
+          if (err && err.status === 'failed') {
+            applyStatus(jobId, err, streamGeneration);
+            reportJobFailure(jobId, message);
+            return;
+          }
+          log('Live stream error: ' + message, 'error');
+          if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId, streamGeneration);
+        },
+        onClose: () => {
+          if (guard() && isActiveStatus((state.getTrainingJob(jobId) || {}).status)) {
+            startPolling(jobId, streamGeneration);
+          }
+        },
+      });
+    } catch (err) {
+      pending = Promise.resolve(null);
+    }
+    Promise.resolve(pending).then((socket) => {
+      if (!guard()) {
+        try { if (socket) socket.close(); } catch (e) { /* stale socket */ }
+        return;
+      }
       activeSocket = socket;
       if (!socket) {
         log('Live progress stream unavailable — using periodic refresh instead.', 'warn');
-        startPolling(jobId);
+        startPolling(jobId, streamGeneration);
         return;
       }
       // Keep the polling fallback only until the WebSocket is actually open.
       // This avoids polling the same job while its live stream is healthy.
       if (socket.readyState === 1) stopPolling();
       else if (typeof socket.addEventListener === 'function') {
-        socket.addEventListener('open', () => stopPolling(), { once: true });
+        socket.addEventListener('open', () => { if (guard()) stopPolling(); }, { once: true });
         socket.addEventListener('error', () => {
-          if (isActiveStatus((state.getTrainingJob(jobId) || {}).status)) startPolling(jobId);
+          if (guard() && isActiveStatus((state.getTrainingJob(jobId) || {}).status)) {
+            startPolling(jobId, streamGeneration);
+          }
         }, { once: true });
       }
+    }).catch(() => {
+      if (guard()) startPolling(jobId, streamGeneration);
     });
   }
 
@@ -1448,11 +1604,12 @@ window.training = (function () {
   let metricFlushScheduled = false;
   let pendingLogLines = [];
 
-  function scheduleMetricFlush() {
+  function scheduleMetricFlush(generation = pageGeneration) {
     if (metricFlushScheduled) return;
     metricFlushScheduled = true;
     const flush = () => {
       metricFlushScheduled = false;
+      if (!isCurrentPage(generation)) return;
       if (pendingLogLines.length) {
         const lines = pendingLogLines;
         pendingLogLines = [];
@@ -1465,7 +1622,7 @@ window.training = (function () {
         }
       }
       updateMetricTiles();
-      updateCharts();
+      updateCharts(generation);
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(flush);
     else setTimeout(flush, 16);
@@ -1478,8 +1635,8 @@ window.training = (function () {
         (tps !== null ? ' — ' + Math.round(tps) + ' tok/s' : '')) + '</span></div>';
   }
 
-  function applyMetric(metric) {
-    if (!metric || metric.step == null) return;
+  function applyMetric(metric, generation = pageGeneration) {
+    if (!metric || metric.step == null || !isCurrentPage(generation)) return;
     const step = Number(metric.step);
     if (seenSteps.has(step)) return;
     seenSteps.add(step);
@@ -1496,7 +1653,11 @@ window.training = (function () {
       }
       pendingLogLines.push(metricLogLine(step, loss, tps));
     }
-    scheduleMetricFlush();
+    // Tiles are cheap text writes: update them synchronously so restored
+    // history is visible immediately. Only log DOM + chart redraws are
+    // coalesced into the next animation frame.
+    updateMetricTiles();
+    scheduleMetricFlush(generation);
   }
 
   function updateMetricTiles() {
@@ -1523,8 +1684,13 @@ window.training = (function () {
     }
   }
 
-  function applyStatus(jobId, payload) {
-    if (!payload) return;
+  function applyStatus(jobId, payload, generation = pageGeneration) {
+    if (!payload || !isCurrentPage(generation)) return;
+    // The backend nests the human-readable reason under data.error on stream
+    // frames; accept every shape it actually sends.
+    const failureMessage = payload.failure_reason || payload.error
+      || (payload.data && typeof payload.data === 'object' ? payload.data.error : null)
+      || (typeof payload.data === 'string' ? payload.data : null);
     state.updateTrainingJob(jobId, {
       status: payload.status,
       dataset_id: payload.dataset_id,
@@ -1536,7 +1702,7 @@ window.training = (function () {
       current_epoch: payload.current_epoch,
       total_epochs: payload.total_epochs,
       processed_tokens: payload.processed_tokens,
-      failure_reason: payload.failure_reason || payload.error,
+      failure_reason: failureMessage,
     });
     const job = state.getTrainingJob(jobId) || { id: jobId, status: payload.status };
     updateControls(job);
@@ -1546,24 +1712,24 @@ window.training = (function () {
     if (!isActiveStatus(payload.status)) {
       stopPolling();
       disconnectJobStream();
-      loadJobs();
-      if (job.model_id) loadCheckpoints(job.model_id);
+      loadJobs(null, generation);
+      if (job.model_id) loadCheckpoints(job.model_id, generation);
       // A terminal state that arrives over the socket must be reported exactly
       // like one that arrives by polling.
       if (payload.status === 'failed') {
-        reportJobFailure(jobId, payload.error);
+        reportJobFailure(jobId, failureMessage);
       }
     }
   }
 
-  function startPolling(jobId) {
+  function startPolling(jobId, generation = pageGeneration) {
     stopPolling();
     pollJob = jobId;
     const tickFn = async () => {
-      if (pollJob !== jobId) return;
+      if (!isCurrentPage(generation) || pollJob !== jobId) return;
       if (!document.getElementById('t-logs')) { stopPolling(); disconnectJobStream(); return; }
-      await refreshJob(jobId, true);
-      if (pollJob === jobId) {
+      await refreshJob(jobId, true, generation);
+      if (isCurrentPage(generation) && pollJob === jobId) {
         pollTimer = setTimeout(tickFn, 5000);
       }
     };
@@ -1576,10 +1742,11 @@ window.training = (function () {
     pollJob = null;
   }
 
-  async function refreshJob(jobId, quiet) {
+  async function refreshJob(jobId, quiet, generation = pageGeneration) {
     try {
       const token = await state.getAccessToken();
-      const job = await window.CORPUS_API.getTrainingJob(jobId, token);
+      const job = reconcileJobStatus(await window.CORPUS_API.getTrainingJob(jobId, token));
+      if (!isCurrentPage(generation)) return null;
       state.updateTrainingJob(jobId, job);
       updateControls(job);
       updateMonitorStatus(job);
@@ -1587,29 +1754,42 @@ window.training = (function () {
       if (!isActiveStatus(job.status)) {
         stopPolling();
         disconnectJobStream();
-        if (!quiet) loadJobs();
+        if (!quiet) loadJobs(null, generation);
         if (job.status === 'failed' && reportedFailureJobId !== jobId && window.CORPUS_API.listTrainingLogs) {
           try {
-            const events = await window.CORPUS_API.listTrainingLogs(jobId, token, { limit: 200 });
-            const failed = Array.isArray(events)
-              ? events.slice().reverse().find(ev => ev && ev.event === 'failed' && ev.data && ev.data.error)
-              : null;
+            const events = normalizeEvents(await window.CORPUS_API.listTrainingLogs(jobId, token, { limit: 200 }));
+            if (!isCurrentPage(generation)) return null;
+            const failed = events.slice().reverse().find(ev => ev && ev.event === 'failed' && ev.data && ev.data.error);
             if (failed) reportJobFailure(jobId, failed.data.error);
           } catch (e) { /* ignore log lookup error */ }
         }
       }
-      const metrics = await window.CORPUS_API.listTrainingMetrics(jobId, token, { limit: 200 });
-      (metrics || []).forEach(applyMetric);
+      const metricsData = await window.CORPUS_API.listTrainingMetrics(jobId, token, { limit: 200 });
+      if (!isCurrentPage(generation)) return null;
+      normalizeEvents(metricsData).forEach(metric => applyMetric(metric, generation));
       return job;
     } catch (err) {
-      if (!quiet) log('Could not refresh job ' + jobId + ': ' + (err.message || 'unknown error'), 'warn');
+      if (isCurrentPage(generation) && !quiet) {
+        log('Could not refresh job ' + jobId + ': ' + (err.message || 'unknown error'), 'warn');
+      }
       return null;
     }
   }
 
   /* ---------------- Charts ---------------- */
 
-  function renderCharts() {
+  function showChartFallback() {
+    const fallback = 'Charting is unavailable in this browser. Training controls, jobs, metrics and progress remain available.';
+    ['training-loss-empty', 'training-throughput-empty'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = fallback;
+      el.classList.remove('hidden');
+    });
+  }
+
+  function renderCharts(generation = pageGeneration) {
+    if (!isCurrentPage(generation)) return;
     const container = document.getElementById('training-charts');
     if (!container) return;
     container.innerHTML = `
@@ -1640,46 +1820,46 @@ window.training = (function () {
         </div>
       </div>
     `;
-    chartInstances.loss = window.charts.createLineChart('training-loss-chart', [], [
+    chartInstances.loss = callChart('createLineChart', 'training-loss-chart', [], [
       { label: 'Loss', data: [], borderColor: '#b9a7ff', backgroundColor: 'rgba(124, 92, 255, 0.14)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 2 },
     ]);
-    chartInstances.throughput = window.charts.createLineChart('training-throughput-chart', [], [
+    chartInstances.throughput = callChart('createLineChart', 'training-throughput-chart', [], [
       { label: 'Tokens/sec', data: [], borderColor: '#4ade80', borderWidth: 2, fill: false, tension: 0.3, pointRadius: 2 },
     ]);
-    updateCharts();
+    if (!chartInstances.loss || !chartInstances.throughput) showChartFallback();
+    updateCharts(generation);
   }
 
-  function updateCharts() {
-    if (!chartInstances.loss || !chartInstances.throughput) return;
+  function updateCharts(generation = pageGeneration) {
+    if (!isCurrentPage(generation)) return;
     const hasLoss = metricSeries.loss.length > 0;
     const hasTps = metricSeries.throughput.some(value => value != null);
     const lossEmpty = document.getElementById('training-loss-empty');
     const tpsEmpty = document.getElementById('training-throughput-empty');
     if (lossEmpty) lossEmpty.classList.toggle('hidden', hasLoss);
     if (tpsEmpty) tpsEmpty.classList.toggle('hidden', hasTps);
-    window.charts.updateChart('training-loss-chart', metricSeries.steps.slice(), [{
-      label: 'Loss', data: metricSeries.loss.slice(), borderColor: '#b9a7ff',
-      backgroundColor: 'rgba(124, 92, 255, 0.14)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 2,
-    }], { animate: false });
-    window.charts.updateChart('training-throughput-chart', metricSeries.steps.slice(), [{
-      label: 'Tokens/sec', data: metricSeries.throughput.map(value => value == null ? null : value),
-      borderColor: '#4ade80', borderWidth: 2, fill: false, tension: 0.3, pointRadius: 2,
-    }], { animate: false });
+    if (chartInstances.loss) {
+      callChart('updateChart', 'training-loss-chart', metricSeries.steps.slice(), [{
+        label: 'Loss', data: metricSeries.loss.slice(), borderColor: '#b9a7ff',
+        backgroundColor: 'rgba(124, 92, 255, 0.14)', borderWidth: 2, fill: true, tension: 0.3, pointRadius: 2,
+      }], { animate: false });
+    }
+    if (chartInstances.throughput) {
+      callChart('updateChart', 'training-throughput-chart', metricSeries.steps.slice(), [{
+        label: 'Tokens/sec', data: metricSeries.throughput.map(value => value == null ? null : value),
+        borderColor: '#4ade80', borderWidth: 2, fill: false, tension: 0.3, pointRadius: 2,
+      }], { animate: false });
+    }
   }
 
   function dispose() {
-    disconnectJobStream();
-    stopPolling();
-    // Charts hold canvases, observers and timers of their own: destroy them,
-    // otherwise every visit to the Training page leaked two live Chart.js
-    // instances that kept re-laying out off-screen.
-    if (window.charts && typeof window.charts.destroyChart === 'function') {
-      window.charts.destroyChart('training-loss-chart');
-      window.charts.destroyChart('training-throughput-chart');
-    }
-    chartInstances = {};
-    pendingLogLines = [];
-    startInFlight = false;
+    // Called by the router when leaving. Incrementing here is the stale-request
+    // barrier: every in-flight promise from this visit has an older generation.
+    pageGeneration += 1;
+    const container = window.CORPUS_APP && typeof window.CORPUS_APP.getPageContainer === 'function'
+      ? window.CORPUS_APP.getPageContainer() : null;
+    if (container) container.removeAttribute('data-training-page-generation');
+    resetPageResources();
   }
 
   return {
@@ -1709,5 +1889,7 @@ window.training = (function () {
     // exposed for tests/diagnostics
     validateSelection,
     isDatasetUsable,
+    isCurrentPage,
+    getPageGeneration: () => pageGeneration,
   };
 })();

@@ -79,30 +79,134 @@ window.students = (function () {
     </dl>`;
   }
 
-  function architectureTable(architecture) {
-    if (!architecture) return '';
-    const rows = [
-      ['Architecture', architecture.architecture],
-      ['Architecture version', architecture.architecture_version],
-      ['Engine', architecture.engine],
-      ['Total parameters', num(architecture.total_parameters)],
-      ['Trainable parameters', num(architecture.trainable_parameters)],
-      ['Embedding / hidden dim', num(architecture.embedding_dim || architecture.hidden_dim)],
-      ['Intermediate dim', num(architecture.intermediate_dim)],
-      ['Layers', num(architecture.layers)],
-      ['Attention heads', num(architecture.attention_heads)],
-      ['KV heads', num(architecture.kv_heads)],
-      ['Vocabulary', num(architecture.vocab_size)],
-      ['Context window', num(architecture.context_window)],
-      ['Precision', architecture.precision],
-      ['Quantization', architecture.quantization || 'none'],
-      ['Weight size', architecture.weight_size_bytes ? Math.round(architecture.weight_size_bytes / 1024) + ' KB' : 'Unavailable'],
-      ['Tokenizer', architecture.tokenizer],
-      ['Parameter source', architecture.source || architecture.parameter_source],
-    ];
-    return `<table class="table compact"><tbody>${rows.map(([label, value]) => `
-      <tr><th>${esc(label)}</th><td>${value === null || value === undefined || value === ''
-        ? 'Unavailable' : esc(value)}</td></tr>`).join('')}</tbody></table>`;
+  // ---- Inspection console ------------------------------------------------
+  // Renders exactly what the backend measured. A missing field renders as
+  // "Not reported" — never a guessed or hardcoded value.
+
+  function reported(value) {
+    return !(value === null || value === undefined || value === '');
+  }
+
+  function specValue(value, options = {}) {
+    if (!reported(value)) return '<span class="spec-na">Not reported</span>';
+    if (options.numeric) return `<span class="mono">${esc(num(value))}</span>`;
+    if (options.mono) return `<span class="mono">${esc(value)}</span>`;
+    return esc(value);
+  }
+
+  function specRow(label, value, options = {}) {
+    return `<div class="spec-row"><dt>${esc(label)}</dt><dd>${specValue(value, options)}</dd></div>`;
+  }
+
+  function specGroup(title, icon, rows) {
+    const body = rows.filter(Boolean).join('');
+    if (!body) return '';
+    return `<section class="spec-group" aria-label="${esc(title)}">
+      <h3 class="spec-group-title"><i class="fas ${esc(icon)}"></i> ${esc(title)}</h3>
+      <dl class="spec-list">${body}</dl>
+    </section>`;
+  }
+
+  function overviewCard(label, value, options = {}) {
+    return `<div class="stat-card spec-stat">
+      <div class="stat-label">${esc(label)}</div>
+      <div class="stat-value spec-stat-value">${specValue(value, options)}</div>
+    </div>`;
+  }
+
+  function formatPercent(value) {
+    if (!reported(value)) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return (Math.round(n * 10) / 10) + '%';
+  }
+
+  function formatWeightSize(bytes) {
+    if (!reported(bytes)) return null;
+    const n = Number(bytes);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return window.CORPUS_UTILS && typeof CORPUS_UTILS.formatBytes === 'function'
+      ? CORPUS_UTILS.formatBytes(n) : num(n) + ' B';
+  }
+
+  function parameterBreakdown(breakdown) {
+    if (!breakdown || typeof breakdown !== 'object') return '';
+    const entries = Object.entries(breakdown)
+      .filter(([, count]) => Number.isFinite(Number(count)))
+      .sort((a, b) => Number(b[1]) - Number(a[1]));
+    if (!entries.length) return '';
+    return `<details class="spec-advanced">
+      <summary>Parameter breakdown by tensor (${entries.length})</summary>
+      <div class="param-table" role="table" aria-label="Parameter breakdown">
+        ${entries.map(([name, count]) => `<div class="param-row" role="row">
+          <span class="param-name mono" role="cell">${esc(name)}</span>
+          <span class="param-count mono" role="cell">${esc(num(count))}</span>
+        </div>`).join('')}
+      </div>
+    </details>`;
+  }
+
+  function inspectionConsole(inspection) {
+    const arch = inspection && inspection.architecture ? inspection.architecture : {};
+    const modelRow = (STATE.models || []).find((m) => m && m.id === inspection.model_id);
+    const trainablePct = formatPercent(arch.trainable_percent);
+    const overview = [
+      overviewCard('Model', inspection.name),
+      modelRow && reported(modelRow.status) ? overviewCard('Status', modelRow.status) : '',
+      overviewCard('Architecture', arch.architecture, { mono: true }),
+      overviewCard('Engine', arch.engine),
+      overviewCard('Total parameters', arch.total_parameters, { numeric: true }),
+      overviewCard('Trainable parameters', arch.trainable_parameters, { numeric: true }),
+      // The backend reports a percentage only when it actually counted trainable
+      // weights (CORPUS). A config-only HF inspection omits the card entirely.
+      trainablePct !== null ? overviewCard('Trainable', trainablePct) : '',
+      overviewCard('Layers', arch.layers, { numeric: true }),
+      overviewCard('Embedding dim', arch.embedding_dim || arch.hidden_dim, { numeric: true }),
+      overviewCard('Context window', arch.context_window, { numeric: true }),
+    ].filter(Boolean).join('');
+
+    const groups = [
+      specGroup('Identity', 'fa-fingerprint', [
+        specRow('Architecture', arch.architecture, { mono: true }),
+        specRow('Architecture version', arch.architecture_version, { mono: true }),
+        specRow('Engine', arch.engine),
+        specRow('Base source', inspection.base_source),
+        reported(inspection.base_ref) ? specRow('Base reference', inspection.base_ref, { mono: true }) : '',
+        reported(inspection.model_id) ? specRow('Model ID', inspection.model_id, { mono: true }) : '',
+      ]),
+      specGroup('Dimensions', 'fa-ruler-combined', [
+        specRow('Hidden / embedding dim', arch.embedding_dim || arch.hidden_dim, { numeric: true }),
+        specRow('Intermediate dim', arch.intermediate_dim, { numeric: true }),
+        specRow('Layers', arch.layers, { numeric: true }),
+        specRow('Attention heads', arch.attention_heads, { numeric: true }),
+        specRow('KV heads', arch.kv_heads, { numeric: true }),
+        specRow('Vocabulary size', arch.vocab_size, { numeric: true }),
+        specRow('Context window', arch.context_window, { numeric: true }),
+        specRow('Dropout', arch.dropout),
+      ]),
+      specGroup('Parameters & weights', 'fa-weight-hanging', [
+        specRow('Total parameters', arch.total_parameters, { numeric: true }),
+        specRow('Trainable parameters', arch.trainable_parameters, { numeric: true }),
+        specRow('Frozen parameters', arch.frozen_parameters, { numeric: true }),
+        trainablePct !== null ? specRow('Trainable share', trainablePct) : '',
+        specRow('Precision', arch.precision, { mono: true }),
+        specRow('Quantization', reported(arch.quantization) ? arch.quantization : 'none'),
+        specRow('Weight size', formatWeightSize(arch.weight_size_bytes), { mono: true }),
+        specRow('Parameter source', arch.parameter_source || arch.source),
+      ]),
+      specGroup('Tokenizer', 'fa-font', [
+        specRow('Tokenizer', arch.tokenizer, { mono: true }),
+        specRow('Tokenizer reference', arch.tokenizer_version, { mono: true }),
+        specRow('Vocabulary size', arch.vocab_size, { numeric: true }),
+      ]),
+    ].filter(Boolean).join('');
+
+    return `
+      <div class="stats-grid spec-overview">${overview}</div>
+      ${reported(arch.load_error) ? `<div class="alert alert-warning"><i class="fas fa-triangle-exclamation"></i>
+        <div>${esc(arch.load_error)}</div></div>` : ''}
+      <div class="spec-groups">${groups}</div>
+      ${parameterBreakdown(arch.parameter_breakdown)}`;
   }
 
   function configCard(config) {
@@ -176,18 +280,21 @@ window.students = (function () {
 
       ${inspection ? `
       <div class="section-block">
-        <h2 class="section-heading">Inspected architecture</h2>
-        ${architectureTable(inspection.architecture)}
+        <h2 class="section-heading">Inspected model</h2>
+        ${inspectionConsole(inspection)}
+        ${(inspection.compatibility && inspection.compatibility.reason) ? `
         <div class="callout"><i class="fas fa-circle-info"></i>
-          <p>${esc((inspection.compatibility && inspection.compatibility.reason) || '')}</p></div>
+          <p>${esc(inspection.compatibility.reason)}</p></div>` : ''}
       </div>
       <div class="section-block">
         <h2 class="section-heading">Training methods</h2>
+        <div class="table-scroll">
         <table class="table">
           <thead><tr><th>Method</th><th>Status</th><th>Why</th></tr></thead>
           <tbody>${Object.entries(system.methods || {}).map(([key, meta]) =>
             methodRow(key, meta, (inspection.methods || {})[key] || corpusAvailability[key])).join('')}</tbody>
         </table>
+        </div>
       </div>
       <div class="card">
         <div class="card-header"><h3>Create a training configuration</h3></div>
@@ -339,7 +446,7 @@ window.students = (function () {
     // exposed for tests
     _state: () => ({ system: STATE.system, models: STATE.models, configs: STATE.configs,
                      inspection: STATE.inspection, error: STATE.error }),
-    _architectureTable: architectureTable,
+    _inspectionConsole: inspectionConsole,
     _methodRow: methodRow,
   };
 })();
