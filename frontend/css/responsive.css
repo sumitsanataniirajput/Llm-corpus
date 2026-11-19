@@ -381,3 +381,13 @@ code {
 .file-row-main {
   min-width: 0;
 }
+
+
+/* CORPUS ULTIMATE 2026-11-19.4: one navigation system on every screen.
+   Mobile routes are available from the hamburger drawer; never reserve a bottom bar. */
+.bottom-nav { display: none !important; }
+@media (max-width: 1023px) {
+  .main-content { padding-bottom: calc(var(--safe-bottom) + var(--space-4)) !important; }
+  .toast-container { bottom: calc(var(--safe-bottom) + var(--space-3)) !important; }
+  .sidebar { height: 100dvh; overflow-y: auto; padding-bottom: calc(var(--safe-bottom) + var(--space-4)); }
+}
