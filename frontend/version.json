@@ -1,8 +1,9 @@
 {
   "app": "CORPUS ULTIMATE",
   "kind": "frontend",
-  "buildId": "2026-11-19.3",
+  "buildId": "2026-11-19.4",
   "sourceRef": "main",
+  "navigation": "All application routes are in the hamburger sidebar; bottom navigation removed.",
   "notes": [
     "AI Teacher Network: providers (OpenAI, Gemini, Anthropic, OpenRouter, Groq, Together, DeepSeek, Fireworks or a custom OpenAI-compatible endpoint) are connected once, verified against the real API, and their models are discovered live. No model list or price is hardcoded anywhere: specs appear only where the provider reports them and prices only where you enter them.",
     "Credential security: API keys are encrypted with AES-256-GCM before storage, returned only as a last-four hint plus a short fingerprint, redacted from provider errors, and refused outright when CREDENTIAL_ENCRYPTION_KEY is not configured on the backend.",
