@@ -23,7 +23,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 # Bump when a shipped fix must be verified in production.
-BUILD_ID = "2026-11-18.1"
+BUILD_ID = "2026-11-20.7"
 
 # Behaviour markers that must be present in a healthy production deployment.
 FEATURES = [
@@ -39,6 +39,17 @@ FEATURES = [
     "dataset-storage-io-off-event-loop", # Supabase dataset upload/preview do not block FastAPI
     "dataset-upload-metadata-rollback", # failed metadata writes remove orphaned private objects
     "training-storage-io-off-event-loop", # training data/checkpoint transfers do not block FastAPI
+    "evaluation-status-honest",         # no fabricated score/completed evaluation
+    "compute-worker-owner-required",    # worker registration rejects nil-UUID owners
+    "training-compute-truthful",        # only in-process CPU training is accepted
+    "rate-limit-bounded-proxy-safe",    # bounded buckets, health exempt, trusted proxy IPs
+    "websocket-auth-first-frame",       # no Supabase token in socket URLs; shared auth frame
+    "device-ownership-canonical",       # device/task/job queries use UUID/text-safe ownership
+    "charts-numeric-zoom-reset",        # shared numeric axes, ranges, downsampling, zoom/reset
+    "checkpoint-backed-inference",      # real PyTorch state dict + tokenizer, no canned replies
+    "active-model-selectors",           # chat/prediction account models and per-user active id
+    "inference-cache-cleared-on-delete", # deleting a model evicts decoded checkpoints
+    "repo-hygiene-ci-tests",            # pytest/jsdom, migration manifest, baseline-aware gate
 ]
 
 _STARTED_AT = datetime.datetime.now(datetime.timezone.utc).isoformat()

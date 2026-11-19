@@ -1,27 +1,33 @@
 # CORPUS ULTIMATE — Deployment Guide
 
+> Read [STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md) first. This guide
+> describes the code in this checkout, not a service that has been redeployed.
+
 ## Overview
 
 CORPUS ULTIMATE has two parts:
 
-1. **Frontend** — static HTML/CSS/JS, deployable on Hopeweb (or any static host).
-2. **Backend** — Python FastAPI server, runs on your computer, Linux server, or cloud.
+1. **Frontend** — static HTML/CSS/JS, deployable on any static host.
+2. **Backend** — Python FastAPI server, run locally, on a Linux server, or on a
+   container host.
 
-They communicate via REST API (`/api/v1`) and WebSockets.
+They communicate via REST (`/api/v1`) and authenticated WebSockets. Browser
+sockets send the Supabase token as the **first frame**, never in a query string.
 
 ---
 
-## Part 1: Supabase Setup (required for auth + cloud storage)
+## Part 1: Supabase Setup (required for auth + private storage)
 
-1. Create a free project at https://supabase.com
-2. Go to **SQL Editor** and run the migration:
-   `supabase/migrations/001_initial_schema.sql`
+1. Create a project at https://supabase.com.
+2. Apply **all** SQL migrations in `supabase/migrations/` in filename order. See
+   [MIGRATIONS_AND_ROLLBACK.md](MIGRATIONS_AND_ROLLBACK.md) before migration
+   `004` (it changes a column type and requires a snapshot).
 3. Go to **Authentication > Settings** and note:
    - Project URL
-   - `anon` / `public` key (safe for frontend)
+   - `anon` / `publishable` key (safe for frontend)
    - `service_role` key (backend only — NEVER expose)
 4. Go to **Storage** and create a private bucket named `corpus-storage`.
-5. Enable **Row Level Security** (already in migration) — verify policies are active.
+5. Verify **Row Level Security** policies are active; the migrations create them.
 
 ---
 
@@ -40,7 +46,7 @@ source venv/bin/activate
 venv\Scripts\activate
 
 pip install --upgrade pip
-pip install --no-audit --no-fund --fetch-retries=3 -r requirements.txt
+pip install -r requirements.txt
 ```
 
 ### B. Configure environment
@@ -52,15 +58,19 @@ cp .env.example .env
 
 Required `.env` values:
 - `SUPABASE_URL` — your Supabase project URL
-- `SUPABASE_ANON_KEY` — anon key
+- `SUPABASE_ANON_KEY` — anon / publishable key
 - `SUPABASE_SERVICE_ROLE_KEY` — service role key (backend only)
 - `DATABASE_URL` — Supabase PostgreSQL connection string
 - `SECRET_KEY` — strong random string for JWT
 - `WORKER_AUTH_SECRET` — secret for worker registration
+- `CREDENTIAL_ENCRYPTION_KEY` — 32-byte hex key for encrypted provider credentials
+- `TRUSTED_PROXY_IPS` — proxy IPs allowed to supply forwarded client addresses
 
 ### C. Run database migrations
 
-The migration SQL is in `supabase/migrations/001_initial_schema.sql`. Run it in the Supabase SQL Editor. The FastAPI app also attempts `Base.metadata.create_all` on startup (dev convenience).
+Apply the SQL files manually in the Supabase SQL editor, in filename order.
+The FastAPI app does **not** call `Base.metadata.create_all` or Alembic on
+startup. See [MIGRATIONS_AND_ROLLBACK.md](MIGRATIONS_AND_ROLLBACK.md).
 
 ### D. Start the FastAPI server
 
@@ -68,36 +78,32 @@ The migration SQL is in `supabase/migrations/001_initial_schema.sql`. Run it in 
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Verify: open `http://127.0.0.1:8000/api/v1/health` — should return `{"status": "ok"}`.
-API docs: `http://127.0.0.1:8000/api/v1/docs`
+Verify: `http://127.0.0.1:8000/api/v1/health` reports liveness and
+`/ready` reports database/Supabase readiness. API docs are at
+`http://127.0.0.1:8000/api/v1/docs`.
 
-### E. Register a worker (local or cloud)
+### E. Worker registration, honestly
 
-The backend exposes `/api/v1/compute/workers/register` (requires `WORKER_AUTH_SECRET`). A worker process sends heartbeats to `/api/v1/compute/workers/{id}/heartbeat`.
+`/api/v1/compute/workers/register` exists and requires `WORKER_AUTH_SECRET`,
+but registered workers **do not execute gradient training**. Training runs
+in-process on the backend CPU. Device endpoints coordinate dataset-shard
+preprocessing only. There is no `compute="cloud"` mode.
 
 ---
 
-## Part 3: Frontend Deployment (Hopeweb)
+## Part 3: Frontend Deployment (static host)
 
-Hopeweb hosts static sites. Upload the `frontend/` folder contents:
+Upload the **entire `frontend/` directory**, preserving its `js/` and `css/`
+subdirectories. `index.html` loads build-stamped files from those directories;
+there is no root `style.css`, `script.js`, or `assets/` directory. Keep
+`version.json` at the site root.
 
-| File | Hopeweb location |
-|------|-----------------|
-| `index.html` | project root |
-| `style.css` | project root |
-| `script.js` | project root |
-| `js/*.js` | `js/` folder |
-| `css/*.css` | `css/` folder |
-| `assets/*` | `assets/` folder |
-
-### How to upload in Hopeweb
-
-1. Log in to Hopeweb.
-2. Create folders: `js`, `css`, `assets` (if not present).
-3. Upload `index.html`, `style.css`, `script.js` to the root.
-4. Upload all `js/` files to the `js` folder.
-5. Upload all `css/` files to the `css` folder.
-6. Upload assets to `assets`.
+| File | Static-host location |
+|------|----------------------|
+| `frontend/index.html` | project root |
+| `frontend/version.json` | project root |
+| `frontend/js/*.js` | `js/` folder |
+| `frontend/css/*.css` | `css/` folder |
 
 ### Configure the frontend
 
@@ -111,52 +117,58 @@ window.CORPUS_CONFIG.API_BASE_URL = 'https://your-backend-url.com';
 
 ### Verify
 
-1. Open your Hopeweb site URL.
+1. Open the static site URL.
 2. Sign up / sign in (Supabase Auth).
-3. Create a model, upload a dataset, start training.
-4. Check the browser console for errors.
+3. Create a model, upload a dataset, start a short CPU training job.
+4. After it completes, select the trained model in Chat or Prediction Lab.
+5. Check the browser console and `GET /api/v1/version` / `/version.json`.
 
 ---
 
-## Part 4: Local Worker (Windows / macOS / Linux)
-
-A local worker runs the Python training engine on your machine.
+## Part 4: Local compute (Windows / macOS / Linux)
 
 1. Follow Part 2 (backend setup).
-2. Set `compute=local` when creating a training job in the frontend.
-3. The backend runs training in-process using PyTorch (CPU) or the custom numerical engine.
-4. Monitor progress via WebSocket in the Training Center.
+2. Create a training job from the Training page; the only accepted compute mode
+   is `local`.
+3. The backend runs the real PyTorch `CorpusTransformerPT` in-process on CPU and
+   writes metrics, a checkpoint and tokenizer to private storage.
+4. Monitor progress through the authenticated `/api/v1/training/ws/{job_id}`
+   socket. Inference reads the saved checkpoint after the job completes.
 
 ### Hardware detection
 
-The backend reports available device (`cpu`, `cuda`, `mps`) via the health/compute endpoints. GPU training requires CUDA-capable PyTorch (`pip install torch --index-url https://download.pytorch.org/whl/cu118`).
+The API reports CPU/host telemetry. The pinned runtime uses CPU PyTorch; a CUDA
+wheel is a manual, separate installation and is not required for the default
+training path.
 
 ---
 
-## Part 5: Cloud Worker
+## Part 5: Cloud / distributed workers — not implemented
 
-A cloud worker runs on a separate server:
-
-1. Deploy the backend Docker image: `docker-compose up`.
-2. Set `compute=cloud` when creating training jobs.
-3. Jobs are queued and assigned to registered workers via heartbeats.
-4. Checkpoints upload to Supabase Storage.
+There is no cloud gradient worker, parameter server, federated averaging, or
+device-side backpropagation in this checkout. Do not set `compute=cloud`; the
+backend rejects it. Deploying a second container does not distribute a training
+job. See [DEVICE_TRAINING.md](DEVICE_TRAINING.md) for what connected devices
+actually do.
 
 ---
 
 ## Android / iOS Mobile
 
-- Open the Hopeweb URL in Chrome (Android) or Safari (iOS).
-- Use the bottom navigation (mobile-native feel).
-- A phone can **manage** remote jobs but typically cannot train large models locally.
-- To control a remote worker: register the worker on a Linux/cloud server, then use the phone's Compute Manager to view and assign jobs.
+- Open the static site in Chrome (Android) or Safari (iOS).
+- Navigation is one hamburger-opened sidebar at every screen size; the old
+  bottom navigation was removed.
+- A phone can register as a preprocessing device and manage jobs, but it does
+  not run gradient training locally.
+- For LAN development, use the computer's LAN IP in `API_BASE_URL`, not
+  `localhost`.
 
 ---
 
 ## Verifying what a Render deployment is actually running
 
 A merged commit on `main` does **not** mean the live services run it. Use
-[`docs/PRODUCTION_VERIFICATION.md`](PRODUCTION_VERIFICATION.md):
+[PRODUCTION_VERIFICATION.md](PRODUCTION_VERIFICATION.md):
 
 * backend: `GET https://corpus-ultimate-api.onrender.com/api/v1/version`
   (`build_id`, `commit` from `RENDER_GIT_COMMIT`, `features`),
@@ -167,13 +179,18 @@ the Render dashboard and check the build log.
 
 ## Database migrations
 
-Run these once, in order, in the Supabase SQL editor:
+Run all ten SQL files once, in filename order:
 
-1. `supabase/migrations/001_initial_schema.sql`
-2. `supabase/migrations/002_add_api_key_hash.sql`
-3. `supabase/migrations/003_dataset_upload_status.sql`
-4. `supabase/migrations/004_normalize_models_owner_id.sql` — converts
-   `models.owner_id` from `text` to `uuid` (idempotent; never reassigns owners)
+`001_initial_schema.sql`, `002_add_api_key_hash.sql`,
+`003_dataset_upload_status.sql`, `004_normalize_models_owner_id.sql`,
+`005_safe_production_alignment.sql`, `006_fk_indexes_and_rls_initplan.sql`,
+`007_training_progress_and_job_delete.sql`, `008_training_devices.sql`,
+`010_teacher_network_and_distillation.sql`,
+`011_student_models_and_training_telemetry.sql`.
+
+There is no `009` file. The full forward/rollback playbook is
+[MIGRATIONS_AND_ROLLBACK.md](MIGRATIONS_AND_ROLLBACK.md); `npm run
+check:migrations` verifies the list in CI.
 
 ---
 
@@ -184,14 +201,16 @@ Run these once, in order, in the Supabase SQL editor:
 | Supabase not configured | Check `js/config.js` values match your Supabase project |
 | Backend connection refused | Ensure `API_BASE_URL` points to a running uvicorn instance |
 | CORS error | Add your frontend URL to `CORS_ORIGINS` in backend `.env` |
-| Training fails | Verify model config passes validation (d_model % n_heads == 0) |
-| RLS blocks access | Run the migration SQL; ensure policies are enabled |
+| Training fails | Verify model config passes validation (`d_model % n_heads == 0`) and the dataset has a stored file |
+| Inference says unavailable | Train the model first; untrained models have no checkpoint/tokenizer |
+| RLS blocks access | Apply the migration SQL in order; verify policies are enabled |
+| WebSocket closes with 1008 | The client must send `{"type":"auth","token":"..."}` as the first frame |
 
 ---
 
 ## Security Notes
 
 - Never commit `.env` with real secrets.
-- The Supabase `anon` key is public-safe when RLS is enabled.
+- The Supabase `anon` / publishable key is public-safe when RLS is enabled.
 - The `service_role` key must stay backend-only.
 - API keys are stored hashed in the database, never in browser LocalStorage.

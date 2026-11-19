@@ -6,6 +6,11 @@ from fastapi import APIRouter
 
 api_router = APIRouter()
 
+# The authenticated general notification socket is a hard dependency: silently
+# skipping it would leave the frontend retrying a nonexistent /api/v1/ws route.
+from app.api.endpoints import notifications as notifications_endpoints  # noqa: E402
+api_router.include_router(notifications_endpoints.router, prefix="/ws", tags=["websocket"])
+
 # Import endpoint modules (created in later phases)
 try:
     from app.api.endpoints import auth as auth_endpoints

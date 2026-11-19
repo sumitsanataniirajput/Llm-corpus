@@ -240,7 +240,14 @@ window.intelligence = (function () {
 
   function drawCharts(data) {
     const series = (data.metrics && data.metrics.series) || [];
-    if (!series.length || !window.charts || typeof window.charts.createLineChart !== 'function') return;
+    if (!series.length || !window.charts || typeof window.charts.createLineChart !== 'function') {
+      if (window.charts && typeof window.charts.destroyChart === 'function') {
+        ['intel-loss-chart', 'intel-lr-chart', 'intel-throughput-chart'].forEach((id) => {
+          window.charts.destroyChart(id);
+        });
+      }
+      return;
+    }
     const labels = series.map((point) => point.step);
     try {
       window.charts.createLineChart('intel-loss-chart', labels, [{

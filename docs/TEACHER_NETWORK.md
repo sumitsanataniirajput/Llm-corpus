@@ -6,7 +6,9 @@ that data, configuring a student model, and reading back what a training run
 actually did. It records what is implemented, what is deliberately **not**
 implemented, and how to verify each part.
 
-Branch: `arena/f91ac9a4-llm-corpus` · migrations `010`, `011` · build `2026-11-19.2`
+Historical implementation notes for migrations `010`/`011`. Current status:
+[STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md); current build identity:
+`frontend/version.json` and `GET /api/v1/version`.
 
 ---
 
@@ -151,7 +153,8 @@ the first metric row, else from `created_at`.
 1. `supabase/migrations/010_teacher_network_and_distillation.sql`
 2. `supabase/migrations/011_student_models_and_training_telemetry.sql`
 3. Backend deploy (needs `CREDENTIAL_ENCRYPTION_KEY`, `RATE_LIMIT_REQUESTS_PER_MINUTE`)
-4. Frontend deploy, then verify `/version.json` reports `2026-11-19.2`
+4. Frontend deploy, then verify `/version.json` reports the same build id as
+   `frontend/version.json` in the deployed commit.
 
 Both migrations are additive: six tables in `010`
 (`ai_provider_connections`, `ai_teacher_models`, `ai_provider_requests`,

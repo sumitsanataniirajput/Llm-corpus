@@ -1,5 +1,9 @@
 # Training dataset selection — fix and contract
 
+Historical implementation notes. Current WebSocket authentication uses a
+first-frame auth message, not a query-string token; see
+[STATUS_AND_LIMITATIONS.md](STATUS_AND_LIMITATIONS.md).
+
 ## Symptom
 
 Creating a training job produced a job with `dataset_id = null`, the worker then
@@ -18,7 +22,7 @@ Three independent problems compounded:
 1. **The Training page never fetched datasets.** `frontend/js/training.js`
    rendered its `<select id="t-dataset">` from `state.getDatasets()`, which is
    only populated by the *Dataset Manager* page. Opening Training directly (a
-   normal case, it is in the sidebar and the mobile bottom nav) produced an
+   normal case, it is in the sidebar) produced an
    empty dropdown, so the form fell back to `dataset_id: datasetId || null`.
 2. **The API accepted a missing dataset.** `TrainingConfig.dataset_id` was
    optional and `create_job` persisted and queued the job without validating the
@@ -40,11 +44,11 @@ database default that was not declared in the SQLAlchemy models.
 
 | File | Change |
 |---|---|
-| `backend/app/api/endpoints/training.py` | `resolve_training_resources()` validates dataset id → ownership → stored file → usable status → model ownership, all **before** the job row is written. Missing dataset returns `400 {"detail": "Select a dataset before starting training."}`. `JobOut` now includes `dataset_id`. Real progress websocket (`/api/v1/training/ws/{job_id}?token=…`) streams DB status/metric/complete events instead of mock data, and rejects foreign jobs. |
+| `backend/app/api/endpoints/training.py` | `resolve_training_resources()` validates dataset id → ownership → stored file → usable status → model ownership, all **before** the job row is written. Missing dataset returns `400 {"detail": "Select a dataset before starting training."}`. `JobOut` now includes `dataset_id`. Real progress websocket (`/api/v1/training/ws/{job_id}` with first-frame auth) streams DB status/metric/complete events instead of mock data, and rejects foreign jobs. |
 | `backend/app/api/endpoints/datasets.py` | `DatasetOut` exposes `file_name`, `file_size`, `storage_path`, `uploaded_at`, `has_file`, `trainable` from the latest `dataset_files` row (scoped by owner). New records are `status="pending"`. New `GET /datasets/{id}/preview` returns real text from private storage. Delete removes stored objects. Upload sets `status="uploaded"`, real size, checksum and file extension. |
 | `backend/app/services/training_worker.py` | Captures `dataset_id`/`model_id` before the session closes, refuses unusable datasets, verifies the SHA-256 checksum of the downloaded object, records a `started` event containing the dataset id, file name and storage path, and writes metrics/checkpoint only for real runs. |
 | `backend/app/api/endpoints/models.py` | Ownership comparisons/creation use `uuid.UUID(...)` so listing models does not fail against a UUID column. |
-| `backend/app/core/models.py` | Removed duplicated `owner_id` indexes and declared the `now()` server defaults that the Supabase migration already has (keeps `create_all` schemas identical to production). |
+| `backend/app/core/models.py` | Removed duplicated `owner_id` indexes and declared the `now()` server defaults that the Supabase migration already has (kept dev schemas aligned before startup auto-create was removed). |
 
 ### Frontend
 

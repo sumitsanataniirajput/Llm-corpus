@@ -1198,6 +1198,36 @@
   min-width: 0;
 }
 
+/* P2 chat model selector: a real account-scoped choice, not a static chip. */
+.chat-model-select-label {
+  font-size: var(--text-label-small);
+  color: var(--color-text-muted);
+  flex: 0 0 auto;
+}
+.chat-model-select {
+  flex: 0 1 220px;
+  min-width: 0;
+  min-height: 44px;
+  max-width: 220px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-variant);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-label-small);
+}
+.chat-model-select:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.chat-header .status-badge { flex: 0 0 auto; }
+
+@media (max-width: 600px) {
+  .chat-model-select-label { display: none; }
+  .chat-model-select { flex-basis: 150px; }
+}
+
 /* ========================================
    Statistics
    ======================================== */

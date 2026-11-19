@@ -168,6 +168,17 @@ window.CORPUS_BOOTSTRAP = (function () {
     const container = document.getElementById('page-container');
     window.CORPUS_APP.setPageContainer(container);
 
+    // Phase 1: protect every page's typed values, caret and focus from a full
+    // `innerHTML` repaint (background pollers, filter changes, auth events).
+    // Idempotent; components.js also installs it as soon as it is evaluated.
+    try {
+      if (window.ui && typeof window.ui.installFormStateGuard === 'function') {
+        window.ui.installFormStateGuard(container);
+      }
+    } catch (err) {
+      error('Form state guard could not be installed', err);
+    }
+
     if (!checkPageContainer()) {
       showBootstrapError('Main content container not found in the page.');
       return;

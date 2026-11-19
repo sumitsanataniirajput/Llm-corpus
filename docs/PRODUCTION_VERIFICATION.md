@@ -5,6 +5,10 @@ but the live app still misbehaved. **A GitHub commit is not evidence that a
 deployment is running it.** Use the checks below to prove what each Render
 service is actually executing.
 
+Current build ids are read from `frontend/version.json` and
+`backend/app/api/endpoints/version.py`; the hard-coded values in the
+historical appendix are observations, not expected values for a new deploy.
+
 ---
 
 ## 1. Render services
@@ -48,17 +52,10 @@ Expected:
 ```json
 {
   "service": "corpus-ultimate-api",
-  "build_id": "2026-11-16.5",
+  "build_id": "<BUILD_ID from backend/app/api/endpoints/version.py>",
   "commit": "<sha of the newest commit on main>",
   "branch": "main",
-  "features": [
-    "owner-id-normalization",
-    "owner-column-type-agnostic",
-    "owner-delete-authorized",
-    "model-delete-cleanup",
-    "ownership-diagnostics",
-    "version-endpoint-present"
-  ]
+  "features": ["<every marker in that file's FEATURES list>"]
 }
 ```
 
@@ -247,7 +244,7 @@ phone:
    input, so there is no label/JS double activation).
 4b. Hard-refresh (Chrome ⋮ → Reload) and repeat: local assets are requested as
    `css/…?v=<buildId>`, so the old stylesheet must not be reused. In DevTools
-   remote debugging the network panel must show `?v=2026-11-16.7`.
+   remote debugging the network panel must show `?v=<current buildId>`.
 5. Select one `.txt` file → it appears once in the upload queue → **Upload** →
    progress reaches 100% and the dataset shows `uploaded`.
 6. Select a `.pdf` file → same flow.
@@ -308,21 +305,25 @@ whether the automatic retry ran — paste that, it identifies the broken file
 without guesswork.
 
 `GET https://corpus-ultimate-web.onrender.com/version.json` must already show
-`buildId 2026-11-16.7` before you test — otherwise you are testing the old CSS.
+`buildId` matching `frontend/version.json` before you test — otherwise you are
+testing the old CSS.
 
 ---
 
 ## 8. Test commands
 
 ```bash
-# frontend (jsdom) + deployment-verification tooling
-npm install
-npm test                        # = node --test frontend/tests/*.test.mjs scripts/tests/*.test.mjs
+# from repository root
+npm ci --no-audit --no-fund
+npm test                        # full TAP output (11 known baseline failures)
+npm run test:ci                 # migration/docs/baseline-aware gate
 
-# backend (needs a Python env with backend/requirements.txt installed)
+# backend
+cd backend
 python -m venv /tmp/venv
-/tmp/venv/bin/pip install -r backend/requirements.txt   # or the subset used in CI
-/tmp/venv/bin/pytest backend/tests -v
+/tmp/venv/bin/pip install -r requirements.txt
+/tmp/venv/bin/pytest -q
+/tmp/venv/bin/pytest corpus_engine/tests -q
 ```
 
 The backend suite starts a throw-away PostgreSQL server via `pgserver`, so it
@@ -362,7 +363,7 @@ curl -s https://corpus-ultimate-web.onrender.com/version.json     # buildId == f
 
 ---
 
-## 9. Session & upload regression checklist (build 2026-11-16.7)
+## 9. Session & upload regression checklist (historical)
 
 These are the behaviours the authentication/upload repair guarantees. Every one
 of them is covered by an automated test where the flow is testable without a

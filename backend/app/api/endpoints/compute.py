@@ -1,6 +1,6 @@
 """CORPUS ULTIMATE — Compute / worker endpoints."""
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List, Dict, Any
 import uuid
 from datetime import datetime, timezone
@@ -18,13 +18,29 @@ class WorkerRegister(BaseModel):
     os: str
     cpu: str
     ram: int
+    # Worker registration uses a shared infrastructure secret, not a user JWT.
+    # The trusted registrar must therefore state which account owns the worker;
+    # the old code wrote a nil-UUID "system owner" that no account could see.
+    owner_id: str
     gpu: Optional[str] = None
     vram: Optional[int] = None
     backend: str = "cpu"
 
+    @field_validator("owner_id")
+    @classmethod
+    def validate_owner_id(cls, value: str) -> str:
+        try:
+            owner = uuid.UUID(value)
+        except (TypeError, ValueError):
+            raise ValueError("owner_id must be a UUID for the account that owns this worker")
+        if owner == uuid.UUID("00000000-0000-0000-0000-000000000000"):
+            raise ValueError("owner_id cannot be the nil UUID")
+        return str(owner)
+
 
 class WorkerOut(BaseModel):
     id: str
+    owner_id: str
     name: str
     status: str
     last_heartbeat: Optional[str]
@@ -36,6 +52,7 @@ class WorkerOut(BaseModel):
 def _worker_to_out(w: ComputeWorker) -> WorkerOut:
     return WorkerOut(
         id=w.id,
+        owner_id=str(w.owner_id),
         name=w.name,
         status=w.status,
         last_heartbeat=w.last_heartbeat.isoformat() if w.last_heartbeat else None,
@@ -56,14 +73,15 @@ async def list_workers(user=Depends(require_user), db: AsyncSession = Depends(ge
 
 @router.post("/workers/register", response_model=WorkerOut, tags=["compute"])
 async def register_worker(data: WorkerRegister, secret=Depends(verify_worker_secret), db: AsyncSession = Depends(get_db_session)):
-    # Note: worker registration uses worker secret, not user auth.
-    # The owner_id is derived from the worker secret context if needed.
-    # For now, register without owner association (system-level worker).
+    # Worker registration uses the shared worker secret, not a user JWT. The
+    # trusted registrar supplies the owning account explicitly; we never invent
+    # a nil-UUID "system owner" that would make the worker invisible to every
+    # account and misrepresent ownership in the database.
     worker_id = "worker_" + uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc)
     worker = ComputeWorker(
         id=worker_id,
-        owner_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),  # system owner
+        owner_id=uuid.UUID(data.owner_id),
         name=data.name,
         os=data.os,
         cpu=data.cpu,

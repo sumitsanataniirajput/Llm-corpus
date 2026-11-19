@@ -14,6 +14,38 @@ window.auth = (function () {
   // session (page reload, token refresh, returning from the Android file
   // picker); treating those as fresh logins used to yank the user to Dashboard.
   let interactiveSignIn = false;
+  // The account identity the current page was rendered for. Supabase emits
+  // SIGNED_IN again on a token refresh, a page reload and after the Android
+  // system file picker returns. Re-rendering on those events used to replace
+  // the whole page while the user was typing (lost value, caret and keyboard).
+  let lastRenderedUserId = null;
+
+  function sessionUserId(session) {
+    return session && session.user
+      ? String(session.user.id || session.user.email || '')
+      : null;
+  }
+
+  // Re-render only when the identity actually changes, and always preserve
+  // in-progress form state when a render is genuinely required.
+  function rerenderForIdentity(session, force) {
+    const id = sessionUserId(session);
+    if (!force && id === lastRenderedUserId) {
+      updateProfileUI();
+      return;
+    }
+    lastRenderedUserId = id;
+    if (typeof router !== 'undefined' && router.initialized) {
+      const root = window.CORPUS_APP && window.CORPUS_APP.getPageContainer
+        ? window.CORPUS_APP.getPageContainer()
+        : null;
+      if (root && window.ui && typeof window.ui.repaintPreservingForms === 'function') {
+        window.ui.repaintPreservingForms(root, function () { return router.render(); });
+      } else {
+        router.render();
+      }
+    }
+  }
 
   // Check Supabase configuration before allowing any auth operation
   function checkSupabaseConfig() {
@@ -30,6 +62,11 @@ window.auth = (function () {
   }
 
   function init() {
+    try {
+      const current = state.getUser();
+      lastRenderedUserId = current ? String(current.id || current.email || '') : null;
+    } catch (e) { lastRenderedUserId = null; }
+
     // Check Supabase configuration first
     const configOk = checkSupabaseConfig();
     if (!configOk) {
@@ -64,11 +101,10 @@ window.auth = (function () {
         }
         state.setAuthInitializing(false);
         updateProfileUI();
-        // Re-render the current route if router is already initialized
-        // so the page reflects the restored session
-        if (typeof router !== 'undefined' && router.initialized) {
-          router.render();
-        }
+        // The initial session restore changes what the page is allowed to show,
+        // so it needs one render — but it must not discard anything already
+        // typed into a form on the page.
+        rerenderForIdentity(session, true);
         return;
       }
 
@@ -81,16 +117,17 @@ window.auth = (function () {
           if (wasInteractive) {
             ui.toast('Signed in successfully', 'success');
             closeModal();
+            lastRenderedUserId = sessionUserId(session);
             if (typeof router !== 'undefined' && router.initialized) {
               router.navigate('dashboard');
             }
           } else {
             // Session restored/refreshed by Supabase (reload, token refresh,
             // returning from the system file picker). Stay exactly where the
-            // user is and just re-render so the page picks up the session.
-            if (typeof router !== 'undefined' && router.initialized) {
-              router.render();
-            }
+            // user is. If the account is unchanged there is nothing to render
+            // at all; otherwise preserve what they were typing.
+            rerenderForIdentity(session, false);
+            return;
           }
           updateProfileUI();
         }
@@ -100,14 +137,16 @@ window.auth = (function () {
       if (event === 'TOKEN_REFRESHED') {
         if (session && session.user) {
           state.setUser(session.user);
-          // Do NOT show a toast on every token refresh — that's noisy
-          // Just update the profile UI silently
+          lastRenderedUserId = sessionUserId(session);
+          // Do NOT show a toast or re-render on every token refresh — that's
+          // noisy and would interrupt typing.
           updateProfileUI();
         }
         return;
       }
 
       if (event === 'SIGNED_OUT') {
+        lastRenderedUserId = null;
         state.clearUser();
         state.setAuthReady(true);
         if (!initializing) {
@@ -302,11 +341,14 @@ window.auth = (function () {
     if (currentTab === 'login') {
       formContainer.innerHTML = `
         <div class="input-field">
-          <input type="email" id="login-email" placeholder="Email" required>
+          <input type="email" id="login-email" placeholder="Email" required
+                 autocomplete="email" inputmode="email" enterkeyhint="next" autocapitalize="off" spellcheck="false">
           <label for="login-email">Email</label>
         </div>
         <div class="input-field">
-          <input type="password" id="login-password" placeholder="Password" required>
+          <input type="password" id="login-password" placeholder="Password" required
+                 autocomplete="current-password" inputmode="text" enterkeyhint="go"
+                 autocapitalize="off" spellcheck="false">
           <label for="login-password">Password</label>
         </div>
         <button class="btn btn-primary w-full" onclick="auth.handleLogin()">Sign in</button>
@@ -316,15 +358,19 @@ window.auth = (function () {
     } else {
       formContainer.innerHTML = `
         <div class="input-field">
-          <input type="email" id="signup-email" placeholder="Email" required>
+          <input type="email" id="signup-email" placeholder="Email" required
+                 autocomplete="email" inputmode="email" enterkeyhint="next" autocapitalize="off" spellcheck="false">
           <label for="signup-email">Email</label>
         </div>
         <div class="input-field">
-          <input type="password" id="signup-password" placeholder="Password" required>
+          <input type="password" id="signup-password" placeholder="Password" required
+                 autocomplete="new-password" inputmode="text" enterkeyhint="next"
+                 autocapitalize="off" spellcheck="false">
           <label for="signup-password">Password (min 6 chars)</label>
         </div>
         <div class="input-field">
-          <input type="text" id="signup-name" placeholder="Full name">
+          <input type="text" id="signup-name" placeholder="Full name"
+                 autocomplete="name" inputmode="text" enterkeyhint="done" autocapitalize="words" spellcheck="true">
           <label for="signup-name">Full name</label>
         </div>
         <button class="btn btn-primary w-full" onclick="auth.handleSignup()">Create account</button>

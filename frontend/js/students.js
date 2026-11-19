@@ -199,9 +199,9 @@ window.students = (function () {
                 ${availability.available ? '' : ' — unavailable'}</option>`;
             }).join('')}</select>
           </label>
-          <label>Learning rate <input id="st-lr" type="number" step="0.00001" min="0.000001" value="0.0005"></label>
-          <label>Epochs <input id="st-epochs" type="number" min="1" max="50" value="1"></label>
-          <label>Batch size <input id="st-batch" type="number" min="1" value="1"></label>
+          <label>Learning rate <input id="st-lr" type="number" step="0.00001" min="0.000001" value="0.0005" inputmode="decimal" enterkeyhint="done" autocapitalize="off" spellcheck="false"></label>
+          <label>Epochs <input id="st-epochs" type="number" min="1" max="50" value="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false"></label>
+          <label>Batch size <input id="st-batch" type="number" min="1" value="1" inputmode="numeric" enterkeyhint="done" autocapitalize="off" spellcheck="false"></label>
           <button class="btn btn-primary" type="button" onclick="students.saveConfig(this)">
             <i class="fas fa-floppy-disk"></i> Save configuration
           </button>
@@ -220,7 +220,7 @@ window.students = (function () {
       <div class="card">
         <div class="card-header"><h3>Hugging Face base model (optional)</h3></div>
         <div class="card-body form-grid">
-          <label>Repository ID <input id="st-hf-repo" placeholder="e.g. organization/model-id">
+          <label>Repository ID <input id="st-hf-repo" placeholder="e.g. organization/model-id" inputmode="text" enterkeyhint="done" autocapitalize="words" spellcheck="true">
             <span class="field-help">The backend reads the real config from the Hub. If it cannot, you get the error — not a guess.</span>
           </label>
           <label class="checkbox-row"><input type="checkbox" id="st-hf-load"> Load the weights to count parameters (slow, memory heavy)</label>

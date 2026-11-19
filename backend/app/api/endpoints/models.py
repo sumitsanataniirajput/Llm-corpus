@@ -448,6 +448,14 @@ async def delete_model(
     await db.execute(delete(Model).where(Model.id == model_id))
     await db.commit()
 
+    # A deleted model's checkpoint must not stay live in the bounded inference
+    # cache. Clearing all decoded bundles is cheap and avoids a stale path.
+    try:
+        from app.services import inference_service
+        inference_service.clear_cache()
+    except Exception as exc:  # pragma: no cover - cache is an optimisation
+        logger.debug("Could not clear inference cache after delete: %s", exc)
+
     logger.info(
         "Deleted model=%s owner=%s removed_files=%d detached_jobs=%d",
         model_id,

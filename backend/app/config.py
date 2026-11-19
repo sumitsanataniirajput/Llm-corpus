@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     # ── Server ──
     PORT: int = 8000
     ALLOWED_HOSTS: List[str] = ["*"]  # Safe dev default; override in production
+    # Only these immediate peers may supply X-Forwarded-For / X-Real-IP. Empty
+    # by default: a public client cannot spoof its rate-limit identity.
+    TRUSTED_PROXY_IPS: List[str] = []
 
     # ── Supabase ──
     SUPABASE_URL: str = ""
@@ -72,6 +75,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8000",
         "http://localhost:41625",
         "http://127.0.0.1:41625",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ]
 
     # ── Storage ──
@@ -104,6 +109,14 @@ class Settings(BaseSettings):
         """Accept comma-separated string or list for ALLOWED_HOSTS env var."""
         if isinstance(v, str):
             return [h.strip() for h in v.split(",") if h.strip()]
+        return v
+
+    @field_validator("TRUSTED_PROXY_IPS", mode="before")
+    @classmethod
+    def parse_trusted_proxy_ips(cls, v: Union[str, List[str]]) -> List[str]:
+        """Accept comma-separated string or list for TRUSTED_PROXY_IPS."""
+        if isinstance(v, str):
+            return [ip.strip() for ip in v.split(",") if ip.strip()]
         return v
 
     @field_validator("SECRET_KEY")

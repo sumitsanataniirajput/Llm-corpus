@@ -1,0 +1,51 @@
+name: Verify backend and frontend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# This workflow verifies the source in this push. It does NOT deploy or inspect
+# a live environment; a separate workflow checks the live deployment identity.
+jobs:
+  backend:
+    name: Backend pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Test FastAPI and checkpoint-backed inference
+        run: pytest -q
+      - name: Test corpus engine modules
+        run: pytest corpus_engine/tests -q
+
+  frontend:
+    name: Frontend jsdom and repo gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install deterministic test tooling
+        run: npm ci --no-audit --no-fund
+      - name: Verify repo hygiene and migration manifest
+        run: npm run test:ci
+      - name: Syntax-check browser modules and tests
+        run: |
+          for file in frontend/js/*.js frontend/tests/*.mjs scripts/*.mjs scripts/tests/*.mjs; do
+            node --check "$file"
+          done

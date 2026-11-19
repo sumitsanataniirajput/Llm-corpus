@@ -274,3 +274,27 @@ async def test_delete_model_blocks_active_training_and_stops_worker_when_request
     assert jobs[0].status == "stopped"
     # Shared dataset still exists.
     assert len(await db_rows(Dataset, id=dataset["id"])) == 1
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_model_evicts_decoded_inference_bundles(http, monkeypatch):
+    from app.services import inference_service
+
+    real_clear_cache = inference_service.clear_cache
+    calls = []
+
+    def spy_clear_cache():
+        calls.append(1)
+        return real_clear_cache()
+
+    monkeypatch.setattr(inference_service, "clear_cache", spy_clear_cache)
+    # A private cache implementation detail is used here only to prove that a
+    # deleted model cannot keep a live decoded checkpoint bundle.
+    inference_service._CACHE["stale-model-bundle"] = object()
+
+    model = await _create_model(http, name="Cache eviction")
+    resp = await http.delete(f"/api/v1/models/{model['id']}")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == [1]
+    assert len(inference_service._CACHE) == 0

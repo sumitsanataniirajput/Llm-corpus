@@ -103,7 +103,9 @@ window.settings = (function () {
             <form id="settings-key-form" onsubmit="return settings.handleCreateKeySubmit(event)">
               <div class="input-field">
                 <label for="settings-key-name">Key name</label>
-                <input type="text" id="settings-key-name" placeholder="e.g. notebook" maxlength="60" required autocomplete="off">
+                <input type="text" id="settings-key-name" placeholder="e.g. notebook" maxlength="60"
+                       required autocomplete="off" inputmode="text" enterkeyhint="done"
+                       autocapitalize="words" spellcheck="false">
                 <span class="field-hint">Choose a label you will recognise later.</span>
               </div>
               <div class="form-actions">
@@ -240,7 +242,8 @@ window.settings = (function () {
     const form = document.getElementById('settings-key-form');
     if (form) form.reset();
     const result = document.getElementById('settings-key-result');
-    if (result) result.style.display = 'none';
+    // A secret shown once must never survive into the next visit to the modal.
+    if (result) { result.innerHTML = ''; result.style.display = 'none'; }
     const modal = document.getElementById('settings-create-key-modal');
     if (modal) modal.classList.remove('hidden');
   }
@@ -249,7 +252,9 @@ window.settings = (function () {
     const modal = document.getElementById('settings-create-key-modal');
     if (modal) modal.classList.add('hidden');
     const result = document.getElementById('settings-key-result');
-    if (result) result.style.display = 'none';
+    if (result) { result.innerHTML = ''; result.style.display = 'none'; }
+    const name = document.getElementById('settings-key-name');
+    if (name) name.value = '';
   }
 
   async function handleCreateKeySubmit(event) {

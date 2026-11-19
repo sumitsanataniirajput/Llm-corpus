@@ -570,6 +570,13 @@ body.nav-open { overflow: hidden; }
 .operation-row.state-queued { border-left-color: var(--color-accent); }
 
 .operation-row-head { display: flex; justify-content: space-between; gap: var(--space-2); }
+.operation-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.operation-row-actions .btn { min-height: 2.75rem; }
 .operation-name { font-weight: 600; overflow-wrap: anywhere; }
 .operation-state { color: var(--color-text-muted); white-space: nowrap; }
 .operation-meta { color: var(--color-text-muted); font-size: 11px; margin-top: 2px; }
@@ -593,6 +600,13 @@ body.nav-open { overflow: hidden; }
 /* Anything mid-action is not interactive, without touching the page's own
    disabled state (which page code owns and restores on re-render). */
 [data-busy="true"] { pointer-events: none; cursor: progress; opacity: 0.9; }
+/* A busy container must never block taps on an editable field: Android Chrome
+   opens the soft keyboard from that first tap, and `pointer-events: none` on
+   an ancestor would make the field look permanently unresponsive. */
+[data-busy="true"] input,
+[data-busy="true"] textarea,
+[data-busy="true"] select,
+[data-busy="true"] [contenteditable="true"] { pointer-events: auto; }
 .btn.is-busy .btn-busy-label { opacity: 0.95; }
 
 /* ---------- Modal ---------- */

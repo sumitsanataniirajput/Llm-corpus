@@ -10,19 +10,22 @@ Personal LLM development, training, experimentation, and monitoring platform.
 
 ## What it is
 
-A real, self-hostable AI platform that lets you:
+A self-hostable AI workspace that currently lets you:
 
-- Create custom language models from randomly initialized weights
-- Design and configure transformer architectures
-- Train models with a genuine PyTorch engine and a custom numerical engine
-- Fine-tune supported open-source models
-- Store datasets, weights, checkpoints, and configurations in Supabase cloud storage
-- Switch between devices and continue training
-- Monitor genuine training metrics
-- Chat with your trained model (real inference, no external API routing)
-- Explore tokenization and next-token probabilities
-- Inspect architecture, parameters, vocabulary, and training history
-- Export and deploy models
+- Create custom transformer model configurations from randomly initialized weights
+- Train a small decoder-only model with the real in-process PyTorch CPU engine
+- Store datasets, checkpoints, tokenizers and configurations in private Supabase Storage
+- Register devices for dataset-shard preprocessing and heartbeat/lease coordination
+- Monitor genuine optimizer-step metrics, job events and checkpoints
+- Chat with a **trained** model through checkpoint-backed inference (no external model API)
+- Inspect the real tokenizer and next-token logits in Prediction Lab
+- Inspect architecture, computed parameter counts and training history
+- Export the stored model configuration and private-object references
+
+See [docs/STATUS_AND_LIMITATIONS.md](docs/STATUS_AND_LIMITATIONS.md) for the
+explicit list of what is not implemented. Device-side/cloud gradient training,
+hosted-model fine-tuning, evaluation scoring and one-click model deployment are
+not part of the running backend.
 
 ## Technology stack
 
@@ -35,29 +38,27 @@ A real, self-hostable AI platform that lets you:
 ## Repository structure
 
 ```
-corpus-ultimate/
-├── frontend/                 # Hopeweb-deployable static frontend
+Llm-corpus/
+├── frontend/                 # static frontend (no build step)
 │   ├── index.html
-│   ├── style.css
-│   ├── script.js
-│   ├── assets/
-│   ├── js/
-│   └── css/
-├── backend/                  # Python FastAPI training server
+│   ├── version.json
+│   ├── css/                  # variables, layout, components, pages, responsive
+│   ├── js/                   # route modules, API client, shared UI helpers
+│   └── tests/                # jsdom regression suites
+├── backend/                  # Python FastAPI training + inference server
 │   ├── app/
 │   ├── corpus_engine/
+│   ├── tests/
 │   ├── requirements.txt
-│   ├── .env.example
-│   ├── Dockerfile
-│   └── docker-compose.yml
-├── supabase/                 # Database migrations and seed
-│   ├── migrations/
-│   ├── seed.sql
-│   └── config.toml
-├── scripts/
-├── docs/
+│   └── .env.example
+├── supabase/                 # forward-only SQL migrations and seed
+│   └── migrations/
+├── scripts/                  # deployment verification + repo hygiene checks
+├── docs/                     # architecture, deployment, migration and status docs
+├── package.json              # frontend test tooling only
+├── package-lock.json
 ├── README.md
-├── LICENSE
+├── AGENTS.md
 └── .gitignore
 ```
 
@@ -67,19 +68,16 @@ corpus-ultimate/
 
 1. Create a project at https://supabase.com
 2. Copy your Project URL and `anon` (public) key
-3. Run the SQL migrations in `supabase/migrations/` against your Supabase database
-4. Enable Row Level Security (RLS) on all tables (migrations include policies)
+3. Apply the SQL migrations in `supabase/migrations/` **in filename order**; see
+   [docs/MIGRATIONS_AND_ROLLBACK.md](docs/MIGRATIONS_AND_ROLLBACK.md)
+4. Verify Row Level Security (RLS) policies are active (migrations include them)
 
 ### 2. Deploy the frontend (Hopeweb)
 
-Upload the `frontend/` folder to Hopeweb:
-
-- `index.html` → Hopeweb project root
-- `style.css` → Hopeweb project root
-- `script.js` → Hopeweb project root
-- `js/*.js` → Hopeweb/js/
-- `css/*.css` → Hopeweb/css/
-- `assets/*` → Hopeweb/assets/
+Upload the **entire `frontend/` directory** to a static host, preserving its
+`js/` and `css/` subdirectories. There is no root `style.css` or `script.js`:
+`frontend/index.html` loads the stamped files under `js/` and `css/` and must
+also serve `version.json`.
 
 Edit `frontend/js/config.js` and set:
 - `SUPABASE_URL` — your Supabase project URL
@@ -95,7 +93,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # edit .env with your Supabase credentials
-alembic upgrade head  # or run supabase migrations manually
+# apply the SQL migrations manually (the app does NOT call create_all on startup)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -119,6 +117,20 @@ Check what the deployment actually executes:
 See [docs/PRODUCTION_VERIFICATION.md](docs/PRODUCTION_VERIFICATION.md) for the
 full playbook (deployment identity, `403 Not authorized` diagnostics, database
 migration `004`, and the real-device Android file-picker checklist).
+
+## Local verification
+
+```bash
+npm ci --no-audit --no-fund
+npm run test:ci              # migration manifest, docs, baseline-aware jsdom gate
+cd backend
+pytest -q                   # real SQLAlchemy models + throw-away pgserver PostgreSQL
+pytest corpus_engine/tests -q
+```
+
+`npm test` still contains 11 known pre-existing failures; `npm run test:baseline`
+fails only when a **new** failure appears. See
+[docs/STATUS_AND_LIMITATIONS.md](docs/STATUS_AND_LIMITATIONS.md).
 
 ## UI documentation
 

@@ -410,7 +410,12 @@ window.dashboard = (function () {
       canvas.style.display = 'none';
       if (empty) empty.classList.remove('hidden');
       if (chartInstances.activity) {
-        try { chartInstances.activity.destroy(); } catch (e) {}
+        // Use the shared helper so the zoom toolbar and its listeners go too.
+        if (window.charts && typeof window.charts.destroyChart === 'function') {
+          window.charts.destroyChart('dashboard-activity-chart');
+        } else {
+          try { chartInstances.activity.destroy(); } catch (e) {}
+        }
         chartInstances.activity = null;
       }
       return;
@@ -527,11 +532,15 @@ window.dashboard = (function () {
   }
 
   function dispose() {
-    Object.keys(chartInstances).forEach(key => {
-      if (chartInstances[key]) {
-        try { chartInstances[key].destroy(); } catch (e) {}
-      }
-    });
+    if (window.charts && typeof window.charts.destroyChart === 'function') {
+      window.charts.destroyChart('dashboard-activity-chart');
+    } else {
+      Object.keys(chartInstances).forEach(key => {
+        if (chartInstances[key]) {
+          try { chartInstances[key].destroy(); } catch (e) {}
+        }
+      });
+    }
     chartInstances = {};
   }
 

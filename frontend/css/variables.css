@@ -263,6 +263,13 @@ textarea {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
+  /* Phase 1: a control must never grow past its card, and the caret must be
+     explicitly visible on dark surfaces (Android Chrome otherwise renders a
+     low-contrast caret that looks like the field "does not accept typing"). */
+  box-sizing: border-box;
+  max-width: 100%;
+  caret-color: var(--color-accent);
+  -webkit-tap-highlight-color: transparent;
 }
 
 img,
@@ -297,10 +304,23 @@ h1, h2, h3, h4, h5 {
   background-clip: padding-box;
 }
 
+/* Visible focus at EVERY viewport width (not only on 1600px+ displays).
+   The old global rule removed the browser ring from bare-label inputs, which
+   have no page-specific focus style of their own. */
 :focus-visible {
-  outline: none;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-sm);
+}
+
+/* Mouse/touch focus on a text field does not always match :focus-visible in
+   every Android WebView, so give editable controls an explicit focus ring. */
+input:focus:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 .hidden { display: none !important; }
@@ -622,7 +642,10 @@ h1, h2, h3, h4, h5 {
   line-height: 1.35;
   padding: 0;
   background: none;
-  pointer-events: none;
+  /* Tapping the label must focus its control. Making labels inert removed the
+     largest tap target on every form on phones. */
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .input-field input,
@@ -648,6 +671,11 @@ h1, h2, h3, h4, h5 {
   padding: var(--space-3);
   resize: vertical;
   min-height: 5.5rem;
+  /* Vertical resizing must never push a card wider or taller than its box. */
+  max-width: 100%;
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
 }
 
 .input-field select {
@@ -723,6 +751,100 @@ h1, h2, h3, h4, h5 {
   width: auto;
   min-height: 0;
   accent-color: var(--color-brand-soft);
+}
+
+/* ------------------------------------------------------------------------
+   Forms built with a bare <label> wrapper instead of `.input-field`
+   (AI Teacher / Provider Management, Knowledge Distillation, Dataset Quality
+   Review, Student Studio, Budgets, inline budget forms).
+
+   These had NO component styles at all: browser-default background, no visible
+   focus ring (the global rule removed outlines), no caret colour and no 44px
+   tap target. That is the shared reason those fields looked and behaved as if
+   they "did not accept typing" on Android Chrome. One rule set gives every
+   text field in the app the same readable, tappable, focusable control.
+   ------------------------------------------------------------------------ */
+label > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]),
+label > select,
+label > textarea,
+.inline-form input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+.inline-form select,
+.inline-form textarea,
+.filter-row input,
+.filter-row select,
+.filter-row textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;           /* 44px touch target */
+  padding: 0 var(--space-3);
+  font-family: inherit;
+  font-size: var(--text-body-medium);
+  line-height: 1.4;
+  color: var(--color-text);
+  caret-color: var(--color-accent);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+label > textarea,
+.inline-form textarea,
+.filter-row textarea {
+  padding: var(--space-3);
+  min-height: 5.5rem;
+  max-height: 60vh;
+  resize: vertical;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+label > select,
+.inline-form select,
+.filter-row select {
+  padding-right: 2.4rem;
+  text-overflow: ellipsis;
+}
+
+label > input:focus,
+label > select:focus,
+label > textarea:focus,
+.inline-form input:focus,
+.inline-form select:focus,
+.inline-form textarea:focus,
+.filter-row input:focus,
+.filter-row select:focus,
+.filter-row textarea:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-color: var(--color-brand-soft);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.18);
+}
+
+label > input:disabled,
+label > select:disabled,
+label > textarea:disabled,
+.filter-row input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Important controls need a 44px target at every width, including phones. */
+.icon-btn,
+.copy-btn,
+.chat-send,
+.modal-close,
+.sidebar-close,
+.menu-toggle,
+.operation-toggle,
+.auth-tab {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
 }
 
 /* Checkbox rows */

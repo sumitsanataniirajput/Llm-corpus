@@ -801,9 +801,13 @@ window.CORPUS_API = (function () {
 
   async function inferStream(modelId, payload, onMessage, onError, onClose, token) {
     const resolvedToken = token || (await state.getAccessToken());
-    const url = BASE + '/api/v1/inference/' + encodeURIComponent(modelId) + '/stream';
-    const socket = new WebSocket(url.replace('http', 'ws') + '?token=' + encodeURIComponent(resolvedToken));
+    // The real socket is /{model_id}/ws, not the POST /stream REST route.
+    // Credentials are sent as the first frame, never in the URL (URLs leak into
+    // proxy logs, browser history and Referer headers).
+    const url = BASE + '/api/v1/inference/' + encodeURIComponent(modelId) + '/ws';
+    const socket = new WebSocket(url.replace(/^http/, 'ws'));
     socket.onopen = () => {
+      if (resolvedToken) socket.send(JSON.stringify({ type: 'auth', token: resolvedToken }));
       socket.send(JSON.stringify(payload));
     };
     socket.onmessage = (ev) => {
@@ -816,11 +820,13 @@ window.CORPUS_API = (function () {
   }
 
   async function tokenize(modelId, text, token) {
-    return request('/api/v1/tokenize/' + encodeURIComponent(modelId), { method: 'POST', token, body: { text } });
+    // Mounted at /api/v1/inference/tokenize/{id}, not a top-level /tokenize.
+    return request('/api/v1/inference/tokenize/' + encodeURIComponent(modelId), { method: 'POST', token, body: { text } });
   }
 
   async function nextToken(modelId, payload, token) {
-    return request('/api/v1/predict/' + encodeURIComponent(modelId), { method: 'POST', token, body: payload });
+    // The real next-token logits endpoint lives under the inference router.
+    return request('/api/v1/inference/predict/' + encodeURIComponent(modelId), { method: 'POST', token, body: payload });
   }
 
   // ---------- Evaluation ----------
@@ -901,9 +907,11 @@ window.CORPUS_API = (function () {
   async function connectWS(token, onConnect, onDisconnect) {
     if (ws && ws.readyState === WebSocket.OPEN) return;
     const resolvedToken = token || (await state.getAccessToken()) || '';
-    const wsUrl = (BASE.replace('http', 'ws') + '/api/v1/ws?token=' + encodeURIComponent(resolvedToken));
+    const wsUrl = (BASE.replace(/^http/, 'ws') + '/api/v1/ws');
     ws = new WebSocket(wsUrl);
     ws.onopen = () => {
+      // No access token in the URL. The first frame carries it instead.
+      if (resolvedToken) ws.send(JSON.stringify({ type: 'auth', token: resolvedToken }));
       wsReconnectAttempts = 0;
       if (onConnect) onConnect();
     };
@@ -964,8 +972,7 @@ window.CORPUS_API = (function () {
       return null;
     }
     const wsUrl = BASE.replace(/^http/, 'ws') +
-      '/api/v1/training/ws/' + encodeURIComponent(jobId) +
-      '?token=' + encodeURIComponent(token);
+      '/api/v1/training/ws/' + encodeURIComponent(jobId);
     let socket;
     try {
       socket = new WebSocket(wsUrl);
@@ -973,6 +980,10 @@ window.CORPUS_API = (function () {
       if (handlers.onError) handlers.onError(err);
       return null;
     }
+    socket.onopen = () => {
+      // Authenticate in-band, not through a query string.
+      socket.send(JSON.stringify({ type: 'auth', token }));
+    };
     socket.onmessage = (ev) => {
       let msg;
       try {
